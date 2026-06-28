@@ -238,8 +238,9 @@ public class CombatAbilityHandler {
             target.hurt(source, extraDamage);
             float actualDealt = healthBefore - target.getHealth();
 
-            // 清零无敌帧：hurt() 后原版会将 invulnerableTime 设为 10
+            // 清零无敌帧 + 受击闪烁：hurt() 后原版会将 invulnerableTime 设为 10
             target.invulnerableTime = 0;
+            clearHurtTime(target);
 
             // 兜底：hurt() 被外部 mod（Boss 限伤/硬上限等）拦截 → 直写血量
             float epsilon = Math.max(0.01F, extraDamage * 0.01F);
@@ -247,6 +248,7 @@ public class CombatAbilityHandler {
                 float correctedHealth = Math.max(healthBefore - extraDamage, 0.0F);
                 HealthUtil.setAllHealthLikeRaw(target, correctedHealth);
                 if (correctedHealth <= 0.0F) {
+                    clearHurtTime(target);
                     target.invulnerableTime = 0;
                     target.setLastHurtByMob(attacker);
                     target.setLastHurtByPlayer(attacker);
@@ -359,6 +361,7 @@ public class CombatAbilityHandler {
 
                 target.setLastHurtByMob(attacker);
                 target.setLastHurtByPlayer(attacker);
+                clearHurtTime(target);
                 target.invulnerableTime = 0;
 
                 // ★ 第一层：走标准 hurt() 管线
@@ -526,6 +529,30 @@ public class CombatAbilityHandler {
         if (!shadowData.isEmpty()) {
             playerData.put(NBT_SP_DATA, shadowData);
         }
+    }
+
+    /** 清零实体 hurtTime（反射方式），防止个别 Boss 将 hurtTime>0 作为额外无敌判据 */
+    private static void clearHurtTime(LivingEntity target) {
+        if (target instanceof Player) return; // PVP 保留原版 10tick 无敌窗口
+        if (HURT_TIME_FIELD == null) return;
+        try {
+            HURT_TIME_FIELD.setInt(target, 0);
+        } catch (IllegalAccessException ignored) {}
+    }
+
+    private static final java.lang.reflect.Field HURT_TIME_FIELD;
+    static {
+        java.lang.reflect.Field f = null;
+        try {
+            f = LivingEntity.class.getDeclaredField("f_19802_");
+            f.setAccessible(true);
+        } catch (NoSuchFieldException e) {
+            try {
+                f = LivingEntity.class.getDeclaredField("hurtTime");
+                f.setAccessible(true);
+            } catch (Exception ignored) {}
+        }
+        HURT_TIME_FIELD = f;
     }
 
     /** 将实体的 deathScore 设为 -1，阻止 die() 内部重复调用 awardKillScore */
