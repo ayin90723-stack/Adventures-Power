@@ -70,7 +70,7 @@ dependencies {
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 
     // Curios API (https://www.curseforge.com/minecraft/mc-mods/curios)
-    implementation fg.deobf("curse.maven:curios-309927:5925633")
+    implementation fg.deobf("curse.maven:curios-309927:6418456")
 }
 
 tasks.named('processResources', ProcessResources).configure {
