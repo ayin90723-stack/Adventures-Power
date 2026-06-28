@@ -55,8 +55,11 @@ minecraft {
 sourceSets.main.resources { srcDir 'src/generated/resources' }
 
 repositories {
-    flatDir {
-        dir 'libs'
+    maven {
+        url "https://cursemaven.com"
+        content {
+            includeGroup "curse.maven"
+        }
     }
 }
 
@@ -66,8 +69,8 @@ dependencies {
     // Mixin
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 
-    // Curios API
-    implementation fg.deobf("curios:curios-forge:5.14.1+1.20.1")
+    // Curios API (https://www.curseforge.com/minecraft/mc-mods/curios)
+    implementation fg.deobf("curse.maven:curios-309927:5925633")
 }
 
 tasks.named('processResources', ProcessResources).configure {
