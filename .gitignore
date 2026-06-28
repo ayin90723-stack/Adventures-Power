@@ -1,0 +1,42 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+.vscode/
+bin/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Minecraft
+run/
+run-data/
+logs/
+*.log
+
+# Maven local repo (用于发布)
+mcmodsrepo/
+
+# Claude Code
+CLAUDE.md
+.claude/
+
+# 本地依赖（不应提交二进制 JAR）
+libs/
+
+# 临时文件
+*.tmp
+*.bak
+*~
+发布介绍.md

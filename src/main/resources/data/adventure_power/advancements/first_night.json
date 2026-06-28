@@ -1,0 +1,23 @@
+{
+  "display": {
+    "icon": {
+      "item": "minecraft:clock"
+    },
+    "title": {
+      "translate": "milestone.adventure_power.first_night"
+    },
+    "description": {
+      "translate": "advancement.adventure_power.first_night.desc"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "parent": "adventure_power:root",
+  "criteria": {
+    "first_night": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

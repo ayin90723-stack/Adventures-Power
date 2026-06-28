@@ -1,0 +1,23 @@
+{
+  "display": {
+    "icon": {
+      "item": "minecraft:emerald"
+    },
+    "title": {
+      "translate": "milestone.adventure_power.first_trade"
+    },
+    "description": {
+      "translate": "advancement.adventure_power.first_trade.desc"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "parent": "adventure_power:root",
+  "criteria": {
+    "first_trade": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}
