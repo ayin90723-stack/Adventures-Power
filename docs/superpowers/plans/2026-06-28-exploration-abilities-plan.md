@@ -33,7 +33,7 @@
 ### Task 1: ModConfig — 添加四组配置
 
 **Files:**
-- Modify: `src/main/java/com/rosycentury/adventure_power/config/ModConfig.java`
+- Modify: `src/main/java/com/ayin90723/adventure_power/config/ModConfig.java`
 
 - [ ] **Step 1: 添加字段声明**
 
@@ -100,7 +100,7 @@ cd "D:\download\模组\冒险的力量" && ./gradlew build -x test
 - [ ] **Step 4: 提交**
 
 ```bash
-git add src/main/java/com/rosycentury/adventure_power/config/ModConfig.java
+git add src/main/java/com/ayin90723/adventure_power/config/ModConfig.java
 git commit -m "feat: 添加大地之力/无形之手/鸿运当头/坚韧之躯配置项"
 ```
 
@@ -109,14 +109,14 @@ git commit -m "feat: 添加大地之力/无形之手/鸿运当头/坚韧之躯�
 ### Task 2: DiggingPowerAbility — 大地之力
 
 **Files:**
-- Create: `src/main/java/com/rosycentury/adventure_power/ability/DiggingPowerAbility.java`
+- Create: `src/main/java/com/ayin90723/adventure_power/ability/DiggingPowerAbility.java`
 
 - [ ] **Step 1: 编写类**
 
 ```java
-package com.rosycentury.adventure_power.ability;
+package com.ayin90723.adventure_power.ability;
 
-import com.rosycentury.adventure_power.config.ModConfig;
+import com.ayin90723.adventure_power.config.ModConfig;
 import net.minecraft.network.chat.Component;
 
 /**
@@ -158,7 +158,7 @@ public class DiggingPowerAbility implements Ability {
 - [ ] **Step 2: 提交**
 
 ```bash
-git add src/main/java/com/rosycentury/adventure_power/ability/DiggingPowerAbility.java
+git add src/main/java/com/ayin90723/adventure_power/ability/DiggingPowerAbility.java
 git commit -m "feat: 添加大地之力能力元数据"
 ```
 
@@ -167,14 +167,14 @@ git commit -m "feat: 添加大地之力能力元数据"
 ### Task 3: ExtendedReachAbility — 无形之手
 
 **Files:**
-- Create: `src/main/java/com/rosycentury/adventure_power/ability/ExtendedReachAbility.java`
+- Create: `src/main/java/com/ayin90723/adventure_power/ability/ExtendedReachAbility.java`
 
 - [ ] **Step 1: 编写类**
 
 ```java
-package com.rosycentury.adventure_power.ability;
+package com.ayin90723.adventure_power.ability;
 
-import com.rosycentury.adventure_power.config.ModConfig;
+import com.ayin90723.adventure_power.config.ModConfig;
 import net.minecraft.network.chat.Component;
 
 /**
@@ -216,7 +216,7 @@ public class ExtendedReachAbility implements Ability {
 - [ ] **Step 2: 提交**
 
 ```bash
-git add src/main/java/com/rosycentury/adventure_power/ability/ExtendedReachAbility.java
+git add src/main/java/com/ayin90723/adventure_power/ability/ExtendedReachAbility.java
 git commit -m "feat: 添加无形之手能力元数据"
 ```
 
@@ -225,14 +225,14 @@ git commit -m "feat: 添加无形之手能力元数据"
 ### Task 4: FortuneFavorAbility — 鸿运当头
 
 **Files:**
-- Create: `src/main/java/com/rosycentury/adventure_power/ability/FortuneFavorAbility.java`
+- Create: `src/main/java/com/ayin90723/adventure_power/ability/FortuneFavorAbility.java`
 
 - [ ] **Step 1: 编写类**
 
 ```java
-package com.rosycentury.adventure_power.ability;
+package com.ayin90723.adventure_power.ability;
 
-import com.rosycentury.adventure_power.config.ModConfig;
+import com.ayin90723.adventure_power.config.ModConfig;
 import net.minecraft.network.chat.Component;
 
 /**
@@ -275,7 +275,7 @@ public class FortuneFavorAbility implements Ability {
 - [ ] **Step 2: 提交**
 
 ```bash
-git add src/main/java/com/rosycentury/adventure_power/ability/FortuneFavorAbility.java
+git add src/main/java/com/ayin90723/adventure_power/ability/FortuneFavorAbility.java
 git commit -m "feat: 添加鸿运当头能力元数据"
 ```
 
@@ -284,14 +284,14 @@ git commit -m "feat: 添加鸿运当头能力元数据"
 ### Task 5: VitalityAbility — 坚韧之躯
 
 **Files:**
-- Create: `src/main/java/com/rosycentury/adventure_power/ability/VitalityAbility.java`
+- Create: `src/main/java/com/ayin90723/adventure_power/ability/VitalityAbility.java`
 
 - [ ] **Step 1: 编写类**
 
 ```java
-package com.rosycentury.adventure_power.ability;
+package com.ayin90723.adventure_power.ability;
 
-import com.rosycentury.adventure_power.config.ModConfig;
+import com.ayin90723.adventure_power.config.ModConfig;
 import net.minecraft.network.chat.Component;
 
 /**
@@ -333,7 +333,7 @@ public class VitalityAbility implements Ability {
 - [ ] **Step 2: 提交**
 
 ```bash
-git add src/main/java/com/rosycentury/adventure_power/ability/VitalityAbility.java
+git add src/main/java/com/ayin90723/adventure_power/ability/VitalityAbility.java
 git commit -m "feat: 添加坚韧之躯能力元数据"
 ```
 
@@ -342,7 +342,7 @@ git commit -m "feat: 添加坚韧之躯能力元数据"
 ### Task 6: AbilityRegistry — 注册新能力
 
 **Files:**
-- Modify: `src/main/java/com/rosycentury/adventure_power/ability/AbilityRegistry.java`
+- Modify: `src/main/java/com/ayin90723/adventure_power/ability/AbilityRegistry.java`
 
 - [ ] **Step 1: 按里程碑顺序插入**
 
@@ -358,7 +358,7 @@ git commit -m "feat: 添加坚韧之躯能力元数据"
 
 ```bash
 cd "D:\download\模组\冒险的力量" && ./gradlew build -x test
-git add src/main/java/com/rosycentury/adventure_power/ability/AbilityRegistry.java
+git add src/main/java/com/ayin90723/adventure_power/ability/AbilityRegistry.java
 git commit -m "feat: 注册大地之力/无形之手/鸿运当头/坚韧之躯"
 ```
 
@@ -367,7 +367,7 @@ git commit -m "feat: 注册大地之力/无形之手/鸿运当头/坚韧之躯"
 ### Task 7: KNOWN_ABILITIES + DeathDefy 修复
 
 **Files:**
-- Modify: `src/main/java/com/rosycentury/adventure_power/capability/AdventureProgressCapability.java`
+- Modify: `src/main/java/com/ayin90723/adventure_power/capability/AdventureProgressCapability.java`
 
 - [ ] **Step 1: 添加 KNOWN_ABILITIES 条目**
 
@@ -401,7 +401,7 @@ float restoreHealth = player.getMaxHealth();
 - [ ] **Step 3: 提交**
 
 ```bash
-git add src/main/java/com/rosycentury/adventure_power/capability/AdventureProgressCapability.java
+git add src/main/java/com/ayin90723/adventure_power/capability/AdventureProgressCapability.java
 git commit -m "feat: 注册新能力条目并修复死亡抗拒使用getMaxHealth"
 ```
 
@@ -410,17 +410,17 @@ git commit -m "feat: 注册新能力条目并修复死亡抗拒使用getMaxHealt
 ### Task 8: ExplorationAbilityHandler — 大地之力 + 无形之手 + 坚韧之躯
 
 **Files:**
-- Create: `src/main/java/com/rosycentury/adventure_power/handler/ExplorationAbilityHandler.java`
+- Create: `src/main/java/com/ayin90723/adventure_power/handler/ExplorationAbilityHandler.java`
 
 - [ ] **Step 1: 编写 Handler**
 
 ```java
-package com.rosycentury.adventure_power.handler;
+package com.ayin90723.adventure_power.handler;
 
-import com.rosycentury.adventure_power.AdventurePower;
-import com.rosycentury.adventure_power.ability.Ability;
-import com.rosycentury.adventure_power.ability.AbilityRegistry;
-import com.rosycentury.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.AdventurePower;
+import com.ayin90723.adventure_power.ability.Ability;
+import com.ayin90723.adventure_power.ability.AbilityRegistry;
+import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.common.ForgeMod;
@@ -590,7 +590,7 @@ public class ExplorationAbilityHandler {
 - [ ] **Step 2: 提交**
 
 ```bash
-git add src/main/java/com/rosycentury/adventure_power/handler/ExplorationAbilityHandler.java
+git add src/main/java/com/ayin90723/adventure_power/handler/ExplorationAbilityHandler.java
 git commit -m "feat: 添加大地之力/无形之手/坚韧之躯效果处理器"
 ```
 
@@ -599,12 +599,12 @@ git commit -m "feat: 添加大地之力/无形之手/坚韧之躯效果处理器
 ### Task 9: FortuneContext — Mixin 上下文工具类
 
 **Files:**
-- Create: `src/main/java/com/rosycentury/adventure_power/util/FortuneContext.java`
+- Create: `src/main/java/com/ayin90723/adventure_power/util/FortuneContext.java`
 
 - [ ] **Step 1: 编写类**
 
 ```java
-package com.rosycentury.adventure_power.util;
+package com.ayin90723.adventure_power.util;
 
 import net.minecraft.world.entity.player.Player;
 
@@ -634,7 +634,7 @@ public class FortuneContext {
 - [ ] **Step 2: 提交**
 
 ```bash
-git add src/main/java/com/rosycentury/adventure_power/util/FortuneContext.java
+git add src/main/java/com/ayin90723/adventure_power/util/FortuneContext.java
 git commit -m "feat: 添加时运 Mixin 上下文工具类"
 ```
 
@@ -643,18 +643,18 @@ git commit -m "feat: 添加时运 Mixin 上下文工具类"
 ### Task 10: FortuneFavorHandler — 鸿运当头处理（抢夺+LootingLevelEvent）
 
 **Files:**
-- Create: `src/main/java/com/rosycentury/adventure_power/handler/FortuneFavorHandler.java`
+- Create: `src/main/java/com/ayin90723/adventure_power/handler/FortuneFavorHandler.java`
 
 - [ ] **Step 1: 编写 Handler**
 
 ```java
-package com.rosycentury.adventure_power.handler;
+package com.ayin90723.adventure_power.handler;
 
-import com.rosycentury.adventure_power.AdventurePower;
-import com.rosycentury.adventure_power.ability.Ability;
-import com.rosycentury.adventure_power.ability.AbilityRegistry;
-import com.rosycentury.adventure_power.capability.AdventureProgressCapability;
-import com.rosycentury.adventure_power.util.FortuneContext;
+import com.ayin90723.adventure_power.AdventurePower;
+import com.ayin90723.adventure_power.ability.Ability;
+import com.ayin90723.adventure_power.ability.AbilityRegistry;
+import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.util.FortuneContext;
 import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.event.entity.living.LootingLevelEvent;
 import net.minecraftforge.event.level.BlockEvent;
@@ -716,7 +716,7 @@ public class FortuneFavorHandler {
 - [ ] **Step 2: 提交**
 
 ```bash
-git add src/main/java/com/rosycentury/adventure_power/handler/FortuneFavorHandler.java
+git add src/main/java/com/ayin90723/adventure_power/handler/FortuneFavorHandler.java
 git commit -m "feat: 添加鸿运当头效果处理器"
 ```
 
@@ -725,17 +725,17 @@ git commit -m "feat: 添加鸿运当头效果处理器"
 ### Task 11: FortuneFavorMixin — 时运 Mixin
 
 **Files:**
-- Create: `src/main/java/com/rosycentury/adventure_power/mixin/FortuneFavorMixin.java`
+- Create: `src/main/java/com/ayin90723/adventure_power/mixin/FortuneFavorMixin.java`
 
 - [ ] **Step 1: 编写 Mixin**
 
 ```java
-package com.rosycentury.adventure_power.mixin;
+package com.ayin90723.adventure_power.mixin;
 
-import com.rosycentury.adventure_power.ability.Ability;
-import com.rosycentury.adventure_power.ability.AbilityRegistry;
-import com.rosycentury.adventure_power.capability.AdventureProgressCapability;
-import com.rosycentury.adventure_power.util.FortuneContext;
+import com.ayin90723.adventure_power.ability.Ability;
+import com.ayin90723.adventure_power.ability.AbilityRegistry;
+import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.util.FortuneContext;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.enchantment.Enchantment;
@@ -790,7 +790,7 @@ cd "D:\download\模组\冒险的力量" && ./gradlew build -x test
 - [ ] **Step 3: 提交**
 
 ```bash
-git add src/main/java/com/rosycentury/adventure_power/mixin/FortuneFavorMixin.java
+git add src/main/java/com/ayin90723/adventure_power/mixin/FortuneFavorMixin.java
 git commit -m "feat: 添加鸿运当头时运Mixin"
 ```
 

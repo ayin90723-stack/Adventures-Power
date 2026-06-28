@@ -5,7 +5,7 @@ Minecraft Forge 1.20.1 模组 **冒险的力量 (Adventure's Power)** v1.0.1。
 - **Forge**: 47.4.10
 - **Java**: JDK 17
 - **Mod ID**: `adventure_power`
-- **包名**: `com.rosycentury.adventure_power`
+- **包名**: `com.ayin90723.adventure_power`
 - **依赖**: Curios API (curios-forge-5.14.1+1.20.1, body slot)
 - **Git**: https://github.com/ayin90723-stack/Adventures-Power
 
@@ -198,7 +198,7 @@ resources/
 - **内层 key**：`@Invoker` 注解值
 - **值**：完整的 SRG 方法描述符 `L<owner>;<srg_name>(<params>)<return>`
 
-当前唯一映射：`com/rosycentury/adventure_power/mixin/SeeAndSlashLivingEntityAccessor` → `actuallyHurt` → `Lnet/minecraft/world/entity/LivingEntity;m_6475_(Lnet/minecraft/world/damagesource/DamageSource;F)V`
+当前唯一映射：`com/ayin90723/adventure_power/mixin/SeeAndSlashLivingEntityAccessor` → `actuallyHurt` → `Lnet/minecraft/world/entity/LivingEntity;m_6475_(Lnet/minecraft/world/damagesource/DamageSource;F)V`
 
 ## 冒险饰品流程
 

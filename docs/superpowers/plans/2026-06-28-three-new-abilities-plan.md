@@ -30,7 +30,7 @@
 ### Task 1: ModConfig — 添加配置项
 
 **Files:**
-- Modify: `src/main/java/com/rosycentury/adventure_power/config/ModConfig.java`
+- Modify: `src/main/java/com/ayin90723/adventure_power/config/ModConfig.java`
 
 在 `能力数值` push 块内，`影杀` pop 之后、`能力数值` pop 之前，插入三个新能力的配置声明和初始化。
 
@@ -94,7 +94,7 @@ cd "D:\download\模组\冒险的力量" && ./gradlew build -x test
 - [ ] **Step 4: 提交**
 
 ```bash
-git add src/main/java/com/rosycentury/adventure_power/config/ModConfig.java
+git add src/main/java/com/ayin90723/adventure_power/config/ModConfig.java
 git commit -m "feat: 添加休养生息/不动如山/嗜血配置项"
 ```
 
@@ -103,14 +103,14 @@ git commit -m "feat: 添加休养生息/不动如山/嗜血配置项"
 ### Task 2: RapidRecoveryAbility — 休养生息元数据
 
 **Files:**
-- Create: `src/main/java/com/rosycentury/adventure_power/ability/RapidRecoveryAbility.java`
+- Create: `src/main/java/com/ayin90723/adventure_power/ability/RapidRecoveryAbility.java`
 
 - [ ] **Step 1: 编写 Ability 类**
 
 ```java
-package com.rosycentury.adventure_power.ability;
+package com.ayin90723.adventure_power.ability;
 
-import com.rosycentury.adventure_power.config.ModConfig;
+import com.ayin90723.adventure_power.config.ModConfig;
 import net.minecraft.network.chat.Component;
 
 /**
@@ -157,7 +157,7 @@ public class RapidRecoveryAbility implements Ability {
 - [ ] **Step 2: 提交**
 
 ```bash
-git add src/main/java/com/rosycentury/adventure_power/ability/RapidRecoveryAbility.java
+git add src/main/java/com/ayin90723/adventure_power/ability/RapidRecoveryAbility.java
 git commit -m "feat: 添加休养生息能力元数据"
 ```
 
@@ -166,14 +166,14 @@ git commit -m "feat: 添加休养生息能力元数据"
 ### Task 3: KnockbackResistAbility — 不动如山元数据
 
 **Files:**
-- Create: `src/main/java/com/rosycentury/adventure_power/ability/KnockbackResistAbility.java`
+- Create: `src/main/java/com/ayin90723/adventure_power/ability/KnockbackResistAbility.java`
 
 - [ ] **Step 1: 编写 Ability 类**
 
 ```java
-package com.rosycentury.adventure_power.ability;
+package com.ayin90723.adventure_power.ability;
 
-import com.rosycentury.adventure_power.config.ModConfig;
+import com.ayin90723.adventure_power.config.ModConfig;
 import net.minecraft.network.chat.Component;
 
 /**
@@ -218,7 +218,7 @@ public class KnockbackResistAbility implements Ability {
 - [ ] **Step 2: 提交**
 
 ```bash
-git add src/main/java/com/rosycentury/adventure_power/ability/KnockbackResistAbility.java
+git add src/main/java/com/ayin90723/adventure_power/ability/KnockbackResistAbility.java
 git commit -m "feat: 添加不动如山能力元数据"
 ```
 
@@ -227,14 +227,14 @@ git commit -m "feat: 添加不动如山能力元数据"
 ### Task 4: LifestealAbility — 嗜血元数据
 
 **Files:**
-- Create: `src/main/java/com/rosycentury/adventure_power/ability/LifestealAbility.java`
+- Create: `src/main/java/com/ayin90723/adventure_power/ability/LifestealAbility.java`
 
 - [ ] **Step 1: 编写 Ability 类**
 
 ```java
-package com.rosycentury.adventure_power.ability;
+package com.ayin90723.adventure_power.ability;
 
-import com.rosycentury.adventure_power.config.ModConfig;
+import com.ayin90723.adventure_power.config.ModConfig;
 import net.minecraft.network.chat.Component;
 
 /**
@@ -279,7 +279,7 @@ public class LifestealAbility implements Ability {
 - [ ] **Step 2: 提交**
 
 ```bash
-git add src/main/java/com/rosycentury/adventure_power/ability/LifestealAbility.java
+git add src/main/java/com/ayin90723/adventure_power/ability/LifestealAbility.java
 git commit -m "feat: 添加嗜血能力元数据"
 ```
 
@@ -288,7 +288,7 @@ git commit -m "feat: 添加嗜血能力元数据"
 ### Task 5: AbilityRegistry — 注册新能力
 
 **Files:**
-- Modify: `src/main/java/com/rosycentury/adventure_power/ability/AbilityRegistry.java`
+- Modify: `src/main/java/com/ayin90723/adventure_power/ability/AbilityRegistry.java`
 
 - [ ] **Step 1: 添加注册调用**
 
@@ -329,7 +329,7 @@ git commit -m "feat: 添加嗜血能力元数据"
 - [ ] **Step 2: 提交**
 
 ```bash
-git add src/main/java/com/rosycentury/adventure_power/ability/AbilityRegistry.java
+git add src/main/java/com/ayin90723/adventure_power/ability/AbilityRegistry.java
 git commit -m "feat: 注册休养生息/不动如山/嗜血三个新能力"
 ```
 
@@ -338,7 +338,7 @@ git commit -m "feat: 注册休养生息/不动如山/嗜血三个新能力"
 ### Task 6: KNOWN_ABILITIES — 添加面板条目
 
 **Files:**
-- Modify: `src/main/java/com/rosycentury/adventure_power/capability/AdventureProgressCapability.java`
+- Modify: `src/main/java/com/ayin90723/adventure_power/capability/AdventureProgressCapability.java`
 
 - [ ] **Step 1: 在 KNOWN_ABILITIES 中添加条目**
 
@@ -364,7 +364,7 @@ git commit -m "feat: 注册休养生息/不动如山/嗜血三个新能力"
 - [ ] **Step 2: 提交**
 
 ```bash
-git add src/main/java/com/rosycentury/adventure_power/capability/AdventureProgressCapability.java
+git add src/main/java/com/ayin90723/adventure_power/capability/AdventureProgressCapability.java
 git commit -m "feat: KNOWN_ABILITIES 添加三个新能力条目"
 ```
 
@@ -373,19 +373,19 @@ git commit -m "feat: KNOWN_ABILITIES 添加三个新能力条目"
 ### Task 7: RecoveryHandler — 休养生息脱战再生 + 嗜血攻击吸血
 
 **Files:**
-- Create: `src/main/java/com/rosycentury/adventure_power/handler/RecoveryHandler.java`
+- Create: `src/main/java/com/ayin90723/adventure_power/handler/RecoveryHandler.java`
 
 - [ ] **Step 1: 编写 RecoveryHandler**
 
 ```java
-package com.rosycentury.adventure_power.handler;
+package com.ayin90723.adventure_power.handler;
 
-import com.rosycentury.adventure_power.AdventurePower;
-import com.rosycentury.adventure_power.ability.Ability;
-import com.rosycentury.adventure_power.ability.AbilityRegistry;
-import com.rosycentury.adventure_power.capability.AdventureProgressCapability;
-import com.rosycentury.adventure_power.config.ModConfig;
-import com.rosycentury.adventure_power.util.FriendlyFireProtection;
+import com.ayin90723.adventure_power.AdventurePower;
+import com.ayin90723.adventure_power.ability.Ability;
+import com.ayin90723.adventure_power.ability.AbilityRegistry;
+import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.config.ModConfig;
+import com.ayin90723.adventure_power.util.FriendlyFireProtection;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.LivingEntity;
@@ -545,7 +545,7 @@ public class RecoveryHandler {
 - [ ] **Step 2: 提交**
 
 ```bash
-git add src/main/java/com/rosycentury/adventure_power/handler/RecoveryHandler.java
+git add src/main/java/com/ayin90723/adventure_power/handler/RecoveryHandler.java
 git commit -m "feat: 添加休养生息和嗜血能力效果处理器"
 ```
 
@@ -554,17 +554,17 @@ git commit -m "feat: 添加休养生息和嗜血能力效果处理器"
 ### Task 8: KnockbackResistHandler — 不动如山属性管理
 
 **Files:**
-- Create: `src/main/java/com/rosycentury/adventure_power/handler/KnockbackResistHandler.java`
+- Create: `src/main/java/com/ayin90723/adventure_power/handler/KnockbackResistHandler.java`
 
 - [ ] **Step 1: 编写 KnockbackResistHandler**
 
 ```java
-package com.rosycentury.adventure_power.handler;
+package com.ayin90723.adventure_power.handler;
 
-import com.rosycentury.adventure_power.AdventurePower;
-import com.rosycentury.adventure_power.ability.Ability;
-import com.rosycentury.adventure_power.ability.AbilityRegistry;
-import com.rosycentury.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.AdventurePower;
+import com.ayin90723.adventure_power.ability.Ability;
+import com.ayin90723.adventure_power.ability.AbilityRegistry;
+import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.event.TickEvent;
@@ -670,7 +670,7 @@ public class KnockbackResistHandler {
 - [ ] **Step 2: 提交**
 
 ```bash
-git add src/main/java/com/rosycentury/adventure_power/handler/KnockbackResistHandler.java
+git add src/main/java/com/ayin90723/adventure_power/handler/KnockbackResistHandler.java
 git commit -m "feat: 添加不动如山能力效果处理器"
 ```
 

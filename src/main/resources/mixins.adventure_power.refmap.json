@@ -1,6 +1,6 @@
 {
     "mappings": {
-        "com/rosycentury/adventure_power/mixin/SeeAndSlashLivingEntityAccessor": {
+        "com/ayin90723/adventure_power/mixin/SeeAndSlashLivingEntityAccessor": {
             "actuallyHurt": "Lnet/minecraft/world/entity/LivingEntity;m_6475_(Lnet/minecraft/world/damagesource/DamageSource;F)V"
         }
     }

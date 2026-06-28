@@ -2,7 +2,7 @@
     "required": true,
     "minVersion": "0.8",
     "priority": -5000,
-    "package": "com.rosycentury.adventure_power.mixin",
+    "package": "com.ayin90723.adventure_power.mixin",
     "compatibilityLevel": "JAVA_17",
     "refmap": "mixins.adventure_power.refmap.json",
     "mixins": [
