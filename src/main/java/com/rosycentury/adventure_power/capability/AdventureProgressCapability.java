@@ -573,6 +573,13 @@ public class AdventureProgressCapability {
             if (progress.isMilestoneUnlocked(milestone)) return;
 
             progress.unlockMilestone(milestone);
+            // 翱翔飞行立即同步：不等 PlayerStateHandler 下一 tick，
+            // 避免两处 TickEvent.Phase.END handler 执行顺序不确定导致的竞态
+            if (progress.isAbilityEnabled("soar") && !player.getAbilities().mayfly
+                && !player.getAbilities().instabuild && !player.isSpectator()) {
+                player.getAbilities().mayfly = true;
+                player.onUpdateAbilities();
+            }
             syncCapabilityToPersistent(player, progress);
             syncAllAdventureItemNbt(player, progress);
             syncToClient(player);

@@ -156,6 +156,24 @@ public class PlayerStateHandler {
         removeUndyingGearAwakened(event.getEntity());
     }
 
+    /** 游戏模式切换后恢复翱翔飞行能力（原版会在切回生存时重置 mayfly）。
+     *  立即同步，不等 tick handler，避免竞态条件。 */
+    @SubscribeEvent
+    public static void onPlayerChangeGameMode(PlayerEvent.PlayerChangeGameModeEvent event) {
+        Player player = event.getEntity();
+        if (player.level().isClientSide()) return;
+
+        var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
+        if (progressOpt.isEmpty()) return;
+        var progress = progressOpt.get();
+
+        if (progress.isAbilityEnabled("soar") && !player.getAbilities().mayfly
+            && !player.getAbilities().instabuild && !player.isSpectator()) {
+            player.getAbilities().mayfly = true;
+            player.onUpdateAbilities();
+        }
+    }
+
     /** 跨维度转移 soul_bind 持久数据，防止末地返回传送门等场景下数据丢失 */
     private static void transferSoulBindData(Player original, Player player) {
         CompoundTag buffsTag = original.getPersistentData().getCompound(SOUL_BIND_BUFFS_KEY);
