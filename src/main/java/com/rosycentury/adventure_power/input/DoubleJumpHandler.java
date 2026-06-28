@@ -11,6 +11,7 @@ import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.phys.Vec3;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
@@ -32,8 +33,6 @@ public class DoubleJumpHandler {
    private static final Map<UUID, Long> COOLDOWNS = new HashMap<>();
    /** 每玩家剩余空中跳跃次数（觉醒后=2，非觉醒=1） */
    private static final Map<UUID, Integer> JUMPS_REMAINING = new HashMap<>();
-   /** 落地时重置的垂直速度阈值 */
-   private static final double ON_GROUND_THRESHOLD = -0.1;
 
    public static void handleDoubleJump(ServerPlayer player) {
       if (isDoubleJumpEnabled(player)) {
@@ -57,9 +56,8 @@ public class DoubleJumpHandler {
       if (player.isInWater()) return false;
       if (player.getAbilities().flying) return false;
 
-      // 落地 → 重置跳数
-      if (player.onGround() && player.getDeltaMovement().y <= ON_GROUND_THRESHOLD) {
-         JUMPS_REMAINING.remove(player.getUUID());
+      // 落地 → 不允许（tick 处理器负责在此处清理 JUMPS_REMAINING）
+      if (player.onGround()) {
          return false;
       }
 
@@ -68,7 +66,7 @@ public class DoubleJumpHandler {
       if (remaining == null) {
          int maxJumps = getMaxAirJumps(player);
          JUMPS_REMAINING.put(player.getUUID(), maxJumps);
-         return false; // 首次离地不算二段跳
+         remaining = maxJumps;
       }
 
       // 冷却检查
@@ -84,6 +82,19 @@ public class DoubleJumpHandler {
    public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
       COOLDOWNS.remove(event.getEntity().getUUID());
       JUMPS_REMAINING.remove(event.getEntity().getUUID());
+   }
+
+   /**
+    * 玩家落地时重置空中跳跃次数。
+    * 使用 END phase 确保在服务端 tick 逻辑完成后检测，此时 {@code onGround()} 状态已经稳定。
+    */
+   @SubscribeEvent
+   public static void onPlayerTick(TickEvent.PlayerTickEvent event) {
+      if (event.phase == TickEvent.Phase.END && event.player instanceof ServerPlayer player) {
+         if (player.onGround()) {
+            JUMPS_REMAINING.remove(player.getUUID());
+         }
+      }
    }
 
    private static boolean isDoubleJumpEnabled(ServerPlayer player) {
