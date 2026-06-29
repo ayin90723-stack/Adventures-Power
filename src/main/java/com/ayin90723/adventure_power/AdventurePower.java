@@ -70,9 +70,4 @@ public class AdventurePower {
         return AdventureProgressCapability.getAdventureProgress(player)
             .map(p -> p.isAdventurer() && p.isAbilityEnabled("undying_gear")).orElse(false);
     }
-
-    public static boolean hasTenacity(Player player) {
-        return AdventureProgressCapability.getAdventureProgress(player)
-            .map(p -> p.isAdventurer() && p.isAbilityEnabled("resilience")).orElse(false);
-    }
 }
