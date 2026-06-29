@@ -19,6 +19,9 @@
         "PurifiedSoulMixin",
         "FortuneFavorMixin"
     ],
+    "client": [
+        "LivingEntityAccessor"
+    ],
     "injectors": {
         "defaultRequire": 1
     }
