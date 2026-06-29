@@ -379,7 +379,7 @@ public class CombatAbilityHandler {
 
                 // 觉醒：影杀 AOE 爆炸
                 if (progress.isFullyUnlocked()) {
-                    shadowKillAoe(attacker, target, totalHP);
+                    shadowKillAoe(attacker, target);
                 }
             }
         });
@@ -479,7 +479,7 @@ public class CombatAbilityHandler {
     }
 
     /** 觉醒影杀 AOE：对斩杀目标周围实体施加影子血量削减 */
-    private static void shadowKillAoe(Player attacker, LivingEntity killed, float baseTotalHP) {
+    private static void shadowKillAoe(Player attacker, LivingEntity killed) {
         double radius = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SHADOW_KILL_AOE_RADIUS.get();
         float ratio = (float) (double) com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SHADOW_KILL_AOE_RATIO.get();
         int maxTargets = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SHADOW_KILL_AOE_MAX_TARGETS.get();
