@@ -594,7 +594,8 @@ public class AdventureProgressCapability {
                 Component.translatable("milestone.adventure_power." + milestone.getId()).withStyle(ChatFormatting.GREEN), true);
 
             // ★ 全部里程碑达成 → 冒险的开始 自动替换为 冒险的终点 + 终极成就
-            if (milestone == Milestone.ELYTRA && progress.areAllMilestonesUnlocked()) {
+            // 不限制最后一个里程碑必须是 ELYTRA，适应任意解锁顺序
+            if (progress.areAllMilestonesUnlocked() && !progress.isFullyUnlocked()) {
                 replaceBeginWithEnd(player);
                 AdvancementEventHandler.grantEndAdvancement(player);
             }

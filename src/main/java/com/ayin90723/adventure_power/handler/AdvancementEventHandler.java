@@ -36,7 +36,8 @@ public class AdvancementEventHandler {
     static {
         VANILLA_TO_MILESTONE.put(new ResourceLocation("story/enchant_item"), Milestone.FIRST_ENCHANT);
         VANILLA_TO_MILESTONE.put(new ResourceLocation("story/enter_the_nether"), Milestone.NETHER);
-        VANILLA_TO_MILESTONE.put(new ResourceLocation("nether/summon_wither"), Milestone.WITHER);
+        // 凋零：wither.json 使用 player_killed_entity 原生触发器（击杀时触发），
+        // 不联动 nether/summon_wither（召唤时触发），避免放出来就完成成就
         VANILLA_TO_MILESTONE.put(new ResourceLocation("end/kill_dragon"), Milestone.DRAGON);
         VANILLA_TO_MILESTONE.put(new ResourceLocation("end/elytra"), Milestone.ELYTRA);
     }
