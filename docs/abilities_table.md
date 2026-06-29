@@ -88,4 +88,4 @@
 
 ---
 
-> 📝 本文档基于 `zh_cn.json` 语言文件和 `ModConfig.java` 配置生成，版本 v1.0.1
+> 📝 本文档基于 `zh_cn.json` 语言文件和 `ModConfig.java` 配置生成，版本 v1.0.2

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Minecraft Forge 1.20.1 模组 **冒险的力量 (Adventure's Power)** v1.0.1。
+Minecraft Forge 1.20.1 模组 **冒险的力量 (Adventure's Power)** v1.0.2。
 
 - **Forge**: 47.4.10
 - **Java**: JDK 17
