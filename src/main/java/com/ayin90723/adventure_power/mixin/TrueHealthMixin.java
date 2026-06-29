@@ -14,7 +14,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 /**
  * 真实血量 —— 独立备份驱动的健康值保护，免疫一切 DataItem 字段直写篡改。
  *
- * <h3>三层防护</h3>
+ * <h3>四层防护</h3>
  * <ol>
  *   <li><b>读取层（getHealth HEAD）</b>：从 Capability 备份读取真实血量，
  *       而非被污染的 SynchedEntityData。同时检测备份与 DataItem 是否一致：
@@ -24,17 +24,21 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  *       清零但备份仍有效时，判定为伪造死亡，修复并返回备份值。</li>
  *   <li><b>同步层（setHealth RETURN）</b>：仅在合法路径（{@code hurt()} 内部或回血）下
  *       更新备份，拒绝外部篡改路径的同步。</li>
+ *   <li><b>存活性自检（tick HEAD）</b>：每 tick 检测实体是否被外部标记为已移除/零血量/
+ *       死亡状态，若备份有效则立即修复——清除 removalReason、恢复血量。
+ *       作为 {@code die()} 和 {@code isDeadOrDying()} HEAD 注入被 ASM 绕过时的最后兜底。</li>
  * </ol>
  *
  * <h3>防御原理</h3>
- * 梦幻终焉维系者尾杀的攻击链：
+ * 外部 Boss 的攻击链：
  * <pre>
  *   actuallyHurt0 → setHealth(X) [被 RejectHealthManipMixin 拒绝]
  *                 → catchSetTrueHealth(X) [直写 DataItem.value — 绕过一切]
  *   actuallyHurt wrapper → die() → catchSetTrueHealth(0) [强制清零]
+ *                          → setRemoved() → removalReason = KILLED [字段直写]
  * </pre>
- * 本 Mixin 通过独立 Capability NBT 备份 + 每次 {@code getHealth()} 自动修复，
- * 确保所有非法 DataItem 修改在下次读取时被立即纠正。
+ * 本 Mixin 通过独立 Capability NBT 备份 + 多层注入（读取/同步/死亡拦截/tick 自检），
+ * 确保所有非法修改在可检测的时间窗口内被纠正。
  *
  * <h3>通用性</h3>
  * 任何绕过 {@code setHealth()} 直接写入 DataItem 的攻击均被免疫。
@@ -251,6 +255,89 @@ public abstract class TrueHealthMixin {
                         " backup=" + backup + " → cancel");
                 }
                 ci.cancel();
+            }
+        });
+    }
+
+    // ===== 存活性自检：tick() HEAD =====
+
+    /**
+     * 每 tick 存活性自检——true_health 的最后一道防线。
+     *
+     * <h3>检测与修复</h3>
+     * <ol>
+     *   <li><b>已移除复活</b>：{@code isRemoved() == true} 且备份 &gt; 0 →
+     *       字段直写 {@code removalReason = null} + 血量恢复到备份值。
+     *       处理外部 Mod 通过字段直写标记实体为已移除的场景。</li>
+     *   <li><b>零血量修复</b>：DataItem 血量 ≤ 0 且备份 &gt; 0 →
+     *       {@code setAllHealthLikeRaw} 恢复到备份值。作为 {@link #onGetHealth}
+     *       读取层修复的补充——覆盖 tick 之间没有任何代码调用 {@code getHealth()}
+     *       的极端情况。</li>
+     *   <li><b>死亡状态否决</b>：{@code isDeadOrDying() == true} 且备份 &gt; 0 →
+     *       清除移除标记并恢复血量。处理 {@link #onIsDeadOrDying}
+     *       被 ASM 层绕过的极端场景。</li>
+     * </ol>
+     *
+     * <h3>为什么注入 tick() 而非 ServerTickEvent</h3>
+     * {@code LivingEntity.tick()} 在服务端实体管理器的移除清理<b>之前</b>执行。
+     * 每 tick 有一个修复窗口——如果本 tick 内实体被标记为已移除，
+     * 下一次 tick HEAD 可以拦截并修复，在实体被从 chunk map / tick list 中
+     * 清除之前挽救。
+     * <p>
+     * 若实体已被 {@code forceRemoveEntity} 从 tick list 中删除（无名术士
+     * 不会对玩家执行此操作），tick 不再触发，此自检也失效。
+     * 此时需依赖 {@link #onDie} 和 {@link #onIsDeadOrDying} 的 HEAD 注入。
+     *
+     * <h3>性能</h3>
+     * 仅 true_health 激活的完全解锁玩家每 tick 执行一次 Capability 查询 +
+     * 至多三次简单条件检查。无反射遍历、无对象分配（除日志）。</p>
+     */
+    @Inject(method = "m_8119_", at = @At("HEAD"))
+    private void onTickLivenessCheck(CallbackInfo ci) {
+        LivingEntity self = (LivingEntity) (Object) this;
+        if (!(self instanceof Player player)) return;
+        if (player.level().isClientSide()) return;
+
+        if (!AdventureProgressCapability.isFullyUnlocked(player)) return;
+        AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
+            if (!progress.isAbilityEnabled("true_health")) return;
+            float backup = progress.getBackupHealth();
+            if (backup <= 0.0F) return;  // 备份无效，玩家确实应死
+
+            boolean repaired = false;
+
+            // ① 已移除复活：removalReason 被外部字段直写
+            if (player.isRemoved()) {
+                if (debugLog()) {
+                    System.err.println("[MME-TrueHealth] 存活性自检：实体已移除！" +
+                        " removalReason=" + player.getRemovalReason() +
+                        " backup=" + backup + " → clearRemovedFlag + 血量恢复");
+                }
+                HealthUtil.clearRemovedFlag(player);
+                HealthUtil.setAllHealthLikeRaw(player, backup);
+                repaired = true;
+            }
+
+            // ② 零血量修复：tick 之间被外部清零，且 getHealth() 未被调用
+            float rawHealth = HealthUtil.getHealthDirect(player);
+            if (!repaired && rawHealth <= 0.0F) {
+                if (debugLog()) {
+                    System.err.println("[MME-TrueHealth] 存活性自检：零血量！" +
+                        " DataItem=" + rawHealth + " backup=" + backup +
+                        " → setAllHealthLikeRaw 修复");
+                }
+                HealthUtil.setAllHealthLikeRaw(player, backup);
+                repaired = true;
+            }
+
+            // ③ 死亡状态否决：isDeadOrDying 被 ASM 绕过
+            if (player.isDeadOrDying() && backup > 0.0F) {
+                if (debugLog()) {
+                    System.err.println("[MME-TrueHealth] 存活性自检：isDeadOrDying=true！" +
+                        " backup=" + backup + " → clearRemovedFlag + 血量恢复");
+                }
+                HealthUtil.clearRemovedFlag(player);
+                HealthUtil.setAllHealthLikeRaw(player, backup);
             }
         });
     }

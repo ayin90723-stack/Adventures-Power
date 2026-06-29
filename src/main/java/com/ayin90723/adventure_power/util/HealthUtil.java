@@ -419,6 +419,33 @@ public class HealthUtil {
     private static Field ENTITY_REMOVAL_REASON_FIELD;
 
     /**
+     * 清除 {@code Entity.removalReason} 字段，将实体从"已移除"状态恢复到正常状态。
+     * <p>
+     * 适用场景：存活性自检（liveness check）发现实体被外部通过字段直写标记为已移除，
+     * 但 Capability 备份表明玩家应存活时，调用此方法撤销移除标记。
+     * <p>
+     * 与 {@link #setRemovedFieldDirect} 的不同在于本方法写入 {@code null}，
+     * 等价于"从未被移除"的初始状态。
+     *
+     * @param target 目标实体
+     */
+    public static void clearRemovedFlag(LivingEntity target) {
+        try {
+            if (ENTITY_REMOVAL_REASON_FIELD == null) {
+                try {
+                    ENTITY_REMOVAL_REASON_FIELD = Entity.class.getDeclaredField("f_146795_");
+                } catch (NoSuchFieldException e) {
+                    ENTITY_REMOVAL_REASON_FIELD = Entity.class.getDeclaredField("removalReason");
+                }
+                ENTITY_REMOVAL_REASON_FIELD.setAccessible(true);
+            }
+            ENTITY_REMOVAL_REASON_FIELD.set(target, null);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
      * 直接反射写入 {@code Entity.removalReason} 字段 (SRG: {@code f_146795_})，
      * 绕过<b>所有</b>方法调用——包括 Mixin 注入和子类覆写。
      * <p>
