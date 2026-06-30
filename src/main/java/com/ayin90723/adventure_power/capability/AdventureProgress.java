@@ -1,17 +1,16 @@
 package com.ayin90723.adventure_power.capability;
 
-import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
-import com.ayin90723.adventure_power.milestone.Milestone;
+import com.ayin90723.adventure_power.util.MilestoneRegistry;
 import net.minecraft.nbt.CompoundTag;
 import java.util.Collections;
-import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.Set;
 
 /**
  * IAdventureProgress 默认实现。
  * 不可持久化不变式：一旦 adventurer / fullyUnlocked 激活，永不回退。
+ * 里程碑使用字符串 ID 存储，由 MilestoneRegistry 动态定义。
  */
 public class AdventureProgress implements IAdventureProgress {
 
@@ -28,11 +27,11 @@ public class AdventureProgress implements IAdventureProgress {
     private static final String TAG_SANCTUARY_INVUL_END = "sanctuaryInvulEnd";
     private static final String TAG_ACTIVE_SKILL_GCD_END = "activeSkillGcdEnd";
     private static final String TAG_BACKUP_HEALTH = "backupHealth";
+    private static final String TAG_DISABLED_ABILITIES = "disabledAbilities";
 
     private boolean adventurer;
     private boolean fullyUnlocked;
-    private final Set<Milestone> milestones = EnumSet.noneOf(Milestone.class);
-    private static final String TAG_DISABLED_ABILITIES = "disabledAbilities";
+    private final Set<String> unlockedMilestones = new HashSet<>();
     private final Set<String> disabledAbilities = new HashSet<>();
     private long deathDefyInvulEnd;
     private long deathDefyCooldownEnd;
@@ -70,26 +69,25 @@ public class AdventureProgress implements IAdventureProgress {
     // ===== 里程碑 =====
 
     @Override
-    public boolean isMilestoneUnlocked(Milestone m) {
-        // fullyUnlocked 等价于全部里程碑已解锁
+    public boolean isMilestoneUnlocked(String id) {
         if (fullyUnlocked) return true;
-        return milestones.contains(m);
+        return unlockedMilestones.contains(id);
     }
 
     @Override
-    public boolean unlockMilestone(Milestone m) {
-        return milestones.add(m);
+    public boolean unlockMilestone(String id) {
+        return unlockedMilestones.add(id);
     }
 
     @Override
     public int getUnlockedMilestoneCount() {
-        if (fullyUnlocked) return Milestone.values().length;
-        return milestones.size();
+        if (fullyUnlocked) return MilestoneRegistry.getMilestoneCount();
+        return unlockedMilestones.size();
     }
 
     @Override
     public boolean areAllMilestonesUnlocked() {
-        return fullyUnlocked || milestones.size() >= Milestone.values().length;
+        return fullyUnlocked || unlockedMilestones.size() >= MilestoneRegistry.getMilestoneCount();
     }
 
     // ===== 能力开关 =====
@@ -101,25 +99,23 @@ public class AdventureProgress implements IAdventureProgress {
 
     /**
      * 能力是否启用 — 双重门禁：玩家未手动关闭 + 已达成所需里程碑数。
-     * <p>
      * 覆盖接口默认实现（仅检查 disabledAbilities），加入里程碑硬门禁。
      */
     @Override
     public boolean isAbilityEnabled(String id) {
         if (disabledAbilities.contains(id)) return false;
-        Ability ability = AbilityRegistry.get(id);
-        if (ability == null) return false;
-        return getUnlockedMilestoneCount() >= ability.requiredMilestones();
+        if (AbilityRegistry.get(id) == null) return false;
+        return MilestoneRegistry.isAbilityAvailable(id, getUnlockedMilestoneCount());
     }
 
     @Override
     public boolean toggleAbility(String id) {
         if (disabledAbilities.contains(id)) {
             disabledAbilities.remove(id);
-            return true; // 重新启用
+            return true;
         } else {
             disabledAbilities.add(id);
-            return false; // 已禁用
+            return false;
         }
     }
 
@@ -220,8 +216,8 @@ public class AdventureProgress implements IAdventureProgress {
         tag.putBoolean(TAG_FULLY_UNLOCKED, fullyUnlocked);
 
         CompoundTag milestonesTag = new CompoundTag();
-        for (Milestone m : Milestone.values()) {
-            milestonesTag.putBoolean(m.name().toLowerCase(), milestones.contains(m));
+        for (String id : unlockedMilestones) {
+            milestonesTag.putBoolean(id, true);
         }
         tag.put(TAG_MILESTONES, milestonesTag);
 
@@ -235,7 +231,6 @@ public class AdventureProgress implements IAdventureProgress {
         tag.putLong(TAG_DEATH_DEFY_COOLDOWN_END, deathDefyCooldownEnd);
         tag.putInt(TAG_RESILIENCE_STACKS, resilienceStacks);
         tag.putLong(TAG_LAST_HURT_TIME, lastHurtTime);
-        // activeSkillIndex 不序列化 — 纯客户端 UI 状态，服务端同步时不应覆盖
         tag.putLong(TAG_JUDGMENT_COOLDOWN_END, judgmentCooldownEnd);
         tag.putLong(TAG_SANCTUARY_COOLDOWN_END, sanctuaryCooldownEnd);
         tag.putLong(TAG_SANCTUARY_INVUL_END, sanctuaryInvulEnd);
@@ -250,11 +245,11 @@ public class AdventureProgress implements IAdventureProgress {
         this.adventurer = nbt.getBoolean(TAG_ADVENTURER);
         this.fullyUnlocked = nbt.getBoolean(TAG_FULLY_UNLOCKED);
 
-        this.milestones.clear();
+        this.unlockedMilestones.clear();
         CompoundTag milestonesTag = nbt.getCompound(TAG_MILESTONES);
-        for (Milestone m : Milestone.values()) {
-            if (milestonesTag.getBoolean(m.name().toLowerCase())) {
-                this.milestones.add(m);
+        for (String key : milestonesTag.getAllKeys()) {
+            if (milestonesTag.getBoolean(key) && MilestoneRegistry.contains(key)) {
+                this.unlockedMilestones.add(key);
             }
         }
 
@@ -270,7 +265,6 @@ public class AdventureProgress implements IAdventureProgress {
         this.deathDefyCooldownEnd = nbt.getLong(TAG_DEATH_DEFY_COOLDOWN_END);
         this.resilienceStacks = nbt.getInt(TAG_RESILIENCE_STACKS);
         this.lastHurtTime = nbt.getLong(TAG_LAST_HURT_TIME);
-        // activeSkillIndex 不反序列化 — 纯客户端 UI 状态
         this.judgmentCooldownEnd = nbt.getLong(TAG_JUDGMENT_COOLDOWN_END);
         this.sanctuaryCooldownEnd = nbt.getLong(TAG_SANCTUARY_COOLDOWN_END);
         this.sanctuaryInvulEnd = nbt.getLong(TAG_SANCTUARY_INVUL_END);

@@ -7,12 +7,14 @@ import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.handler.AdvancementEventHandler;
 import com.ayin90723.adventure_power.item.ModItems;
 import com.ayin90723.adventure_power.milestone.Milestone;
+import com.ayin90723.adventure_power.util.MilestoneRegistry;
 import com.ayin90723.adventure_power.network.NetworkHandler;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -132,11 +134,9 @@ public class AdventureProgressCapability {
     /** 检查指定能力在当前玩家进度下是否可用（基于里程碑数） */
     public static boolean isAbilityAvailable(Player player, String id) {
         if (!KNOWN_ABILITIES.containsKey(id)) return false;
-        Ability ability = AbilityRegistry.get(id);
-        if (ability == null) return false;
-        int required = ability.requiredMilestones();
+        if (AbilityRegistry.get(id) == null) return false;
         return getAdventureProgress(player)
-            .map(p -> p.getUnlockedMilestoneCount() >= required)
+            .map(p -> MilestoneRegistry.isAbilityAvailable(id, p.getUnlockedMilestoneCount()))
             .orElse(false);
     }
 
@@ -411,31 +411,31 @@ public class AdventureProgressCapability {
     // ===== NBT 扫描与同步 =====
 
     private static void scanAllItemsForMilestones(Player player, boolean[] found) {
-        Milestone[] values = Milestone.values();
+        java.util.List<Milestone> all = MilestoneRegistry.getAll();
         for (ItemStack stack : player.getInventory().items) {
-            scanItemForMilestones(stack, values, found);
+            scanItemForMilestones(stack, all, found);
         }
         for (ItemStack stack : player.getInventory().armor) {
-            scanItemForMilestones(stack, values, found);
+            scanItemForMilestones(stack, all, found);
         }
         for (ItemStack stack : player.getInventory().offhand) {
-            scanItemForMilestones(stack, values, found);
+            scanItemForMilestones(stack, all, found);
         }
         CuriosApi.getCuriosInventory(player).resolve().ifPresent(inv ->
             inv.getCurios().forEach((id, handler) -> {
                 for (int i = 0; i < handler.getStacks().getSlots(); i++) {
-                    scanItemForMilestones(handler.getStacks().getStackInSlot(i), values, found);
+                    scanItemForMilestones(handler.getStacks().getStackInSlot(i), all, found);
                 }
             })
         );
     }
 
-    private static void scanItemForMilestones(ItemStack stack, Milestone[] values, boolean[] found) {
+    private static void scanItemForMilestones(ItemStack stack, java.util.List<Milestone> all, boolean[] found) {
         if (!stack.is(ModItems.ADVENTURE_BEGIN.get()) && !stack.is(ModItems.ADVENTURE_END.get())) return;
         migrateOldStage(stack);
         CompoundTag tag = stack.getOrCreateTag();
-        for (int i = 0; i < values.length; i++) {
-            if (tag.getBoolean(milestoneNbtKey(values[i]))) {
+        for (int i = 0; i < all.size(); i++) {
+            if (tag.getBoolean(milestoneNbtKey(all.get(i).id()))) {
                 found[i] = true;
             }
         }
@@ -448,13 +448,13 @@ public class AdventureProgressCapability {
      * @return true 表示成功恢复了至少一个里程碑
      */
     private static boolean recoverProgressFromItems(Player player, IAdventureProgress progress) {
-        boolean[] found = new boolean[Milestone.values().length];
+        java.util.List<Milestone> all = MilestoneRegistry.getAll();
+        boolean[] found = new boolean[all.size()];
         scanAllItemsForMilestones(player, found);
-        Milestone[] values = Milestone.values();
         boolean anyMilestone = false;
-        for (int i = 0; i < values.length; i++) {
+        for (int i = 0; i < all.size(); i++) {
             if (found[i]) {
-                progress.unlockMilestone(values[i]);
+                progress.unlockMilestone(all.get(i).id());
                 anyMilestone = true;
             }
         }
@@ -499,21 +499,34 @@ public class AdventureProgressCapability {
         }
     }
 
-    /** 向指定玩家同步冒险进度 Capability 数据到客户端 */
+    /** 向指定玩家同步冒险进度 Capability 数据到客户端（含里程碑注册表元数据） */
     public static void syncToClient(Player player) {
         if (!(player instanceof ServerPlayer sp)) return;
         getAdventureProgress(player).ifPresent(progress -> {
+            CompoundTag syncData = progress.serializeNBT();
+            // 附带里程碑注册表元数据给客户端（用于 tooltip 渲染）
+            List<Milestone> all = MilestoneRegistry.getAll();
+            CompoundTag registryMeta = new CompoundTag();
+            registryMeta.putInt("count", all.size());
+            for (int i = 0; i < all.size(); i++) {
+                Milestone m = all.get(i);
+                CompoundTag mTag = new CompoundTag();
+                mTag.putString("id", m.id());
+                mTag.putString("name", m.name());
+                registryMeta.put("m_" + i, mTag);
+            }
+            syncData.put("_milestone_registry", registryMeta);
             NetworkHandler.INSTANCE.send(
                 PacketDistributor.PLAYER.with(() -> sp),
-                new NetworkHandler.AdventureSyncPacket(progress.serializeNBT())
+                new NetworkHandler.AdventureSyncPacket(syncData)
             );
         });
     }
 
     public static void writeMilestonesToStack(ItemStack stack, IAdventureProgress progress) {
         CompoundTag tag = stack.getOrCreateTag();
-        for (Milestone m : Milestone.values()) {
-            tag.putBoolean(milestoneNbtKey(m), progress.isMilestoneUnlocked(m));
+        for (Milestone m : MilestoneRegistry.getAll()) {
+            tag.putBoolean(milestoneNbtKey(m.id()), progress.isMilestoneUnlocked(m.id()));
         }
         stack.setTag(tag);
     }
@@ -526,11 +539,11 @@ public class AdventureProgressCapability {
         CompoundTag tag = stack.getTag();
         if (tag != null && tag.contains(OLD_STAGE_KEY)) {
             int oldStage = tag.getInt(OLD_STAGE_KEY);
-            if (oldStage >= 1) tag.putBoolean(milestoneNbtKey(Milestone.NETHER), true);
-            if (oldStage >= 2) tag.putBoolean(milestoneNbtKey(Milestone.WITHER), true);
-            if (oldStage >= 3) tag.putBoolean(milestoneNbtKey(Milestone.WARDEN), true);
-            if (oldStage >= 4) tag.putBoolean(milestoneNbtKey(Milestone.DRAGON), true);
-            if (oldStage >= 5) tag.putBoolean(milestoneNbtKey(Milestone.ELYTRA), true);
+            if (oldStage >= 1) tag.putBoolean(milestoneNbtKey("nether"), true);
+            if (oldStage >= 2) tag.putBoolean(milestoneNbtKey("wither"), true);
+            if (oldStage >= 3) tag.putBoolean(milestoneNbtKey("warden"), true);
+            if (oldStage >= 4) tag.putBoolean(milestoneNbtKey("dragon"), true);
+            if (oldStage >= 5) tag.putBoolean(milestoneNbtKey("elytra"), true);
             tag.remove(OLD_STAGE_KEY);
             stack.setTag(tag);
         }
@@ -541,8 +554,7 @@ public class AdventureProgressCapability {
      * 旧版 getNbtKey() 返回 "MME_Milestone_Nether" 等 PascalCase 格式，
      * 新版 Milestone.getId() 返回小写，此处还原为旧格式以保持存档兼容。
      */
-    private static String milestoneNbtKey(Milestone m) {
-        String id = m.getId();
+    private static String milestoneNbtKey(String id) {
         return "MME_Milestone_" + Character.toUpperCase(id.charAt(0)) + id.substring(1);
     }
 
@@ -567,12 +579,12 @@ public class AdventureProgressCapability {
      * 此方法是里程碑解锁的<b>唯一入口</b>。无论触发源是 Forge 事件、原版成就
      * 还是网络同步，最终都通过此方法完成 Capability 更新 + NBT 同步 + 客户端通知。
      */
-    public static void grantMilestone(ServerPlayer player, Milestone milestone) {
+    public static void grantMilestone(ServerPlayer player, String milestoneId) {
         getAdventureProgress(player).ifPresent(progress -> {
             if (!progress.isAdventurer()) return;
-            if (progress.isMilestoneUnlocked(milestone)) return;
+            if (progress.isMilestoneUnlocked(milestoneId)) return;
 
-            progress.unlockMilestone(milestone);
+            progress.unlockMilestone(milestoneId);
             // 翱翔飞行立即同步：不等 PlayerStateHandler 下一 tick，
             // 避免两处 TickEvent.Phase.END handler 执行顺序不确定导致的竞态
             if (progress.isAbilityEnabled("soar") && !player.getAbilities().mayfly
@@ -591,7 +603,7 @@ public class AdventureProgressCapability {
                 player.getX(), player.getY() + 1.5, player.getZ(),
                 30, 0.5, 0.5, 0.5, 0.1);
             player.displayClientMessage(
-                Component.translatable("milestone.adventure_power." + milestone.getId()).withStyle(ChatFormatting.GREEN), true);
+                Component.translatable("milestone.adventure_power." + milestoneId).withStyle(ChatFormatting.GREEN), true);
 
             // ★ 全部里程碑达成 → 冒险的开始 自动替换为 冒险的终点 + 终极成就
             // 不限制最后一个里程碑必须是 ELYTRA，适应任意解锁顺序
@@ -790,8 +802,8 @@ public class AdventureProgressCapability {
             if (!progress.isAdventurer()) {
                 progress.activateAdventurer();
             }
-            for (Milestone m : Milestone.values()) {
-                progress.unlockMilestone(m);
+            for (Milestone m : MilestoneRegistry.getAll()) {
+                progress.unlockMilestone(m.id());
             }
             progress.activateFullyUnlocked();
             updateScoreboard(player, true);
@@ -811,8 +823,8 @@ public class AdventureProgressCapability {
 
             if (player instanceof ServerPlayer sp) {
                 AdvancementEventHandler.grantRootAdvancement(sp);
-                for (Milestone m : Milestone.values()) {
-                    AdvancementEventHandler.grantMilestoneAdvancement(sp, m);
+                for (Milestone m : MilestoneRegistry.getAll()) {
+                    AdvancementEventHandler.grantMilestoneAdvancement(sp, m.id());
                 }
                 AdvancementEventHandler.grantEndAdvancement(sp);
             }

@@ -1,6 +1,5 @@
 package com.ayin90723.adventure_power.capability;
 
-import com.ayin90723.adventure_power.milestone.Milestone;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraftforge.common.capabilities.AutoRegisterCapability;
 
@@ -9,7 +8,7 @@ import java.util.Set;
 /**
  * 冒险进度 Capability 接口。
  * 3 层状态：激活层 → 里程碑层 → 查询层。
- * 18 种能力开关 + 主动技能/死亡抗拒 计时器 + 真实血量备份。
+ * 里程碑存储使用字符串 ID，由 MilestoneRegistry 动态定义。
  */
 @AutoRegisterCapability
 public interface IAdventureProgress {
@@ -21,10 +20,10 @@ public interface IAdventureProgress {
     boolean isFullyUnlocked();
     void activateFullyUnlocked();
 
-    // ===== 里程碑（10 个） =====
+    // ===== 里程碑（动态加载，存储为字符串 ID） =====
 
-    boolean isMilestoneUnlocked(Milestone m);
-    boolean unlockMilestone(Milestone m);
+    boolean isMilestoneUnlocked(String id);
+    boolean unlockMilestone(String id);
     int getUnlockedMilestoneCount();
     boolean areAllMilestonesUnlocked();
 
@@ -66,7 +65,7 @@ public interface IAdventureProgress {
     long getActiveSkillGcdEnd();
     void setActiveSkillGcdEnd(long time);
 
-    // ===== 无敌状态判定（DeathDefyMixin / 主动技能 等） =====
+    // ===== 无敌状态判定 =====
 
     default boolean isDeathDefyInvulnerable(long currentGameTime) {
         long end = getDeathDefyInvulEnd();

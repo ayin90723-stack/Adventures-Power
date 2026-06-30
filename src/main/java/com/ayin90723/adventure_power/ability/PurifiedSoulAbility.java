@@ -19,13 +19,15 @@ public class PurifiedSoulAbility implements Ability {
         return Component.translatable("ability.adventure_power.purified_soul.desc");
     }
 
+        private int countAtUnlock = 8;
+
     @Override
-    public int requiredMilestones() {
-        return 8;
+    public void setCountAtUnlock(int n) {
+        this.countAtUnlock = n;
     }
 
     @Override
-    public float value(int milestones) {
+    public float value(int count) {
         return -1;
     }
 }

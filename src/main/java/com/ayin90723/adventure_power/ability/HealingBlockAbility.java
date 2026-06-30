@@ -6,7 +6,7 @@ import net.minecraft.network.chat.Component;
 /**
  * 禁疗之触 — 攻击禁止目标回血。
  * 解锁条件：7 里程碑
- * 成长公式：base + per_milestone × (milestones - required)（秒）
+ * 成长公式：base + per_milestone × (count - required)（秒）
  * 默认范围：3s → 6s
  */
 public class HealingBlockAbility implements Ability {
@@ -26,16 +26,19 @@ public class HealingBlockAbility implements Ability {
         return Component.translatable("ability.adventure_power.healing_block.desc");
     }
 
+    /**
+     * 返回禁疗持续时间（秒）。从配置读取 base + per_milestone × (count - required)。
+     */
+
+    private int countAtUnlock = 7;
+
     @Override
-    public int requiredMilestones() {
-        return 7;
+    public void setCountAtUnlock(int n) {
+        this.countAtUnlock = n;
     }
 
-    /**
-     * 返回禁疗持续时间（秒）。从配置读取 base + per_milestone × (milestones - required)。
-     */
     @Override
-    public float value(int milestones) {
-        return ModConfig.HEALING_BLOCK_BASE.get() + ModConfig.HEALING_BLOCK_PER_MILESTONE.get() * (milestones - requiredMilestones());
+    public float value(int count) {
+        return ModConfig.HEALING_BLOCK_BASE.get() + ModConfig.HEALING_BLOCK_PER_MILESTONE.get() * (count - countAtUnlock);
     }
 }

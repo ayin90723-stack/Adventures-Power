@@ -6,7 +6,7 @@ import net.minecraft.network.chat.Component;
 /**
  * 无形之手 — 增加方块交互距离。
  * 解锁条件：4 里程碑
- * 成长公式：base + per_milestone × (milestones - required)
+ * 成长公式：base + per_milestone × (count - required)
  * 默认范围：+1.0 → +2.8 格
  */
 public class ExtendedReachAbility implements Ability {
@@ -26,14 +26,16 @@ public class ExtendedReachAbility implements Ability {
         return Component.translatable("ability.adventure_power.extended_reach.desc");
     }
 
+        private int countAtUnlock = 4;
+
     @Override
-    public int requiredMilestones() {
-        return 4;
+    public void setCountAtUnlock(int n) {
+        this.countAtUnlock = n;
     }
 
     @Override
-    public float value(int milestones) {
+    public float value(int count) {
         return (float) (ModConfig.EXTENDED_REACH_BASE.get()
-            + ModConfig.EXTENDED_REACH_PER_MILESTONE.get() * (milestones - requiredMilestones()));
+            + ModConfig.EXTENDED_REACH_PER_MILESTONE.get() * (count - countAtUnlock));
     }
 }

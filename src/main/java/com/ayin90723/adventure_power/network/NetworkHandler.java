@@ -229,6 +229,22 @@ public class NetworkHandler {
             ctx.get().enqueueWork(() -> {
                 Minecraft mc = Minecraft.getInstance();
                 if (mc.player != null) {
+                    // 先提取里程碑注册表元数据初始化客户端 MilestoneRegistry
+                    if (msg.data.contains("_milestone_registry")) {
+                        net.minecraft.nbt.CompoundTag registryMeta = msg.data.getCompound("_milestone_registry");
+                        int count = registryMeta.getInt("count");
+                        java.util.List<String> milestoneJsons = new java.util.ArrayList<>();
+                        for (int i = 0; i < count; i++) {
+                            net.minecraft.nbt.CompoundTag mTag = registryMeta.getCompound("m_" + i);
+                            String id = mTag.getString("id");
+                            String name = mTag.getString("name");
+                            milestoneJsons.add("{\"id\":\"" + id + "\",\"name\":\"" + name
+                                + "\",\"abilities\":[],\"advancement\":null,\"trigger\":null}");
+                        }
+                        if (!milestoneJsons.isEmpty()) {
+                            com.ayin90723.adventure_power.util.MilestoneRegistry.clientInit(milestoneJsons);
+                        }
+                    }
                     mc.player.getCapability(AdventureProgressCapability.CAPABILITY).ifPresent(
                         progress -> progress.deserializeNBT(msg.data));
                     // 如果有等待同步后打开的屏幕，现在打开

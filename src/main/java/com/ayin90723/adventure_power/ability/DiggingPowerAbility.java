@@ -6,7 +6,7 @@ import net.minecraft.network.chat.Component;
 /**
  * 大地之力 — 提升挖掘速度。
  * 解锁条件：1 里程碑
- * 成长公式：base + per_milestone × (milestones - required)
+ * 成长公式：base + per_milestone × (count - required)
  * 默认范围：1.3x → 1.75x
  */
 public class DiggingPowerAbility implements Ability {
@@ -26,14 +26,16 @@ public class DiggingPowerAbility implements Ability {
         return Component.translatable("ability.adventure_power.digging_power.desc");
     }
 
+        private int countAtUnlock = 1;
+
     @Override
-    public int requiredMilestones() {
-        return 1;
+    public void setCountAtUnlock(int n) {
+        this.countAtUnlock = n;
     }
 
     @Override
-    public float value(int milestones) {
+    public float value(int count) {
         return (float) (ModConfig.DIGGING_POWER_BASE.get()
-            + ModConfig.DIGGING_POWER_PER_MILESTONE.get() * (milestones - requiredMilestones()));
+            + ModConfig.DIGGING_POWER_PER_MILESTONE.get() * (count - countAtUnlock));
     }
 }

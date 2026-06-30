@@ -8,6 +8,18 @@
   "item.adventure_power.adventure_end.lore_intro": "All ten trials conquered, all twenty-five powers awakened. You have transcended mortality — you are the embodiment of adventure itself.",
   "item.adventure_power.adventure_end.lore_footer": "— Power belongs to the adventurer —",
 
+  "item.adventure_power.lore.loading": "§7Loading...",
+  "item.adventure_power.lore.milestone.first_night": "§6First Night  §8»  §7Agility §8· §7Earthly Power §8· §7Perpetual Blessing",
+  "item.adventure_power.lore.milestone.first_death": "§6First Death  §8»  §7Void Step §8· §7Rapid Recovery",
+  "item.adventure_power.lore.milestone.first_trade": "§6First Trade  §8»  §7Soul Bind §8· §7Unshakable",
+  "item.adventure_power.lore.milestone.first_deep": "§6Into the Depths  §8»  §7Damage Resist §8· §7Unseen Hand",
+  "item.adventure_power.lore.milestone.first_enchant": "§6First Enchantment  §8»  §7Undying Gear §8· §7Fortune's Favor",
+  "item.adventure_power.lore.milestone.nether": "§6Gates of Fire  §8»  §7Env. Immunity §8· §7Lifesteal",
+  "item.adventure_power.lore.milestone.wither": "§6Fall of the Wither  §8»  §7Healing Block §8· §7Iron Constitution",
+  "item.adventure_power.lore.milestone.warden": "§6Fear of the Sculk  §8»  §7Resilience §8· §7Purified Soul",
+  "item.adventure_power.lore.milestone.dragon": "§6Wings of the End  §8»  §7Soul Quench §8· §7Piercing Gaze §8· §7Death Defy §8· §7Soar",
+  "item.adventure_power.lore.milestone.elytra": "§6Proof of the Sky  §8»  §7Shadow Kill §8· §7True Health §8· §7Reject Manip. §8· §7Traveler's Power",
+
   "item.adventure_power.lore.milestone_0": "§6First Night  §8»  §7Agility §8· §7Earthly Power §8· §7Perpetual Blessing",
   "item.adventure_power.lore.milestone_1": "§6First Death  §8»  §7Void Step §8· §7Rapid Recovery",
   "item.adventure_power.lore.milestone_2": "§6First Trade  §8»  §7Soul Bind §8· §7Unshakable",

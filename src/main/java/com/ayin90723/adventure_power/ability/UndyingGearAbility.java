@@ -24,13 +24,15 @@ public class UndyingGearAbility implements Ability {
         return Component.translatable("ability.adventure_power.undying_gear.desc");
     }
 
+        private int countAtUnlock = 5;
+
     @Override
-    public int requiredMilestones() {
-        return 5;
+    public void setCountAtUnlock(int n) {
+        this.countAtUnlock = n;
     }
 
     @Override
-    public float value(int milestones) {
+    public float value(int count) {
         return -1;
     }
 }

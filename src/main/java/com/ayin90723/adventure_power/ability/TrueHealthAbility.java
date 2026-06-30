@@ -24,13 +24,15 @@ public class TrueHealthAbility implements Ability {
         return Component.translatable("ability.adventure_power.true_health.desc");
     }
 
+        private int countAtUnlock = 10;
+
     @Override
-    public int requiredMilestones() {
-        return 10;
+    public void setCountAtUnlock(int n) {
+        this.countAtUnlock = n;
     }
 
     @Override
-    public float value(int milestones) {
+    public float value(int count) {
         return -1;
     }
 }

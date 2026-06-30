@@ -25,24 +25,26 @@ public class SoulQuenchAbility implements Ability {
         return Component.translatable("ability.adventure_power.soul_quench.desc");
     }
 
+    /** value 无意义，实际数值由 flatDamage/hpRatio 提供 */
+        private int countAtUnlock = 9;
+
     @Override
-    public int requiredMilestones() {
-        return 9;
+    public void setCountAtUnlock(int n) {
+        this.countAtUnlock = n;
     }
 
-    /** value 无意义，实际数值由 flatDamage/hpRatio 提供 */
     @Override
-    public float value(int milestones) {
+    public float value(int count) {
         return -1;
     }
 
     /** 固定伤害，从配置读取 */
-    public int flatDamage(int milestones) {
-        return milestones >= 10 ? ModConfig.SOUL_QUENCH_FLAT_DAMAGE_10.get() : ModConfig.SOUL_QUENCH_FLAT_DAMAGE_9.get();
+    public int flatDamage(int count) {
+        return count >= 10 ? ModConfig.SOUL_QUENCH_FLAT_DAMAGE_10.get() : ModConfig.SOUL_QUENCH_FLAT_DAMAGE_9.get();
     }
 
     /** 生命百分比伤害，从配置读取 */
-    public float hpRatio(int milestones) {
-        return (float)(double)(milestones >= 10 ? ModConfig.SOUL_QUENCH_HP_RATIO_10.get() : ModConfig.SOUL_QUENCH_HP_RATIO_9.get());
+    public float hpRatio(int count) {
+        return (float)(double)(count >= 10 ? ModConfig.SOUL_QUENCH_HP_RATIO_10.get() : ModConfig.SOUL_QUENCH_HP_RATIO_9.get());
     }
 }

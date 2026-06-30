@@ -6,7 +6,7 @@ import net.minecraft.network.chat.Component;
 /**
  * 虚空踏步 — 跳跃高度提升（跳跃倍率）。
  * 解锁条件：2 里程碑
- * 成长公式：base + per_milestone × (milestones - required)
+ * 成长公式：base + per_milestone × (count - required)
  * 默认范围：1.0x → 1.24x
  */
 public class VoidStepAbility implements Ability {
@@ -26,16 +26,19 @@ public class VoidStepAbility implements Ability {
         return Component.translatable("ability.adventure_power.void_step.desc");
     }
 
+    /**
+     * 返回跳跃倍率。从配置读取 base + per_milestone × (count - required)。
+     */
+
+    private int countAtUnlock = 2;
+
     @Override
-    public int requiredMilestones() {
-        return 2;
+    public void setCountAtUnlock(int n) {
+        this.countAtUnlock = n;
     }
 
-    /**
-     * 返回跳跃倍率。从配置读取 base + per_milestone × (milestones - required)。
-     */
     @Override
-    public float value(int milestones) {
-        return (float)(ModConfig.VOID_STEP_BASE.get() + ModConfig.VOID_STEP_PER_MILESTONE.get() * (milestones - requiredMilestones()));
+    public float value(int count) {
+        return (float)(ModConfig.VOID_STEP_BASE.get() + ModConfig.VOID_STEP_PER_MILESTONE.get() * (count - countAtUnlock));
     }
 }

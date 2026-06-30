@@ -6,7 +6,7 @@ import net.minecraft.network.chat.Component;
 /**
  * 灵巧 — 攻击速度提升。
  * 解锁条件：1 里程碑
- * 成长公式：base + per_milestone × (milestones - required)
+ * 成长公式：base + per_milestone × (count - required)
  * 默认范围：10% → 73%
  */
 public class AgilityAbility implements Ability {
@@ -26,16 +26,19 @@ public class AgilityAbility implements Ability {
         return Component.translatable("ability.adventure_power.agility.desc");
     }
 
+    /**
+     * 返回攻击速度提升百分比。从配置读取 base + per_milestone × (count - required)。
+     */
+
+    private int countAtUnlock = 1;
+
     @Override
-    public int requiredMilestones() {
-        return 1;
+    public void setCountAtUnlock(int n) {
+        this.countAtUnlock = n;
     }
 
-    /**
-     * 返回攻击速度提升百分比。从配置读取 base + per_milestone × (milestones - required)。
-     */
     @Override
-    public float value(int milestones) {
-        return ModConfig.AGILITY_BASE.get() + ModConfig.AGILITY_PER_MILESTONE.get() * (milestones - requiredMilestones());
+    public float value(int count) {
+        return ModConfig.AGILITY_BASE.get() + ModConfig.AGILITY_PER_MILESTONE.get() * (count - countAtUnlock);
     }
 }

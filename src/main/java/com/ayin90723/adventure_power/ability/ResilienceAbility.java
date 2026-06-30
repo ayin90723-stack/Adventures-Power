@@ -25,17 +25,20 @@ public class ResilienceAbility implements Ability {
         return Component.translatable("ability.adventure_power.resilience.desc");
     }
 
-    @Override
-    public int requiredMilestones() {
-        return 8;
-    }
-
     /**
      * 返回最大减伤层数。从配置读取各里程碑对应的值。
      */
+
+    private int countAtUnlock = 8;
+
     @Override
-    public float value(int milestones) {
-        return switch (milestones) {
+    public void setCountAtUnlock(int n) {
+        this.countAtUnlock = n;
+    }
+
+    @Override
+    public float value(int count) {
+        return switch (count) {
             case 8 -> ModConfig.RESILIENCE_STACKS_8.get();
             case 9 -> ModConfig.RESILIENCE_STACKS_9.get();
             case 10 -> ModConfig.RESILIENCE_STACKS_10.get();
@@ -46,8 +49,8 @@ public class ResilienceAbility implements Ability {
     /**
      * 觉醒版本：在基础层数上额外 +6 层。
      */
-    public float value(int milestones, boolean awakened) {
-        int base = switch (milestones) {
+    public float value(int count, boolean awakened) {
+        int base = switch (count) {
             case 8 -> ModConfig.RESILIENCE_STACKS_8.get();
             case 9 -> ModConfig.RESILIENCE_STACKS_9.get();
             case 10 -> ModConfig.RESILIENCE_STACKS_10.get();

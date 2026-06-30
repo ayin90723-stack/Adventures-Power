@@ -1,5 +1,7 @@
 package com.ayin90723.adventure_power.item;
 
+import com.ayin90723.adventure_power.milestone.Milestone;
+import com.ayin90723.adventure_power.util.MilestoneRegistry;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.Item;
@@ -15,11 +17,9 @@ import java.util.List;
  * <p>
  * 两件物品共享同一套里程碑能力描述，通过 {@code isEnd} 区分引导语。
  * 配色以金色（{@code §6}）为主调。
+ * 里程碑列表由客户端 MilestoneRegistry 动态提供。
  */
 public class AdventureCurioItem extends Item {
-
-    /** 里程碑数量 */
-    private static final int MILESTONE_COUNT = 10;
 
     private final boolean isEnd;
 
@@ -43,21 +43,17 @@ public class AdventureCurioItem extends Item {
     // ========================
 
     private void addBeginTooltip(List<Component> tooltip) {
-        // 标题
         tooltip.add(Component.translatable("item.adventure_power.adventure_begin")
                 .withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
         tooltip.add(Component.empty());
 
-        // 引导语
         tooltip.add(Component.translatable("item.adventure_power.adventure_begin.lore_intro")
                 .withStyle(ChatFormatting.YELLOW));
         tooltip.add(Component.empty());
 
-        // 分隔线
         tooltip.add(Component.literal("◆ ◇ ◆").withStyle(ChatFormatting.GOLD));
         tooltip.add(Component.empty());
 
-        // 10 个里程碑的能力预览
         addMilestoneLines(tooltip);
     }
 
@@ -66,21 +62,17 @@ public class AdventureCurioItem extends Item {
     // ========================
 
     private void addEndTooltip(List<Component> tooltip) {
-        // 标题
         tooltip.add(Component.translatable("item.adventure_power.adventure_end")
                 .withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
         tooltip.add(Component.empty());
 
-        // 祝贺语
         tooltip.add(Component.translatable("item.adventure_power.adventure_end.lore_intro")
                 .withStyle(ChatFormatting.YELLOW));
         tooltip.add(Component.empty());
 
-        // 分隔线
         tooltip.add(Component.literal("◆ ◇ ◆").withStyle(ChatFormatting.GOLD));
         tooltip.add(Component.empty());
 
-        // 10 个里程碑的能力总览
         addMilestoneLines(tooltip);
 
         tooltip.add(Component.empty());
@@ -89,12 +81,17 @@ public class AdventureCurioItem extends Item {
     }
 
     // ========================
-    //  公共：里程碑行
+    //  公共：里程碑行（动态）
     // ========================
 
     private void addMilestoneLines(List<Component> tooltip) {
-        for (int i = 0; i < MILESTONE_COUNT; i++) {
-            tooltip.add(Component.translatable("item.adventure_power.lore.milestone_" + i)
+        if (!MilestoneRegistry.isInitialized()) {
+            tooltip.add(Component.translatable("item.adventure_power.lore.loading")
+                    .withStyle(ChatFormatting.GRAY));
+            return;
+        }
+        for (Milestone m : MilestoneRegistry.getAll()) {
+            tooltip.add(Component.translatable("item.adventure_power.lore.milestone." + m.id())
                     .withStyle(ChatFormatting.GRAY));
         }
     }

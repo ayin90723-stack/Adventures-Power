@@ -25,16 +25,19 @@ public class DeathDefyAbility implements Ability {
         return Component.translatable("ability.adventure_power.death_defy.desc");
     }
 
-    @Override
-    public int requiredMilestones() {
-        return 9;
-    }
-
     /**
      * value 返回无敌 tick 数，从配置读取。
      */
+
+    private int countAtUnlock = 9;
+
     @Override
-    public float value(int milestones) {
+    public void setCountAtUnlock(int n) {
+        this.countAtUnlock = n;
+    }
+
+    @Override
+    public float value(int count) {
         return ModConfig.DEATH_DEFY_INVUL_DURATION.get();
     }
 }

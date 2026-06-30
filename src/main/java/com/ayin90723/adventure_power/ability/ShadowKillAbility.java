@@ -25,16 +25,19 @@ public class ShadowKillAbility implements Ability {
         return Component.translatable("ability.adventure_power.shadow_kill.desc");
     }
 
-    @Override
-    public int requiredMilestones() {
-        return 10;
-    }
-
     /**
      * value 返回固伤值（另一值 hpRatio 由 handler 读取）。
      */
+
+    private int countAtUnlock = 10;
+
     @Override
-    public float value(int milestones) {
+    public void setCountAtUnlock(int n) {
+        this.countAtUnlock = n;
+    }
+
+    @Override
+    public float value(int count) {
         return flatDamage();
     }
 

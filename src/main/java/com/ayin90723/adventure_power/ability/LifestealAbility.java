@@ -6,7 +6,7 @@ import net.minecraft.network.chat.Component;
 /**
  * 嗜血 — 攻击造成伤害时回复自身生命值。
  * 解锁条件：6 里程碑
- * 成长公式：base + per_milestone × (milestones - required)
+ * 成长公式：base + per_milestone × (count - required)
  * 默认范围：5% → 13%
  */
 public class LifestealAbility implements Ability {
@@ -26,14 +26,16 @@ public class LifestealAbility implements Ability {
         return Component.translatable("ability.adventure_power.lifesteal.desc");
     }
 
+        private int countAtUnlock = 6;
+
     @Override
-    public int requiredMilestones() {
-        return 6;
+    public void setCountAtUnlock(int n) {
+        this.countAtUnlock = n;
     }
 
     @Override
-    public float value(int milestones) {
+    public float value(int count) {
         return ModConfig.LIFESTEAL_BASE.get()
-            + ModConfig.LIFESTEAL_PER_MILESTONE.get() * (milestones - requiredMilestones());
+            + ModConfig.LIFESTEAL_PER_MILESTONE.get() * (count - countAtUnlock);
     }
 }

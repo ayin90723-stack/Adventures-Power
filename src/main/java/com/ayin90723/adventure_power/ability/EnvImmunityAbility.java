@@ -19,13 +19,15 @@ public class EnvImmunityAbility implements Ability {
         return Component.translatable("ability.adventure_power.env_immunity.desc");
     }
 
+        private int countAtUnlock = 6;
+
     @Override
-    public int requiredMilestones() {
-        return 6;
+    public void setCountAtUnlock(int n) {
+        this.countAtUnlock = n;
     }
 
     @Override
-    public float value(int milestones) {
+    public float value(int count) {
         return -1;
     }
 }

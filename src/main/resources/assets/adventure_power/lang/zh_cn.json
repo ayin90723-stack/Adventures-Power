@@ -8,6 +8,18 @@
   "item.adventure_power.adventure_end.lore_intro": "十道试炼皆已征服，二十五种力量尽数觉醒。你已超越凡人之躯——你就是冒险的化身。",
   "item.adventure_power.adventure_end.lore_footer": "— 力量属于冒险者自身 —",
 
+  "item.adventure_power.lore.loading": "§7加载中...",
+  "item.adventure_power.lore.milestone.first_night": "§6初次夜冕  §8»  §7灵巧 §8· §7大地之力 §8· §7恩赐永驻",
+  "item.adventure_power.lore.milestone.first_death": "§6初尝败绩  §8»  §7虚空踏步 §8· §7休养生息",
+  "item.adventure_power.lore.milestone.first_trade": "§6初次交易  §8»  §7灵魂绑定 §8· §7不动如山",
+  "item.adventure_power.lore.milestone.first_deep": "§6初探地底  §8»  §7伤害抗性 §8· §7无形之手",
+  "item.adventure_power.lore.milestone.first_enchant": "§6初次附魔  §8»  §7不朽装备 §8· §7鸿运当头",
+  "item.adventure_power.lore.milestone.nether": "§6炽热之门  §8»  §7环境免疫 §8· §7嗜血",
+  "item.adventure_power.lore.milestone.wither": "§6凋零之陨  §8»  §7禁疗之触 §8· §7坚韧之躯",
+  "item.adventure_power.lore.milestone.warden": "§6幽匿之惧  §8»  §7受击坚韧 §8· §7净魂",
+  "item.adventure_power.lore.milestone.dragon": "§6终末之翼  §8»  §7淬魂之力 §8· §7破敌之眼 §8· §7死亡抗拒 §8· §7翱翔",
+  "item.adventure_power.lore.milestone.elytra": "§6苍穹之证  §8»  §7影杀 §8· §7真实血量 §8· §7拒绝篡改 §8· §7旅者之力",
+
   "item.adventure_power.lore.milestone_0": "§6初次夜冕  §8»  §7灵巧 §8· §7大地之力 §8· §7恩赐永驻",
   "item.adventure_power.lore.milestone_1": "§6初尝败绩  §8»  §7虚空踏步 §8· §7休养生息",
   "item.adventure_power.lore.milestone_2": "§6初次交易  §8»  §7灵魂绑定 §8· §7不动如山",
