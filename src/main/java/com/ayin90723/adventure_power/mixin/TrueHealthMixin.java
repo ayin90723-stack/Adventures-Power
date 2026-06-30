@@ -19,7 +19,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  *   <li><b>读取层（getHealth HEAD）</b>：从 Capability 备份读取真实血量，
  *       而非被污染的 SynchedEntityData。同时检测备份与 DataItem 是否一致：
  *       若 DataItem &lt; 备份（非法降血直写，如 {@code catchSetTrueHealth}），
- *       自动通过 {@link HealthUtil#setAllHealthLikeRaw} 修复。</li>
+ *       自动通过 {@link HealthUtil#setAllHealthLikeRaw} + {@link HealthUtil#clearNegativeFloatDeltas} 修复。</li>
  *   <li><b>假死防护（getHealth HEAD）</b>：当 DataItem 被 {@code die()→catchSetTrueHealth(0)}
  *       清零但备份仍有效时，判定为伪造死亡，修复并返回备份值。</li>
  *   <li><b>同步层（setHealth RETURN）</b>：仅在合法路径（{@code hurt()} 内部或回血）下
@@ -60,6 +60,18 @@ public abstract class TrueHealthMixin {
     /** 重入防护：修复期间 BanHealing / 其他 Mixin 调 getHealth() 时直接返回备份 */
     private static final ThreadLocal<Boolean> IN_ON_GET_HEALTH =
         ThreadLocal.withInitial(() -> false);
+
+    /**
+     * 血量修复：先通过 {@link HealthUtil#setAllHealthLikeRaw} 恢复所有血量条目，
+     * 再通过 {@link HealthUtil#clearNegativeFloatDeltas} 清除外部 Boss 注入的负值 delta。
+     * <p>
+     * 两次调用分别对应两个独立语义——"写入正确值"和"清除恶意偏移"。
+     * 攻击侧（淬魂/影杀等）仅需 {@code setAllHealthLikeRaw}，无需清除负值 delta。
+     */
+    private static void repairHealth(LivingEntity player, float health) {
+        HealthUtil.setAllHealthLikeRaw(player, health);
+        HealthUtil.clearNegativeFloatDeltas(player);
+    }
 
     // ===== 读取层：getHealth() HEAD =====
 
@@ -102,7 +114,7 @@ public abstract class TrueHealthMixin {
                         System.err.println("[MME-TrueHealth] 检测到异常血量！" +
                             " rawHealth=" + rawHealth + " → setAllHealthLikeRaw 修复为 " + restore);
                     }
-                    HealthUtil.setAllHealthLikeRaw(player, restore);
+                    repairHealth(player, restore);
                     progress.setBackupHealth(restore);
                     cir.setReturnValue(restore);
                     return;
@@ -120,7 +132,7 @@ public abstract class TrueHealthMixin {
                                 " DataItem=" + rawHealth + " backup=" + backup +
                                 " → setAllHealthLikeRaw 修复 → 返回 " + backup);
                         }
-                        HealthUtil.setAllHealthLikeRaw(player, backup);
+                        repairHealth(player, backup);
                         cir.setReturnValue(backup);
                     }
                     return;
@@ -153,7 +165,7 @@ public abstract class TrueHealthMixin {
                                 " DataItem=" + rawHealth + " backup=" + backup +
                                 " diff=" + diff + " → setAllHealthLikeRaw 修复为 " + backup);
                         }
-                        HealthUtil.setAllHealthLikeRaw(player, backup);
+                        repairHealth(player, backup);
                     }
                 }
 
@@ -270,7 +282,7 @@ public abstract class TrueHealthMixin {
      *       字段直写 {@code removalReason = null} + 血量恢复到备份值。
      *       处理外部 Mod 通过字段直写标记实体为已移除的场景。</li>
      *   <li><b>零血量修复</b>：DataItem 血量 ≤ 0 且备份 &gt; 0 →
-     *       {@code setAllHealthLikeRaw} 恢复到备份值。作为 {@link #onGetHealth}
+     *       {@code repairHealth} 恢复到备份值。作为 {@link #onGetHealth}
      *       读取层修复的补充——覆盖 tick 之间没有任何代码调用 {@code getHealth()}
      *       的极端情况。</li>
      *   <li><b>死亡状态否决</b>：{@code isDeadOrDying() == true} 且备份 &gt; 0 →
@@ -314,7 +326,7 @@ public abstract class TrueHealthMixin {
                         " backup=" + backup + " → clearRemovedFlag + 血量恢复");
                 }
                 HealthUtil.clearRemovedFlag(player);
-                HealthUtil.setAllHealthLikeRaw(player, backup);
+                repairHealth(player, backup);
                 repaired = true;
             }
 
@@ -326,7 +338,7 @@ public abstract class TrueHealthMixin {
                         " DataItem=" + rawHealth + " backup=" + backup +
                         " → setAllHealthLikeRaw 修复");
                 }
-                HealthUtil.setAllHealthLikeRaw(player, backup);
+                repairHealth(player, backup);
                 repaired = true;
             }
 
@@ -337,7 +349,7 @@ public abstract class TrueHealthMixin {
                         " backup=" + backup + " → clearRemovedFlag + 血量恢复");
                 }
                 HealthUtil.clearRemovedFlag(player);
-                HealthUtil.setAllHealthLikeRaw(player, backup);
+                repairHealth(player, backup);
             }
         });
     }

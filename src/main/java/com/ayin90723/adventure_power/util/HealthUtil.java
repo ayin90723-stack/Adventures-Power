@@ -230,15 +230,18 @@ public class HealthUtil {
      * 本方法<b>直接修改 DataItem 内部存储的 value 字段</b>，完全不经过
      * SynchedEntityData 的任何方法调用。
      *
-     * <h3>匹配策略</h3>
-     * 遍历所有 DataItem，找到值等于目标当前血量的条目（匹配 Float/Double/Integer 三种类型），
-     * 直接写入目标血量值。不依赖 EntityDataAccessor key — 无需事先知道
-     * Boss 用哪个 key 存储血量。
-     *
-     * <h3>调用时机</h3>
-     * 作为 {@code setAllHealthLikeDirect} 之后的深层兜底。
-     * 需先调用 {@code setAllHealthLikeDirect} 写入已知 key，
-     * 再调用本方法覆盖任何遗漏的、或被 Mixin 回滚的数据条目。
+     * <h3>三步写入策略</h3>
+     * <ol>
+     *   <li><b>快照</b>：通过 {@link #getHealthDirect} 获取当前主血量值</li>
+     *   <li><b>已知 key 写入</b>：调用 {@link #setAllHealthLikeDirect}
+     *       写入原版 + 所有扫描到的自定义血量 key</li>
+     *   <li><b>值匹配兜底</b>：遍历所有 DataItem，找到值约等于快照值
+     *       的条目（即步骤② 未覆盖的遗漏血量条目），直接写入目标值。
+     *       匹配阈值 0.01，支持 Float/Double/Integer 三种类型</li>
+     * </ol>
+     * <p>
+     * 步骤② 写入后已知 key 的值已变为目标值，自然从步骤③ 的匹配池中消失。
+     * 步骤③ 能匹配到的都是步骤② 遗漏的条目——无需事先知道哪些 key 是血量。
      *
      * @param target 目标实体
      * @param health 目标血量值
@@ -289,12 +292,43 @@ public class HealthUtil {
                     // 单个 DataItem 写入失败，继续处理下一个
                 }
             }
-            // ④ 清除恶意 delta：遍历所有 DataItem，将值为负数的 Float 条目归零。
-            //    部分外部 Boss（如终焉秩序维系者）通过独立的 EntityDataAccessor<Float>
-            //    （不在实体 class hierarchy 中，scanCustomHealthKeys 无法发现）
-            //    维护血量 delta/偏移值。这些负值 delta 会通过 ASM 篡改 getHealth() 返回值，
-            //    且不受前面步骤的"值匹配"逻辑影响（因负值与正常血量差距远超匹配阈值）。
-            //    本步骤作为终极兜底：任何 Float 型 DataItem 值为负数即判定为恶意 delta 并清零。
+        } catch (IllegalAccessException | ClassCastException e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * 清除目标实体 SynchedEntityData 中所有负值 Float 型 DataItem（归零）。
+     *
+     * <h3>用途</h3>
+     * 部分外部 Boss（如终焉秩序维系者）通过独立的 {@code EntityDataAccessor&lt;Float&gt;}
+     * 维护血量 delta/偏移值——以负值 Float 形式注入到<b>玩家</b>的 SynchedEntityData 中，
+     * 再通过 ASM 篡改 {@code getHealth()} 返回值来持续压制玩家血量。
+     * <p>
+     * 这些 delta 条目不在玩家类层次中（{@link #scanCustomHealthKeys} 无法发现），
+     * 且值为负数，不受 {@link #setAllHealthLikeRaw} 的值匹配逻辑影响
+     * （负值与正常血量差距远超过匹配阈值 0.01）。
+     * <p>
+     * 本方法遍历所有 DataItem，将值为负数的 Float 条目归零——
+     * 在每次血量修复后调用，确保恶意 delta 被清除，不会累积压制。
+     *
+     * <h3>调用方</h3>
+     * 仅供 TrueHealth 防御侧使用（目标为玩家自身）。
+     * 攻击侧（淬魂/影杀/审判/见既斩等）<b>不应</b>调用此方法——
+     * Boss 的负值 Float DataItem 通常与血量压制无关，清零反而可能误伤。
+     *
+     * @param target 目标实体（通常为玩家自身）
+     */
+    public static void clearNegativeFloatDeltas(LivingEntity target) {
+        if (ENTITY_DATA_ITEMS_FIELD == null || DATA_ITEM_VALUE_FIELD == null) {
+            return;
+        }
+        SynchedEntityData data = target.getEntityData();
+        try {
+            @SuppressWarnings("unchecked")
+            Map<Integer, Object> items = (Map<Integer, Object>) ENTITY_DATA_ITEMS_FIELD.get(data);
+            if (items == null) return;
+
             for (Object item : items.values()) {
                 try {
                     Object rawValue = DATA_ITEM_VALUE_FIELD.get(item);
