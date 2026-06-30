@@ -26,7 +26,8 @@ public class ResilienceAbility implements Ability {
     }
 
     /**
-     * 返回最大减伤层数。从配置读取各里程碑对应的值。
+     * 返回最大减伤层数。从配置读取三档值，按 countAtUnlock 偏移计算。
+     * 默认 countAtUnlock=8 → 偏移0=8里程碑, 偏移1=9里程碑, 偏移2+=10里程碑。
      */
 
     private int countAtUnlock = 8;
@@ -38,24 +39,17 @@ public class ResilienceAbility implements Ability {
 
     @Override
     public float value(int count) {
-        return switch (count) {
-            case 8 -> ModConfig.RESILIENCE_STACKS_8.get();
-            case 9 -> ModConfig.RESILIENCE_STACKS_9.get();
-            case 10 -> ModConfig.RESILIENCE_STACKS_10.get();
-            default -> 0;
-        };
+        int offset = count - countAtUnlock;
+        if (offset >= 2) return ModConfig.RESILIENCE_STACKS_10.get();
+        if (offset == 1) return ModConfig.RESILIENCE_STACKS_9.get();
+        return ModConfig.RESILIENCE_STACKS_8.get();
     }
 
     /**
      * 觉醒版本：在基础层数上额外 +6 层。
      */
     public float value(int count, boolean awakened) {
-        int base = switch (count) {
-            case 8 -> ModConfig.RESILIENCE_STACKS_8.get();
-            case 9 -> ModConfig.RESILIENCE_STACKS_9.get();
-            case 10 -> ModConfig.RESILIENCE_STACKS_10.get();
-            default -> 0;
-        };
+        int base = (int) value(count);
         return awakened ? base + 6 : base;
     }
 }

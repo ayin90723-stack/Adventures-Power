@@ -26,7 +26,7 @@ public class SoulQuenchAbility implements Ability {
     }
 
     /** value 无意义，实际数值由 flatDamage/hpRatio 提供 */
-        private int countAtUnlock = 9;
+    private int countAtUnlock = 9;
 
     @Override
     public void setCountAtUnlock(int n) {
@@ -38,13 +38,15 @@ public class SoulQuenchAbility implements Ability {
         return -1;
     }
 
-    /** 固定伤害，从配置读取 */
+    /** 固定伤害，从配置读取。countAtUnlock+1 起为第二档。 */
     public int flatDamage(int count) {
-        return count >= 10 ? ModConfig.SOUL_QUENCH_FLAT_DAMAGE_10.get() : ModConfig.SOUL_QUENCH_FLAT_DAMAGE_9.get();
+        if (count >= countAtUnlock + 1) return ModConfig.SOUL_QUENCH_FLAT_DAMAGE_10.get();
+        return ModConfig.SOUL_QUENCH_FLAT_DAMAGE_9.get();
     }
 
-    /** 生命百分比伤害，从配置读取 */
+    /** 生命百分比伤害，从配置读取。countAtUnlock+1 起为第二档。 */
     public float hpRatio(int count) {
-        return (float)(double)(count >= 10 ? ModConfig.SOUL_QUENCH_HP_RATIO_10.get() : ModConfig.SOUL_QUENCH_HP_RATIO_9.get());
+        if (count >= countAtUnlock + 1) return ModConfig.SOUL_QUENCH_HP_RATIO_10.get().floatValue();
+        return ModConfig.SOUL_QUENCH_HP_RATIO_9.get().floatValue();
     }
 }

@@ -10,6 +10,7 @@ import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
+import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -39,6 +40,17 @@ public class MilestoneTriggerManager {
     private static final Set<UUID> FIRST_TRADE_TRIGGERED = new HashSet<>();
     private static final Map<UUID, Set<String>> Y_BELOW_TRIGGERED = new HashMap<>();
     private static final Map<UUID, Set<String>> FIRST_KILL_TRIGGERED = new HashMap<>();
+
+    /** 玩家退出时清理所有关联的触发记录 */
+    @SubscribeEvent
+    public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
+        UUID uuid = event.getEntity().getUUID();
+        SURVIVE_NIGHT_TRIGGERED.remove(uuid);
+        FIRST_DEATH_TRIGGERED.remove(uuid);
+        FIRST_TRADE_TRIGGERED.remove(uuid);
+        Y_BELOW_TRIGGERED.remove(uuid);
+        FIRST_KILL_TRIGGERED.remove(uuid);
+    }
 
     // ===== survive_night =====
 
