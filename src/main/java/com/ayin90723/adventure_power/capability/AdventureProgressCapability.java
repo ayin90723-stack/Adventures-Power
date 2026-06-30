@@ -504,7 +504,7 @@ public class AdventureProgressCapability {
         if (!(player instanceof ServerPlayer sp)) return;
         getAdventureProgress(player).ifPresent(progress -> {
             CompoundTag syncData = progress.serializeNBT();
-            // 附带里程碑注册表元数据给客户端（用于 tooltip 渲染）
+            // 附带里程碑注册表元数据给客户端（用于 tooltip 渲染 + 能力可用性判断）
             List<Milestone> all = MilestoneRegistry.getAll();
             CompoundTag registryMeta = new CompoundTag();
             registryMeta.putInt("count", all.size());
@@ -513,6 +513,14 @@ public class AdventureProgressCapability {
                 CompoundTag mTag = new CompoundTag();
                 mTag.putString("id", m.id());
                 mTag.putString("name", m.name());
+                // 传递 abilities 列表，让客户端能正确判断能力可用性
+                CompoundTag abilitiesTag = new CompoundTag();
+                List<String> abilityList = m.abilities();
+                for (int j = 0; j < abilityList.size(); j++) {
+                    abilitiesTag.putString("a_" + j, abilityList.get(j));
+                }
+                abilitiesTag.putInt("count", abilityList.size());
+                mTag.put("abilities", abilitiesTag);
                 registryMeta.put("m_" + i, mTag);
             }
             syncData.put("_milestone_registry", registryMeta);

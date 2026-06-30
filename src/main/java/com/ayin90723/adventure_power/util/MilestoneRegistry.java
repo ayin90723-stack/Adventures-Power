@@ -77,7 +77,9 @@ public class MilestoneRegistry {
         List<Milestone> loaded = new ArrayList<>();
         JsonArray arr = root.getAsJsonArray("milestones");
         if (arr == null || arr.size() == 0) {
-            LOGGER.warn("[MilestoneRegistry] milestones 数组为空，无里程碑可用");
+            LOGGER.error("[MilestoneRegistry] milestones 数组为空或缺失，回退到内置默认");
+            loadBuiltinDefaults();
+            return;
         }
 
         Set<String> seenIds = new HashSet<>();

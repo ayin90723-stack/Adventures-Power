@@ -238,8 +238,20 @@ public class NetworkHandler {
                             net.minecraft.nbt.CompoundTag mTag = registryMeta.getCompound("m_" + i);
                             String id = mTag.getString("id");
                             String name = mTag.getString("name");
+                            // 解析 abilities
+                            StringBuilder abilitiesJson = new StringBuilder("[");
+                            if (mTag.contains("abilities")) {
+                                net.minecraft.nbt.CompoundTag abTag = mTag.getCompound("abilities");
+                                int abCount = abTag.getInt("count");
+                                for (int j = 0; j < abCount; j++) {
+                                    if (j > 0) abilitiesJson.append(",");
+                                    abilitiesJson.append("\"").append(abTag.getString("a_" + j)).append("\"");
+                                }
+                            }
+                            abilitiesJson.append("]");
                             milestoneJsons.add("{\"id\":\"" + id + "\",\"name\":\"" + name
-                                + "\",\"abilities\":[],\"advancement\":null,\"trigger\":null}");
+                                + "\",\"abilities\":" + abilitiesJson.toString()
+                                + ",\"advancement\":null,\"trigger\":null}");
                         }
                         if (!milestoneJsons.isEmpty()) {
                             com.ayin90723.adventure_power.util.MilestoneRegistry.clientInit(milestoneJsons);
