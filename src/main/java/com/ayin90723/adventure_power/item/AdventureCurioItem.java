@@ -1,9 +1,12 @@
 package com.ayin90723.adventure_power.item;
 
+import com.ayin90723.adventure_power.ability.Ability;
+import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.milestone.Milestone;
 import com.ayin90723.adventure_power.util.MilestoneRegistry;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
@@ -91,8 +94,17 @@ public class AdventureCurioItem extends Item {
             return;
         }
         for (Milestone m : MilestoneRegistry.getAll()) {
-            tooltip.add(Component.translatable("item.adventure_power.lore.milestone." + m.id())
-                    .withStyle(ChatFormatting.GRAY));
+            MutableComponent line = Component.literal(m.name()).withStyle(ChatFormatting.GOLD);
+            line.append(Component.literal("  §8»  "));
+            List<String> ids = m.abilities();
+            for (int i = 0; i < ids.size(); i++) {
+                if (i > 0) line.append(Component.literal(" §8· "));
+                Ability a = AbilityRegistry.get(ids.get(i));
+                if (a != null) {
+                    line.append(a.name().copy().withStyle(ChatFormatting.GRAY));
+                }
+            }
+            tooltip.add(line);
         }
     }
 }
