@@ -59,7 +59,7 @@ public class UndyingSlashEffect extends MobEffect {
          return false;
       }
       CompoundTag data = entity.getPersistentData();
-      if (!data.contains(NBT_KEY)) {
+      if (data == null || !data.contains(NBT_KEY)) {
          return false;
       }
       long endTime = data.getLong(NBT_KEY);
