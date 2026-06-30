@@ -98,9 +98,11 @@
   "key.adventure_power.buff_screen": "Buff Management",
   "key.adventure_power.skill_switch": "Switch Active Skill",
   "key.adventure_power.skill_activate": "Activate Skill",
+  "key.adventure_power.milestone_progress": "View Adventure Progress",
 
   "screen.adventure_power.ability": "Adventure Abilities",
   "screen.adventure_power.buff": "Buff Management",
+  "screen.adventure_power.milestone_progress": "Adventure Progress",
   "screen.adventure_power.enabled": "Enabled",
   "screen.adventure_power.disabled": "Disabled",
 

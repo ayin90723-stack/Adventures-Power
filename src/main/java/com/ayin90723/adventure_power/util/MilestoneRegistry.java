@@ -9,14 +9,16 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.mojang.logging.LogUtils;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.server.packs.resources.ResourceManager;
-import net.minecraft.server.packs.resources.SimpleJsonResourceReloadListener;
+import net.minecraft.server.packs.resources.SimplePreparableReloadListener;
 import net.minecraft.util.profiling.ProfilerFiller;
 import net.minecraftforge.event.AddReloadListenerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import org.slf4j.Logger;
 import javax.annotation.Nullable;
+import java.io.Reader;
 import java.util.*;
 
 /**
@@ -176,14 +178,24 @@ public class MilestoneRegistry {
      */
     @SubscribeEvent
     public static void onAddReloadListener(AddReloadListenerEvent event) {
-        event.addListener(new SimpleJsonResourceReloadListener(GSON, "adventure_power/milestones") {
+        event.addListener(new SimplePreparableReloadListener<JsonElement>() {
             @Override
-            protected void apply(Map<ResourceLocation, JsonElement> map,
-                                ResourceManager resourceManager,
-                                ProfilerFiller profiler) {
+            protected JsonElement prepare(ResourceManager resourceManager, ProfilerFiller profiler) {
+                ResourceLocation loc = new ResourceLocation(AdventurePower.MODID, "adventure_power/milestones.json");
+                Optional<Resource> opt = resourceManager.getResource(loc);
+                if (opt.isPresent()) {
+                    try (Reader reader = opt.get().openAsReader()) {
+                        return GSON.fromJson(reader, JsonElement.class);
+                    } catch (Exception e) {
+                        LOGGER.error("[MilestoneRegistry] 读取 milestones.json 失败: {}", e.toString());
+                    }
+                }
+                return null;
+            }
+
+            @Override
+            protected void apply(JsonElement element, ResourceManager resourceManager, ProfilerFiller profiler) {
                 MilestoneRegistry.clear();
-                ResourceLocation key = new ResourceLocation(AdventurePower.MODID, "adventure_power/milestones");
-                JsonElement element = map.get(key);
                 if (element != null && element.isJsonObject()) {
                     MilestoneRegistry.loadFromJson(AdventurePower.MODID, element.getAsJsonObject());
                 } else {
@@ -197,14 +209,14 @@ public class MilestoneRegistry {
     /** 当数据包中无 milestones.json 时使用模组内置默认 */
     private static void loadBuiltinDefaults() {
         String json = "{ \"milestones\": ["
-            + "{\"id\":\"first_night\",\"name\":\"初次夜冕\",\"abilities\":[\"agility\",\"digging_power\",\"perpetual_blessing\"],\"advancement\":\"adventure_power:first_night\",\"trigger\":{\"type\":\"survive_night\"}},"
-            + "{\"id\":\"first_death\",\"name\":\"初尝败绩\",\"abilities\":[\"void_step\",\"rapid_recovery\"],\"advancement\":\"adventure_power:first_death\",\"trigger\":{\"type\":\"first_death\"}},"
-            + "{\"id\":\"first_trade\",\"name\":\"初次交易\",\"abilities\":[\"soul_bind\",\"knockback_resist\"],\"advancement\":\"adventure_power:first_trade\",\"trigger\":{\"type\":\"first_trade\"}},"
-            + "{\"id\":\"first_deep\",\"name\":\"初探地底\",\"abilities\":[\"damage_resist\",\"extended_reach\"],\"advancement\":\"adventure_power:first_deep\",\"trigger\":{\"type\":\"y_below\",\"y\":0}},"
+            + "{\"id\":\"first_night\",\"name\":\"初次夜冕\",\"abilities\":[\"agility\",\"digging_power\",\"perpetual_blessing\"],\"trigger\":{\"type\":\"survive_night\"}},"
+            + "{\"id\":\"first_death\",\"name\":\"初尝败绩\",\"abilities\":[\"void_step\",\"rapid_recovery\"],\"trigger\":{\"type\":\"first_death\"}},"
+            + "{\"id\":\"first_trade\",\"name\":\"初次交易\",\"abilities\":[\"soul_bind\",\"knockback_resist\"],\"trigger\":{\"type\":\"first_trade\"}},"
+            + "{\"id\":\"first_deep\",\"name\":\"初探地底\",\"abilities\":[\"damage_resist\",\"extended_reach\"],\"trigger\":{\"type\":\"y_below\",\"y\":0}},"
             + "{\"id\":\"first_enchant\",\"name\":\"初次附魔\",\"abilities\":[\"undying_gear\",\"fortune_favor\"],\"advancement\":\"minecraft:story/enchant_item\"},"
             + "{\"id\":\"nether\",\"name\":\"炽热之门\",\"abilities\":[\"env_immunity\",\"lifesteal\"],\"advancement\":\"minecraft:story/enter_the_nether\"},"
-            + "{\"id\":\"wither\",\"name\":\"凋零之陨\",\"abilities\":[\"healing_block\",\"vitality\"],\"advancement\":\"adventure_power:wither\"},"
-            + "{\"id\":\"warden\",\"name\":\"幽匿之惧\",\"abilities\":[\"resilience\",\"purified_soul\"],\"advancement\":\"adventure_power:warden\"},"
+            + "{\"id\":\"wither\",\"name\":\"凋零之陨\",\"abilities\":[\"healing_block\",\"vitality\"],\"advancement\":\"minecraft:nether/summon_wither\",\"trigger\":{\"type\":\"first_kill\",\"entity\":\"minecraft:wither\"}},"
+            + "{\"id\":\"warden\",\"name\":\"幽匿之惧\",\"abilities\":[\"resilience\",\"purified_soul\"],\"advancement\":\"minecraft:adventure/kill_a_mob\",\"trigger\":{\"type\":\"first_kill\",\"entity\":\"minecraft:warden\"}},"
             + "{\"id\":\"dragon\",\"name\":\"终末之翼\",\"abilities\":[\"soar\",\"soul_quench\",\"piercing_gaze\",\"death_defy\"],\"advancement\":\"minecraft:end/kill_dragon\"},"
             + "{\"id\":\"elytra\",\"name\":\"苍穹之证\",\"abilities\":[\"shadow_kill\",\"true_health\",\"reject_manip\",\"active_skill\"],\"advancement\":\"minecraft:end/elytra\"}"
             + "]}";

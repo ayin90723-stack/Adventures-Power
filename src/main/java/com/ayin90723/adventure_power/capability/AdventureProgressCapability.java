@@ -75,6 +75,7 @@ public class AdventureProgressCapability {
     public static final int PENDING_NONE = 0;
     public static final int PENDING_BUFF = 1;
     public static final int PENDING_ABILITY = 2;
+    public static final int PENDING_MILESTONE = 3;
     private static int pendingScreen = PENDING_NONE;
 
     /** 客户端请求同步并计划打开屏幕 */
@@ -94,6 +95,8 @@ public class AdventureProgressCapability {
                 mc.setScreen(new com.ayin90723.adventure_power.ui.BuffManagementScreen());
             } else if (type == PENDING_ABILITY) {
                 mc.setScreen(new com.ayin90723.adventure_power.ui.AbilityManagementScreen());
+            } else if (type == PENDING_MILESTONE) {
+                mc.setScreen(new com.ayin90723.adventure_power.ui.MilestoneProgressScreen());
             }
         }
     }
@@ -135,9 +138,12 @@ public class AdventureProgressCapability {
     public static boolean isAbilityAvailable(Player player, String id) {
         if (!KNOWN_ABILITIES.containsKey(id)) return false;
         if (AbilityRegistry.get(id) == null) return false;
-        return getAdventureProgress(player)
-            .map(p -> MilestoneRegistry.isAbilityAvailable(id, p.getUnlockedMilestoneCount()))
-            .orElse(false);
+        return getAdventureProgress(player).map(p -> {
+            for (Milestone m : MilestoneRegistry.getAll()) {
+                if (p.isMilestoneUnlocked(m.id()) && m.abilities().contains(id)) return true;
+            }
+            return false;
+        }).orElse(false);
     }
 
     /** Capability 附加资源 ID */
@@ -284,12 +290,20 @@ public class AdventureProgressCapability {
                 player.getPersistentData().remove(OLD_UNLOCKED_KEY);
             }
 
-            // 2. 如果 Capability 中还没有 adventurer 状态，扫描物品 NBT 尝试恢复
+            // 2. Forge 可能未反序列化 capability → 从 PERSISTENT_KEY 兜底恢复
+            if (!progress.isAdventurer() && !progress.isFullyUnlocked()) {
+                CompoundTag saved = player.getPersistentData().getCompound(PERSISTENT_KEY);
+                if (!saved.isEmpty()) {
+                    progress.deserializeNBT(saved);
+                }
+            }
+
+            // 3. 如果 Capability 中还没有 adventurer 状态，扫描物品 NBT 尝试恢复
             if (!progress.isAdventurer() && !progress.isFullyUnlocked()) {
                 recoverProgressFromItems(player, progress);
             }
 
-            // 3. 清理旧 AdventureStage NBT（可能残留在物品上）
+            // 4. 清理旧 AdventureStage NBT（可能残留在物品上）
             cleanOldStageNbt(player);
 
             syncCapabilityToPersistent(player, progress);
@@ -371,7 +385,11 @@ public class AdventureProgressCapability {
         getAdventureProgress(player).ifPresent(progress -> {
             if (progress.isAdventurer() || progress.isFullyUnlocked()) return;
             if (playerHasAdventureItem(player)) {
-                AdvancementEventHandler.grantRootAdvancement(sp);
+                progress.activateAdventurer();
+                syncCapabilityToPersistent(player, progress);
+                syncAllAdventureItemNbt(player, progress);
+                syncToClient(player);
+                AdvancementEventHandler.catchUpMissedMilestones(sp);
             }
         });
     }
@@ -460,6 +478,10 @@ public class AdventureProgressCapability {
         }
         if (anyMilestone) {
             progress.activateAdventurer();
+            // 如果所有里程碑都已恢复，也恢复 fullyUnlocked
+            if (progress.getUnlockedMilestoneCount() >= all.size()) {
+                progress.activateFullyUnlocked();
+            }
             syncAllAdventureItemNbt(player, progress);
         }
         return anyMilestone;
@@ -521,6 +543,15 @@ public class AdventureProgressCapability {
                 }
                 abilitiesTag.putInt("count", abilityList.size());
                 mTag.put("abilities", abilitiesTag);
+                // 传递 advancement 和 trigger，供客户端 UI 显示解锁条件
+                if (m.advancement() != null) mTag.putString("advancement", m.advancement().toString());
+                if (m.trigger() != null) {
+                    CompoundTag trigTag = new CompoundTag();
+                    trigTag.putString("type", m.trigger().type());
+                    if (m.trigger().y() != null) trigTag.putInt("y", m.trigger().y());
+                    if (m.trigger().entity() != null) trigTag.putString("entity", m.trigger().entity().toString());
+                    mTag.put("trigger", trigTag);
+                }
                 registryMeta.put("m_" + i, mTag);
             }
             syncData.put("_milestone_registry", registryMeta);
@@ -617,7 +648,10 @@ public class AdventureProgressCapability {
             // 不限制最后一个里程碑必须是 ELYTRA，适应任意解锁顺序
             if (progress.areAllMilestonesUnlocked() && !progress.isFullyUnlocked()) {
                 replaceBeginWithEnd(player);
-                AdvancementEventHandler.grantEndAdvancement(player);
+                progress.activateFullyUnlocked();
+                updateScoreboard(player, true);
+                syncCapabilityToPersistent(player, progress);
+                syncToClient(player);
             }
         });
     }
@@ -829,13 +863,7 @@ public class AdventureProgressCapability {
                 player.onUpdateAbilities();
             }
 
-            if (player instanceof ServerPlayer sp) {
-                AdvancementEventHandler.grantRootAdvancement(sp);
-                for (Milestone m : MilestoneRegistry.getAll()) {
-                    AdvancementEventHandler.grantMilestoneAdvancement(sp, m.id());
-                }
-                AdvancementEventHandler.grantEndAdvancement(sp);
-            }
+            // 所有里程碑已在上面解锁，无需再授予成就
         }
 
         // Buff 延长（每 3 秒）

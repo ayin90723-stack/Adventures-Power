@@ -14,6 +14,7 @@ public class ClientModEvents {
    public static final KeyMapping ABILITY_MANAGEMENT = new KeyMapping("key.adventure_power.ability_screen", GLFW.GLFW_KEY_P, "key.categories.adventure_power");
    public static final KeyMapping SKILL_SWITCH = new KeyMapping("key.adventure_power.skill_switch", GLFW.GLFW_KEY_Y, "key.categories.adventure_power");
    public static final KeyMapping SKILL_ACTIVATE = new KeyMapping("key.adventure_power.skill_activate", GLFW.GLFW_KEY_G, "key.categories.adventure_power");
+   public static final KeyMapping MILESTONE_PROGRESS = new KeyMapping("key.adventure_power.milestone_progress", GLFW.GLFW_KEY_M, "key.categories.adventure_power");
 
    @SubscribeEvent
    public static void registerKeys(RegisterKeyMappingsEvent event) {
@@ -21,5 +22,6 @@ public class ClientModEvents {
       event.register(ABILITY_MANAGEMENT);
       event.register(SKILL_SWITCH);
       event.register(SKILL_ACTIVATE);
+      event.register(MILESTONE_PROGRESS);
    }
 }

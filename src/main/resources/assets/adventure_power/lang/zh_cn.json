@@ -98,9 +98,11 @@
   "key.adventure_power.buff_screen": "Buff 管理",
   "key.adventure_power.skill_switch": "切换主动技能",
   "key.adventure_power.skill_activate": "释放主动技能",
+  "key.adventure_power.milestone_progress": "查看冒险进度",
 
   "screen.adventure_power.ability": "冒险之力",
   "screen.adventure_power.buff": "Buff 管理",
+  "screen.adventure_power.milestone_progress": "冒险进度",
   "screen.adventure_power.enabled": "启用",
   "screen.adventure_power.disabled": "禁用",
 

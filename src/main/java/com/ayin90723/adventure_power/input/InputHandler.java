@@ -5,6 +5,7 @@ import com.ayin90723.adventure_power.network.NetworkHandler;
 import com.ayin90723.adventure_power.ui.AbilityManagementScreen;
 import com.ayin90723.adventure_power.ui.ActiveSkillHudOverlay;
 import com.ayin90723.adventure_power.ui.BuffManagementScreen;
+import com.ayin90723.adventure_power.ui.MilestoneProgressScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.api.distmarker.Dist;
@@ -21,6 +22,8 @@ public class InputHandler {
    private static boolean lastSkillSwitchState = false;
    private static boolean lastSkillActivateState = false;
    private static Player lastActiveSkillPlayer = null;
+   private static boolean lastMilestoneProgressState = false;
+   private static Player lastMilestonePlayer = null;
 
    @SubscribeEvent
    public static void onKeyInput(Key event) {
@@ -64,6 +67,25 @@ public class InputHandler {
                   }
                }
             }
+            // M 键：冒险进度界面
+            if (mc.player != lastMilestonePlayer) {
+                lastMilestonePlayer = mc.player;
+                lastMilestoneProgressState = false;
+            }
+            boolean mpState = ClientModEvents.MILESTONE_PROGRESS.isDown();
+            if (mpState != lastMilestoneProgressState) {
+                lastMilestoneProgressState = mpState;
+                if (mpState) {
+                    if (AdventureProgressCapability.isAdventurer(mc.player)
+                        || AdventureProgressCapability.isFullyUnlocked(mc.player)) {
+                        mc.setScreen(new MilestoneProgressScreen());
+                    } else {
+                        AdventureProgressCapability
+                            .requestSyncAndOpenScreen(AdventureProgressCapability.PENDING_MILESTONE);
+                    }
+                }
+            }
+
             // 主动技能 — 门禁检查
             if (AdventureProgressCapability.isFullyUnlocked(mc.player)) {
                 // 玩家引用变化 → 重置追踪状态

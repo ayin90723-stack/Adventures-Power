@@ -249,9 +249,21 @@ public class NetworkHandler {
                                 }
                             }
                             abilitiesJson.append("]");
+                            // advancement 和 trigger
+                            String advStr = mTag.contains("advancement")
+                                ? "\"" + mTag.getString("advancement") + "\"" : "null";
+                            String trigStr = "null";
+                            if (mTag.contains("trigger")) {
+                                net.minecraft.nbt.CompoundTag trigTag = mTag.getCompound("trigger");
+                                StringBuilder ts = new StringBuilder("{\"type\":\"" + trigTag.getString("type") + "\"");
+                                if (trigTag.contains("y")) ts.append(",\"y\":").append(trigTag.getInt("y"));
+                                if (trigTag.contains("entity")) ts.append(",\"entity\":\"").append(trigTag.getString("entity")).append("\"");
+                                ts.append("}");
+                                trigStr = ts.toString();
+                            }
                             milestoneJsons.add("{\"id\":\"" + id + "\",\"name\":\"" + name
                                 + "\",\"abilities\":" + abilitiesJson.toString()
-                                + ",\"advancement\":null,\"trigger\":null}");
+                                + ",\"advancement\":" + advStr + ",\"trigger\":" + trigStr + "}");
                         }
                         if (!milestoneJsons.isEmpty()) {
                             com.ayin90723.adventure_power.util.MilestoneRegistry.clientInit(milestoneJsons);

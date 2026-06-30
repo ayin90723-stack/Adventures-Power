@@ -4,13 +4,14 @@
 
 从 v1.1.0 起，"冒险的力量"的里程碑系统支持通过 **Minecraft 数据包** 完全自定义。
 
+v1.1.1 起**彻底移除了 Minecraft 成就系统**，里程碑进度通过饰品 tooltip 和 M 键界面查看。
+
 你可以：
 - 增减里程碑数量（不限于 10 个）
 - 重新分配能力到不同里程碑（把飞行放到第一个！）
-- 用其他模组的成就作为里程碑触发条件
-- 添加自定义进度的里程碑
-
-不需要写任何 Java 代码，只需要一个数据包和一个 JSON 文件。
+- 用原版成就或 5 种自定义触发器解锁里程碑
+- 能力在对应里程碑解锁后**立即可用**，不用按顺序
+- 只需一个 JSON 文件，无需任何 Java 代码
 
 ---
 
@@ -18,16 +19,18 @@
 
 ### 1. 创建数据包目录
 
-在你的世界文件夹或模组包中创建：
+在你的世界文件夹中创建：
 
 ```
 <minecraft实例>/saves/<世界名>/datapacks/<你的包名>/
 ├── pack.mcmeta
 └── data/
-    └── <命名空间>/
+    └── adventure_power/
         └── adventure_power/
             └── milestones.json
 ```
+
+> **命名空间必须是 `adventure_power`**，文件位于 `adventure_power/milestones.json`。模组通过 `getResource()` 读取此固定路径，数据包中的同名文件优先级更高，**覆盖**内置默认。
 
 ### 2. pack.mcmeta
 
@@ -40,7 +43,7 @@
 }
 ```
 
-> `pack_format` 对应 Minecraft 版本：1.20.1 用 15。其他版本请查阅 Minecraft Wiki。
+> `pack_format`: 1.20.1 用 15。
 
 ### 3. milestones.json
 
@@ -53,13 +56,13 @@
 }
 ```
 
-**命名空间** 可以是任意合法字符串（推荐用你的包名）。模组只加载你的数据包中的文件，**覆盖**内置默认的 10 个里程碑。
+**只需这一个文件。** 不需要任何 advancement JSON。
 
 ---
 
 ## JSON 格式参考
 
-### 完整字段
+### 完整字段示例
 
 ```json
 {
@@ -75,7 +78,7 @@
       "id": "my_second_milestone",
       "name": "夜幕降临",
       "abilities": ["void_step"],
-      "advancement": "adventure_power:my_night",
+      "advancement": null,
       "trigger": { "type": "survive_night" }
     }
   ]
@@ -86,13 +89,13 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `id` | string | ✅ | 里程碑唯一 ID。只能用小写字母、数字、下划线。**同时作为成就的 criterion key** |
-| `name` | string | ✅ | 显示在饰品 tooltip 上的名称 |
-| `abilities` | string[] | ✅ | 该里程碑解锁后变为可用的能力 ID 列表（见下方能力表） |
-| `advancement` | ResourceLocation | ❌ | 关联的成就。玩家获得该成就即视为里程碑达成。支持任意模组的成就 |
-| `trigger` | object\|null | ❌ | 仅当 advancement 使用 `impossible` 触发器时需要。`null` 表示该成就有原生触发器 |
+| `id` | string | ✅ | 里程碑唯一 ID。只能用小写字母、数字、下划线 |
+| `name` | string | ✅ | 显示在饰品 tooltip 和 M 键进度界面的名称 |
+| `abilities` | string[] | ✅ | 该里程碑解锁后变为可用的能力 ID 列表 |
+| `advancement` | ResourceLocation | ❌ | 关联的原版成就。玩家获得该成就即触发里程碑。填写原版成就 ID（如 `minecraft:story/mine_stone`） |
+| `trigger` | object\|null | ❌ | 自定义触发器。`null` 表示不使用自定义触发 |
 
-> **重要**：`advancement` 和 `trigger` **至少填一个**。两者都不填的里程碑永远无法达成。
+> **至少填一个**。两个都填则两条路径都可触发，先到先得。
 
 ---
 
@@ -141,16 +144,6 @@
 ```
 
 **触发条件**：游戏时间超过 24000 tick 且当前为白天。不需要额外参数。
-
-**配套 advancement JSON**：
-```json
-{
-  "display": { ... },
-  "criteria": {
-    "my_night": { "trigger": "minecraft:impossible" }
-  }
-}
-```
 
 ---
 
@@ -411,39 +404,6 @@
 
 ---
 
-## 配套 advancement JSON
-
-对于 `trigger` 不为 `null` 的里程碑，需要创建对应的 advancement JSON 文件。
-
-路径：`data/<命名空间>/advancements/<milestone_id>.json`
-
-**模板**：
-```json
-{
-  "display": {
-    "icon": { "item": "minecraft:clock" },
-    "title": "第一步",
-    "description": "活过第一个夜晚",
-    "frame": "task",
-    "show_toast": true,
-    "announce_to_chat": true,
-    "background": "minecraft:textures/block/stone.png"
-  },
-  "criteria": {
-    "my_first_milestone": {
-      "trigger": "minecraft:impossible"
-    }
-  }
-}
-```
-
-关键点：
-- `criteria` 中的 key 必须与 `milestones.json` 中的 `id` **完全一致**
-- `trigger` 必须设为 `"minecraft:impossible"`
-- `display` 字段可按需自定义
-
----
-
 ## 常见问题
 
 ### Q: 能力数值没有随里程碑增长？
@@ -465,6 +425,7 @@
 - 确认该模组已安装且成就确实存在
 - 首次获得成就时，里程碑才会解锁。如果之前已完成该成就，需要佩戴冒险的开始后，模组会自动补回
 - 确认 `advancement` 指向的是成就 ID（不是成就标签 `#tag`，标签不支持）
+- **不再需要**创建对应的 advancement JSON 文件——模组直接监听原版成就事件
 
 ### Q: 修改后在游戏中没看到变化？
 
@@ -494,8 +455,9 @@
 
 1. **先小改**：从默认 JSON 出发，每次只改一个里程碑，用 `/reload` 验证
 2. **检查日志**：模组在加载里程碑时会输出日志，`[MilestoneRegistry]` 前缀的信息包含加载了多少里程碑、是否有错误
-3. **用命令查成就**：`/advancement grant @s only adventure_power:<milestone_id>` 可以手动触发一个里程碑来测试
-4. **备份存档**：改动数据包前备份世界，以防意外损坏进度
+3. **按 M 键**：打开冒险进度界面，查看里程碑列表和解锁条件是否正确
+4. **用命令触发**：`/advancement grant @s only minecraft:story/mine_stone` 可手动触发原版成就来测试
+5. **备份存档**：改动数据包前备份世界，以防意外损坏进度
 
 ---
 

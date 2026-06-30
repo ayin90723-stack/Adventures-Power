@@ -1,6 +1,7 @@
 package com.ayin90723.adventure_power.capability;
 
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
+import com.ayin90723.adventure_power.milestone.Milestone;
 import com.ayin90723.adventure_power.util.MilestoneRegistry;
 import net.minecraft.nbt.CompoundTag;
 import java.util.Collections;
@@ -105,7 +106,10 @@ public class AdventureProgress implements IAdventureProgress {
     public boolean isAbilityEnabled(String id) {
         if (disabledAbilities.contains(id)) return false;
         if (AbilityRegistry.get(id) == null) return false;
-        return MilestoneRegistry.isAbilityAvailable(id, getUnlockedMilestoneCount());
+        for (Milestone m : MilestoneRegistry.getAll()) {
+            if (isMilestoneUnlocked(m.id()) && m.abilities().contains(id)) return true;
+        }
+        return false;
     }
 
     @Override
@@ -235,6 +239,7 @@ public class AdventureProgress implements IAdventureProgress {
         tag.putLong(TAG_SANCTUARY_COOLDOWN_END, sanctuaryCooldownEnd);
         tag.putLong(TAG_SANCTUARY_INVUL_END, sanctuaryInvulEnd);
         tag.putLong(TAG_ACTIVE_SKILL_GCD_END, activeSkillGcdEnd);
+        tag.putInt(TAG_ACTIVE_SKILL_INDEX, activeSkillIndex);
         tag.putFloat(TAG_BACKUP_HEALTH, backupHealth);
 
         return tag;
@@ -269,6 +274,7 @@ public class AdventureProgress implements IAdventureProgress {
         this.sanctuaryCooldownEnd = nbt.getLong(TAG_SANCTUARY_COOLDOWN_END);
         this.sanctuaryInvulEnd = nbt.getLong(TAG_SANCTUARY_INVUL_END);
         this.activeSkillGcdEnd = nbt.getLong(TAG_ACTIVE_SKILL_GCD_END);
+        this.activeSkillIndex = nbt.getInt(TAG_ACTIVE_SKILL_INDEX);
         this.backupHealth = nbt.getFloat(TAG_BACKUP_HEALTH);
     }
 }

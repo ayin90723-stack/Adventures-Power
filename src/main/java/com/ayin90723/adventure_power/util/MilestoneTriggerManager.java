@@ -2,7 +2,6 @@ package com.ayin90723.adventure_power.util;
 
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
-import com.ayin90723.adventure_power.handler.AdvancementEventHandler;
 import com.ayin90723.adventure_power.milestone.Milestone;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EntityType;
@@ -71,7 +70,7 @@ public class MilestoneTriggerManager {
                     .map(p -> p.isMilestoneUnlocked(m.id())).orElse(true)) continue;
                 long dayTime = player.level().getDayTime();
                 if (dayTime > DAY_CYCLE_TICKS && player.level().isDay()) {
-                    AdvancementEventHandler.grantMilestoneAdvancement(sp, m.id());
+                    AdventureProgressCapability.grantMilestone(sp, m.id());
                     SURVIVE_NIGHT_TRIGGERED.add(uuid);
                 }
             }
@@ -94,7 +93,7 @@ public class MilestoneTriggerManager {
             if (m.trigger() != null && "first_death".equals(m.trigger().type())) {
                 if (AdventureProgressCapability.getAdventureProgress(player)
                     .map(p -> p.isMilestoneUnlocked(m.id())).orElse(true)) continue;
-                AdvancementEventHandler.grantMilestoneAdvancement(player, m.id());
+                AdventureProgressCapability.grantMilestone(player, m.id());
                 FIRST_DEATH_TRIGGERED.add(uuid);
             }
         }
@@ -116,7 +115,7 @@ public class MilestoneTriggerManager {
             if (m.trigger() != null && "first_trade".equals(m.trigger().type())) {
                 if (AdventureProgressCapability.getAdventureProgress(player)
                     .map(p -> p.isMilestoneUnlocked(m.id())).orElse(true)) continue;
-                AdvancementEventHandler.grantMilestoneAdvancement(player, m.id());
+                AdventureProgressCapability.grantMilestone(player, m.id());
                 FIRST_TRADE_TRIGGERED.add(uuid);
             }
         }
@@ -142,7 +141,7 @@ public class MilestoneTriggerManager {
                     .map(p -> p.isMilestoneUnlocked(m.id())).orElse(true)) continue;
                 int threshold = m.trigger().y() != null ? m.trigger().y() : 0;
                 if (player.getY() < threshold) {
-                    AdvancementEventHandler.grantMilestoneAdvancement(sp, m.id());
+                    AdventureProgressCapability.grantMilestone(sp, m.id());
                     triggered.add(m.id());
                 }
             }
@@ -170,7 +169,7 @@ public class MilestoneTriggerManager {
 
                 EntityType<?> requiredType = ForgeRegistries.ENTITY_TYPES.getValue(m.trigger().entity());
                 if (requiredType != null && event.getEntity().getType() == requiredType) {
-                    AdvancementEventHandler.grantMilestoneAdvancement(player, m.id());
+                    AdventureProgressCapability.grantMilestone(player, m.id());
                     triggered.add(m.id());
                 }
             }

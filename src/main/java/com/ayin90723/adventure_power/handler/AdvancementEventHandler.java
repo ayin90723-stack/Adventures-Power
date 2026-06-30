@@ -14,16 +14,10 @@ import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber.Bus;
 
 /**
- * 成就事件处理器 —— 连接原版成就系统和我们的里程碑系统。
+ * 成就事件处理器 —— 监听原版成就，匹配里程碑后直接解锁。
  * <p>
- * 三个方向：
- * <ol>
- *   <li><b>已获得的成就 → 匹配里程碑</b>：当冒险者玩家完成某个与里程碑关联的成就时，自动授予里程碑</li>
- *   <li><b>我们的成就 → Capability 同步</b>：当我们的成就被授予时，更新 Capability 里程碑数据</li>
- *   <li><b>追回遗漏里程碑</b>：玩家成为冒险者时，扫描已完成的成就不回 Capability</li>
- * </ol>
- * <p>
- * 里程碑与成就的关联由数据包 milestones.json 的 advancement 字段定义，不再硬编码。
+ * 不再创建任何模组成就，不依赖 achievement JSON 文件。
+ * 玩家进度通过饰品 tooltip 和右键查看。
  */
 @EventBusSubscriber(modid = AdventurePower.MODID, bus = Bus.FORGE)
 public class AdvancementEventHandler {
@@ -34,61 +28,16 @@ public class AdvancementEventHandler {
 
         ResourceLocation earnedId = event.getAdvancement().getId();
 
-        // ===== 方向一：已获得的成就 → 检查是否匹配某个里程碑 =====
+        // 原版成就 → 匹配里程碑 → 直接解锁
         Milestone linked = MilestoneRegistry.getByAdvancement(earnedId);
-        if (linked != null) {
-            // 只有冒险者才授予——非冒险者由 catchUpMissedMilestones 在激活时补回
-            if (AdventureProgressCapability.isAdventurer(player)) {
-                grantMilestoneAdvancement(player, linked.id());
-            }
-            return;
-        }
-
-        // ===== 方向二：我们的成就 → 更新 Capability =====
-        if (AdventurePower.MODID.equals(earnedId.getNamespace())) {
-            handleOurAdvancement(player, earnedId.getPath());
-        }
-    }
-
-    /** 处理我们自己的成就被授予 */
-    private static void handleOurAdvancement(ServerPlayer player, String path) {
-        switch (path) {
-            case "root" -> {
-                AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-                    if (!progress.isAdventurer()) {
-                        progress.activateAdventurer();
-                        AdventureProgressCapability.syncCapabilityToPersistent(player, progress);
-                        AdventureProgressCapability.syncAllAdventureItemNbt(player, progress);
-                        AdventureProgressCapability.syncToClient(player);
-                    }
-                });
-                // 激活冒险者后扫描成就补回遗漏的里程碑
-                catchUpMissedMilestones(player);
-            }
-            case "adventure_end" -> {
-                AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-                    if (!progress.isFullyUnlocked()) {
-                        progress.activateFullyUnlocked();
-                        AdventureProgressCapability.updateScoreboard(player, true);
-                        AdventureProgressCapability.syncCapabilityToPersistent(player, progress);
-                        AdventureProgressCapability.syncToClient(player);
-                    }
-                });
-            }
-            default -> {
-                // 常规里程碑成就 → 同步 Capability
-                if (MilestoneRegistry.contains(path)) {
-                    AdventureProgressCapability.grantMilestone(player, path);
-                }
-            }
+        if (linked != null && AdventureProgressCapability.isAdventurer(player)) {
+            AdventureProgressCapability.grantMilestone(player, linked.id());
         }
     }
 
     /**
-     * 补回遗漏的里程碑——玩家成为冒险者时，扫描所有 MilestoneRegistry 中定义的
-     * 成就，将 Capability 中缺失的里程碑同步回来。
-     * <p>
-     * 静默同步（不播放音效/粒子），避免在 catch-up 时刷屏。
+     * 补回遗漏的里程碑——玩家成为冒险者时，扫描所有已完成的原版成就，
+     * 将 Capability 中缺失的里程碑同步回来。静默同步，不播放音效。
      */
     public static void catchUpMissedMilestones(ServerPlayer player) {
         var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
@@ -96,16 +45,28 @@ public class AdvancementEventHandler {
         var progress = progressOpt.get();
 
         boolean anyChanged = false;
-
-        // 扫描所有注册的里程碑对应的成就
         for (Milestone m : MilestoneRegistry.getAll()) {
             if (progress.isMilestoneUnlocked(m.id())) continue;
-            ResourceLocation advId = m.advancement();
-            if (advId == null) continue;
-            Advancement adv = player.server.getAdvancements().getAdvancement(advId);
-            if (adv != null && isAdvancementDone(player, adv)) {
-                progress.unlockMilestone(m.id());
-                anyChanged = true;
+            // 先检查 advancement
+            if (m.advancement() != null) {
+                Advancement adv = player.server.getAdvancements().getAdvancement(m.advancement());
+                if (adv != null && isAdvancementDone(player, adv)) {
+                    progress.unlockMilestone(m.id());
+                    anyChanged = true;
+                    continue;
+                }
+            }
+            // 再检查纯 trigger 是否已可触发（survive_night / y_below）
+            if (m.trigger() != null) {
+                boolean met = switch (m.trigger().type()) {
+                    case "survive_night" -> player.level().getDayTime() > 24000 && player.level().isDay();
+                    case "y_below" -> player.getY() < (m.trigger().y() != null ? m.trigger().y() : 0);
+                    default -> false;
+                };
+                if (met) {
+                    progress.unlockMilestone(m.id());
+                    anyChanged = true;
+                }
             }
         }
 
@@ -116,39 +77,8 @@ public class AdvancementEventHandler {
         }
     }
 
-    /** 弹出成就的 AdvancementProgress 并检查 isDone */
     private static boolean isAdvancementDone(ServerPlayer player, Advancement adv) {
         AdvancementProgress advProgress = player.getAdvancements().getOrStartProgress(adv);
         return advProgress.isDone();
-    }
-
-    /** 授予我们模组的里程碑成就 */
-    public static void grantMilestoneAdvancement(ServerPlayer player, String milestoneId) {
-        ResourceLocation advId = new ResourceLocation(AdventurePower.MODID, milestoneId);
-        Advancement advancement = player.server.getAdvancements().getAdvancement(advId);
-        if (advancement == null) return;
-
-        // 已获得则跳过
-        if (player.getAdvancements().getOrStartProgress(advancement).isDone()) return;
-
-        player.getAdvancements().award(advancement, milestoneId);
-    }
-
-    /** 授予根成就 */
-    public static void grantRootAdvancement(ServerPlayer player) {
-        ResourceLocation advId = new ResourceLocation(AdventurePower.MODID, "root");
-        Advancement advancement = player.server.getAdvancements().getAdvancement(advId);
-        if (advancement == null) return;
-        if (player.getAdvancements().getOrStartProgress(advancement).isDone()) return;
-        player.getAdvancements().award(advancement, "adventurer");
-    }
-
-    /** 授予终极成就 */
-    public static void grantEndAdvancement(ServerPlayer player) {
-        ResourceLocation advId = new ResourceLocation(AdventurePower.MODID, "adventure_end");
-        Advancement advancement = player.server.getAdvancements().getAdvancement(advId);
-        if (advancement == null) return;
-        if (player.getAdvancements().getOrStartProgress(advancement).isDone()) return;
-        player.getAdvancements().award(advancement, "end");
     }
 }

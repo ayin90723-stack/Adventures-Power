@@ -1,0 +1,46 @@
+{
+  "milestones": [
+    {
+      "id": "survive_night",
+      "name": "初夜幸存",
+      "abilities": ["agility", "digging_power", "perpetual_blessing"],
+      "trigger": { "type": "survive_night" }
+    },
+    {
+      "id": "first_death_test",
+      "name": "初次陨落",
+      "abilities": ["void_step", "rapid_recovery"],
+      "trigger": { "type": "first_death" }
+    },
+    {
+      "id": "first_trade_test",
+      "name": "初次交易",
+      "abilities": ["soul_bind", "knockback_resist"],
+      "trigger": { "type": "first_trade" }
+    },
+    {
+      "id": "deep_dark",
+      "name": "深入地底",
+      "abilities": ["damage_resist", "extended_reach"],
+      "trigger": { "type": "y_below", "y": 0 }
+    },
+    {
+      "id": "first_enchant_test",
+      "name": "魔力初现",
+      "abilities": ["undying_gear", "fortune_favor"],
+      "advancement": "minecraft:story/enchant_item"
+    },
+    {
+      "id": "enter_nether",
+      "name": "炽热之门",
+      "abilities": ["env_immunity", "lifesteal", "vitality", "resilience", "purified_soul"],
+      "advancement": "minecraft:story/enter_the_nether"
+    },
+    {
+      "id": "kill_dragon",
+      "name": "屠龙者",
+      "abilities": ["healing_block", "soar", "soul_quench", "piercing_gaze", "death_defy", "shadow_kill", "true_health", "reject_manip", "active_skill"],
+      "advancement": "minecraft:end/kill_dragon"
+    }
+  ]
+}
