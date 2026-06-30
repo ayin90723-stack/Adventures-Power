@@ -34,7 +34,7 @@
 
 - 🎯 **10 Milestones** — From surviving your first night to obtaining the Elytra
 - ⚡ **25 Innate Abilities** — Dodge, flight, lifesteal, death defiance, true damage… all toggleable
-- 🌟 **The Awakening (Stage 11)** — 10 mechanical transformations + 15 numerical amplifications
+- 🌟 **The Awakening (Stage 11)** — 14 mechanical transformations + 11 numerical amplifications
 - 🔗 **Vanilla Advancement Integration** — Completing vanilla advancements unlocks milestones and vice versa
 - 🎛️ **Full Player Control** — Open the ability panel (K key) and enable/disable any ability at will
 - ⚙️ **Highly Configurable** — Every multiplier, probability, and duration is adjustable via TOML config
@@ -86,7 +86,7 @@ Activate "Adventurer's Awakening" — all 25 abilities + awakening buffs
 | **Soul Quench** | Bonus true damage based on target's HP (bypasses armor/iframes) | Scaling | **Double damage below 20% HP** |
 | **Shadow Kill** | Project shadow HP onto target; execute when depleted | 4 flat + 4% HP | **8-block AOE on execute** |
 | **Healing Block** | Attacks prevent target healing & revival | 6s | **8s** |
-| **Piercing Gaze** | Attacks bypass all invulnerability (including boss custom iframes) | Full pierce | **+30% damage vs invulnerable targets** |
+| **Piercing Gaze** | Attacks bypass all invulnerability (including boss custom iframes) | Full pierce | **+30% damage vs invulnerable targets** 🆕 |
 | **Lifesteal** | Heal for a percentage of damage dealt | 13% | **Excess healing → absorption shield** |
 | **Traveler's Power** | Active skills: Judgment (AOE) & Sanctuary (invulnerability) | Judgment 6-block / Sanctuary immobile | **9-block Judgment / movable Sanctuary** |
 
@@ -97,7 +97,7 @@ Activate "Adventurer's Awakening" — all 25 abilities + awakening buffs
 | **Damage Resist** | Reduce all incoming damage | 40% reduction | **52%** |
 | **Resilience** | Gain stacking damage reduction per hit taken (5%/stack) | 12 stacks | **18 stacks** |
 | **Unshakable** | Reduce knockback taken | 79% resist | **100% (full immunity)** |
-| **Env. Immunity** | Immune to fire, lava, cactus, etc. | Tag-matched block | **All sourceless damage** |
+| **Env. Immunity** | Immune to fire, lava, cactus, etc. | Tag-matched block | **All sourceless damage** 🆕 |
 | **Purified Soul** | Immune to all negative potion effects | Continuous cleanse | **Weakness II aura (16 blocks)** |
 | **Death Defy** | Survive a fatal blow on cooldown; full heal + invuln | 60s invuln / 5min CD | **Free Judgment on proc** |
 | **Iron Constitution** | Increase max health | +12 (+6❤) | **+16 (+8❤)** |
@@ -125,7 +125,7 @@ Activate "Adventurer's Awakening" — all 25 abilities + awakening buffs
 | **Soul Bind** | Preserve all buffs and XP on death | Keep buffs + XP | **XP never drops** 🆕 |
 | **Undying Gear** | Equipment never loses durability | No durability loss | **+1 armor per piece / +15% weapon damage** 🆕 |
 | **Rapid Recovery** | Auto-regenerate health after leaving combat | Regen V | **Regen VII** |
-| **True Health** | Backup & auto-repair tampered health values | Backup & repair | **Repair speed doubled** |
+| **True Health** | Backup & auto-repair tampered health values | Backup & repair | **Repair speed doubled** 🆕 |
 | **Reject Manipulation** | Block all illegal health modifications | Intercept | **Reflect 30% blocked damage** 🆕 |
 
 > 🆕 = Mechanical transformation upon Awakening (not just numerical)
@@ -136,7 +136,7 @@ Activate "Adventurer's Awakening" — all 25 abilities + awakening buffs
 
 Automatically activates when all 10 milestones are complete and "Adventure's End" is equipped.
 
-### 10 Mechanical Transformations
+### 14 Mechanical Transformations
 
 | Ability | Transformation |
 |---------|---------------|
@@ -150,10 +150,14 @@ Automatically activates when all 10 milestones are complete and "Adventure's End
 | Lifesteal | Excess healing → **absorption shield** (max 20% HP) |
 | Purified Soul | Hostile mobs within 16 blocks gain **Weakness II** |
 | Traveler's Power | Judgment range ×1.5 (9 blocks); Sanctuary allows **slow movement** |
+| Piercing Gaze | **+30% damage** vs invulnerable-frame targets |
+| Env. Immunity | Tag-matched block → **all sourceless damage** |
+| Reject Manipulation | **Reflect 30%** of blocked damage back to the attacker |
+| True Health | Repair speed **doubled** (epsilon ×2) |
 
-### 15 Numerical Amplifications
+### 11 Numerical Amplifications
 
-All numerical abilities gain **×1.3 multiplier** (configurable), including Agility, Damage Resist, Unshakable, Earthly Power, Unseen Hand, Healing Block, Iron Constitution, Resilience, Fortune's Favor, Rapid Recovery, Perpetual Blessing, and more.
+All numerical abilities gain **×1.3 multiplier** (configurable), including Agility, Damage Resist, Unshakable, Earthly Power, Unseen Hand, Healing Block, Iron Constitution, Resilience, Fortune's Favor, Rapid Recovery, Perpetual Blessing.
 
 ---
 
@@ -187,7 +191,7 @@ All keybindings are customizable in the vanilla Controls menu.
 
 1. Install Minecraft Forge for 1.20.1
 2. Download and install [Curios API](https://www.curseforge.com/minecraft/mc-mods/curios)
-3. Place `adventure_power-1.0.0.jar` into your `mods` folder
+3. Place `adventure_power-1.1.1.jar` into your `mods` folder
 4. Launch the game — you'll receive "Adventure's Beginning" automatically on first login
 
 ## Building from Source
@@ -196,7 +200,7 @@ All keybindings are customizable in the vanilla Controls menu.
 git clone https://github.com/ayin90723-stack/Adventures-Power.git
 cd Adventures-Power
 ./gradlew build -x test
-# Output: build/libs/adventure_power-1.0.0.jar
+# Output: build/libs/adventure_power-1.1.1.jar
 ```
 
 **Requirements**: JDK 17, Curios API (place in `libs/` or configure via CurseMaven).
@@ -236,6 +240,6 @@ This project is licensed under the **MIT License** — see [LICENSE](LICENSE) fo
 > — Adventure's End
 
 **Author**: [ayin90723-stack](https://github.com/ayin90723-stack)  
-**Version**: v1.0.0  
+**Version**: v1.1.1  
 **Game Version**: Minecraft 1.20.1  
 **License**: MIT
