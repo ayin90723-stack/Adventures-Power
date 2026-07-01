@@ -22,6 +22,7 @@ public class AdventureProgress implements IAdventureProgress {
     private static final String TAG_DEATH_DEFY_COOLDOWN_END = "deathDefyCooldownEnd";
     private static final String TAG_RESILIENCE_STACKS = "resilienceStacks";
     private static final String TAG_LAST_HURT_TIME = "lastHurtTime";
+    private static final String TAG_SOAR_GRANTED_FLIGHT = "soarGrantedFlight";
     private static final String TAG_ACTIVE_SKILL_INDEX = "activeSkillIndex";
     private static final String TAG_JUDGMENT_COOLDOWN_END = "judgmentCooldownEnd";
     private static final String TAG_SANCTUARY_COOLDOWN_END = "sanctuaryCooldownEnd";
@@ -39,6 +40,7 @@ public class AdventureProgress implements IAdventureProgress {
     private int resilienceStacks;
     private long lastHurtTime;
     private int activeSkillIndex;
+    private boolean soarGrantedFlight;
     private long judgmentCooldownEnd;
     private long sanctuaryCooldownEnd;
     private long sanctuaryInvulEnd;
@@ -179,6 +181,14 @@ public class AdventureProgress implements IAdventureProgress {
         this.backupHealth = health;
     }
 
+    // ===== 翱翔飞行追踪 =====
+
+    @Override
+    public boolean isSoarGrantedFlight() { return soarGrantedFlight; }
+
+    @Override
+    public void setSoarGrantedFlight(boolean granted) { this.soarGrantedFlight = granted; }
+
     // ===== 主动技能 =====
 
     @Override
@@ -240,6 +250,7 @@ public class AdventureProgress implements IAdventureProgress {
         tag.putLong(TAG_SANCTUARY_INVUL_END, sanctuaryInvulEnd);
         tag.putLong(TAG_ACTIVE_SKILL_GCD_END, activeSkillGcdEnd);
         tag.putInt(TAG_ACTIVE_SKILL_INDEX, activeSkillIndex);
+        tag.putBoolean(TAG_SOAR_GRANTED_FLIGHT, soarGrantedFlight);
         tag.putFloat(TAG_BACKUP_HEALTH, backupHealth);
 
         return tag;
@@ -275,6 +286,7 @@ public class AdventureProgress implements IAdventureProgress {
         this.sanctuaryInvulEnd = nbt.getLong(TAG_SANCTUARY_INVUL_END);
         this.activeSkillGcdEnd = nbt.getLong(TAG_ACTIVE_SKILL_GCD_END);
         this.activeSkillIndex = nbt.getInt(TAG_ACTIVE_SKILL_INDEX);
+        this.soarGrantedFlight = nbt.getBoolean(TAG_SOAR_GRANTED_FLIGHT);
         this.backupHealth = nbt.getFloat(TAG_BACKUP_HEALTH);
     }
 }

@@ -52,6 +52,11 @@ public interface IAdventureProgress {
     long getLastHurtTime();
     void setLastHurtTime(long time);
 
+    // ===== 翱翔飞行追踪 =====
+
+    boolean isSoarGrantedFlight();
+    void setSoarGrantedFlight(boolean granted);
+
     // ===== 主动技能 =====
 
     int getActiveSkillIndex();

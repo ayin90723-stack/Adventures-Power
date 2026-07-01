@@ -170,6 +170,7 @@ public class PlayerStateHandler {
         if (progress.isAbilityEnabled("soar") && !player.getAbilities().mayfly
             && !player.getAbilities().instabuild && !player.isSpectator()) {
             player.getAbilities().mayfly = true;
+            progress.setSoarGrantedFlight(true);
             player.onUpdateAbilities();
         }
     }
@@ -196,6 +197,7 @@ public class PlayerStateHandler {
                 boolean changed = false;
                 if (!player.getAbilities().mayfly) {
                     player.getAbilities().mayfly = true;
+                    progress.setSoarGrantedFlight(true);
                     changed = true;
                 }
                 if (restoreFlying && !player.getAbilities().flying) {
@@ -343,6 +345,8 @@ public class PlayerStateHandler {
                 // 不自动开启 flying，让玩家自己双击空格
                 player.onUpdateAbilities();
             }
+            // 标记飞行由翱翔授予，用于关闭时精准回收
+            progress.setSoarGrantedFlight(true);
             // 觉醒：飞行速度 +50%（只在值不同时写入，不在 tick 中重复乘法避免指数爆炸）
             double targetSpeed = progress.isFullyUnlocked()
                 ? 0.05 * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SOAR_SPEED.get()
@@ -351,11 +355,13 @@ public class PlayerStateHandler {
                 player.getAbilities().setFlyingSpeed((float) targetSpeed);
             }
         } else {
-            // 能力关闭时回收飞行能力，但不干扰创造/观察者模式自带飞行
-            if (player.getAbilities().mayfly && !player.getAbilities().instabuild && !player.isSpectator()) {
+            // 能力关闭/未解锁时回收翱翔授予的飞行，不没收装备或其他模组提供的飞行
+            if (player.getAbilities().mayfly && progress.isSoarGrantedFlight()
+                && !player.getAbilities().instabuild && !player.isSpectator()) {
                 player.getAbilities().mayfly = false;
                 player.getAbilities().flying = false;
                 player.getAbilities().setFlyingSpeed(0.05F);  // 恢复原版飞行速度
+                progress.setSoarGrantedFlight(false);
                 player.onUpdateAbilities();
             }
         }
