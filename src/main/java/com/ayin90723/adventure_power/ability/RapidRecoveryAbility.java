@@ -4,10 +4,12 @@ import com.ayin90723.adventure_power.config.ModConfig;
 import net.minecraft.network.chat.Component;
 
 /**
- * 休养生息 — 脱战后自动获得生命恢复效果。
+ * 休养生息 — 脱战后直写 SynchedEntityData 回血 + 恢复饱食度。
  * 解锁条件：2 里程碑
  * 成长公式：amplifier = base + step × ((count - required) / 2)
- * 默认：里程碑2=再生I(0), 4=再生II(1), 10=再生V(4)
+ * 默认：里程碑2=1HP/3s, 4=2HP/3s, 10=5HP/3s
+ * <p>
+ * 不使用药水效果（addEffect），避免被 MobEffectEvent / removeAllEffects 拦截。
  */
 public class RapidRecoveryAbility implements Ability {
 
@@ -27,8 +29,8 @@ public class RapidRecoveryAbility implements Ability {
     }
 
     /**
-     * 返回再生效果 amplifier（0=再生I, 4=再生V）。
-     * 每 2 个里程碑升一级。
+     * 返回直写回血的 amplifier 等级。
+     * 每 2 个里程碑升一级，handler 按 (amplifier + 1) HP/3s 执行。
      */
 
     private int countAtUnlock = 2;

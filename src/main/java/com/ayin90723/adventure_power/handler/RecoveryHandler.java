@@ -6,8 +6,7 @@ import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.FriendlyFireProtection;
-import net.minecraft.world.effect.MobEffectInstance;
-import net.minecraft.world.effect.MobEffects;
+import com.ayin90723.adventure_power.util.HealthUtil;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.event.TickEvent;
@@ -25,7 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>
  * 处理 2 种恢复能力的实际效果：
  * <ul>
- *   <li>休养生息 (rapid_recovery) — 脱战 N 秒后自动获得生命恢复</li>
+ *   <li>休养生息 (rapid_recovery) — 脱战后直写回血 + 恢复饱食度</li>
  *   <li>嗜血 (lifesteal) — 攻击造成伤害时回复自身生命值</li>
  * </ul>
  */
@@ -60,7 +59,8 @@ public class RecoveryHandler {
 
     /**
      * 每 tick 检查：
-     * 休养生息 — 脱战超过延迟阈值后，周期性施压生命恢复效果
+     * 休养生息 — 脱战超过延迟阈值后，直写 SynchedEntityData 回血并恢复饱食度。
+     * 不使用药水效果（addEffect），避免被 MobEffectEvent / removeAllEffects 拦截。
      */
     @SubscribeEvent
     public static void onPlayerTick(TickEvent.PlayerTickEvent event) {
@@ -91,8 +91,8 @@ public class RecoveryHandler {
                 long lastHurt = lastHurtTimestamps.getOrDefault(player.getUUID(), 0L);
                 long timeSinceHurt = currentTime - lastHurt;
 
-                // 脱战超过延迟阈值 + 血量未满 → 施压再生
-                if (timeSinceHurt >= delayTicks && player.getHealth() < player.getMaxHealth()) {
+                // 脱战超过延迟阈值 → 直写血量 + 恢复饱食度（避免药水效果被拦截）
+                if (timeSinceHurt >= delayTicks) {
                     Ability ability = AbilityRegistry.get("rapid_recovery");
                     if (ability != null) {
                         int amplifier = (int) ability.value(progress.getUnlockedMilestoneCount());
@@ -100,15 +100,18 @@ public class RecoveryHandler {
                         if (progress.isFullyUnlocked()) {
                             amplifier += 2;
                         }
-                        // 检查玩家是否已有更高等级的外部再生效果
-                        MobEffectInstance existing = player.getEffect(MobEffects.REGENERATION);
-                        if (existing == null || existing.getAmplifier() < amplifier) {
-                            player.addEffect(new MobEffectInstance(
-                                MobEffects.REGENERATION,
-                                delayTicks + 20,  // 稍长于检查间隔，确保覆盖
-                                amplifier,
-                                false, false, true));
+
+                        // ① 直写回血 — 绕过一切药水效果拦截（addEffect/MobEffectEvent 均不可靠）
+                        float maxHealth = player.getMaxHealth();
+                        float currentHealth = HealthUtil.getHealthDirect(player);
+                        if (currentHealth < maxHealth) {
+                            float healAmount = (amplifier + 1) * 1.0F; // HP per 3s cycle
+                            float newHealth = Math.min(maxHealth, currentHealth + healAmount);
+                            HealthUtil.setAllHealthLikeRaw(player, newHealth);
                         }
+
+                        // ② 恢复饱食度 — HealthUtil 直写 FoodData 字段，绕过方法拦截
+                        HealthUtil.restoreFoodData(player);
                     }
                 }
             }

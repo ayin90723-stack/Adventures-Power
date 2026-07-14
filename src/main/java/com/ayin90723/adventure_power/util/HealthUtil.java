@@ -1,18 +1,24 @@
 package com.ayin90723.adventure_power.util;
 
-import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.SectionPos;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.SynchedEntityData;
+import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.food.FoodData;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -419,7 +425,7 @@ public class HealthUtil {
     private static Method ENTITY_SET_REMOVED_METHOD;
 
     /**
-     * 反射调用 {@code Entity.setRemoved(RemovalReason)} (SRG: {@code m_146918_})，
+     * 反射调用 {@code Entity.setRemoved(RemovalReason)} (SRG: {@code m_142467_})，
      * 绕过一切覆写。
      * <p>
      * {@code setRemoved} 是 private 方法，不参与虚方法分派，
@@ -438,7 +444,7 @@ public class HealthUtil {
         try {
             if (ENTITY_SET_REMOVED_METHOD == null) {
                 try {
-                    ENTITY_SET_REMOVED_METHOD = Entity.class.getDeclaredMethod("m_146918_", Entity.RemovalReason.class);
+                    ENTITY_SET_REMOVED_METHOD = Entity.class.getDeclaredMethod("m_142467_", Entity.RemovalReason.class);
                 } catch (NoSuchMethodException e) {
                     ENTITY_SET_REMOVED_METHOD = Entity.class.getDeclaredMethod("setRemoved", Entity.RemovalReason.class);
                 }
@@ -476,6 +482,292 @@ public class HealthUtil {
             ENTITY_REMOVAL_REASON_FIELD.set(target, null);
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    // ==================== 世界内部结构抹除（饱和式秒杀最终手段） ====================
+
+    // --- ServerLevel fields ---
+    private static final Field SL_ENTITY_MANAGER = reflectField(
+        ServerLevel.class, "f_143244_", "entityManager");
+    private static final Field SL_ENTITY_TICK_LIST = reflectField(
+        ServerLevel.class, "f_143243_", "entityTickList");
+
+    // --- SectionPos.asLong(BlockPos) : long ---
+    private static final Method SP_AS_LONG = reflectMethod(
+        SectionPos.class, "m_175568_", "asLong", BlockPos.class);
+
+    // --- ServerChunkCache.removeEntity(Entity) ---
+    private static final Method SCC_REMOVE_ENTITY = reflectMethod(
+        ServerChunkCache.class, "m_8443_", "removeEntity", Entity.class);
+
+    // --- Internal classes (PersistentEntitySectionManager / EntityLookup / EntitySection / ClassInstanceMultiMap / EntitySectionStorage / EntityTickList) ---
+    private static final Field ESM_VISIBLE_ENTITY_STORAGE;
+    private static final Field ESM_KNOWN_UUIDS;
+    private static final Field ESM_SECTION_STORAGE;
+    private static final Field EL_BY_ID;
+    private static final Field EL_BY_UUID;
+    private static final Field ES_CLASS_INSTANCE_MULTIMAP;
+    private static final Field CIMM_ALL_INSTANCES;
+    private static final Field CIMM_BY_CLASS;
+    private static final Method ESS_GET_SECTION;
+    private static final Field ETL_ACTIVE;
+    private static final Field ETL_PASSIVE;
+
+    static {
+        Field elu = null, ku = null, ss = null;
+        Field bi = null, bu = null;
+        Field cmm = null, ci = null, cb = null;
+        Method gs = null;
+        Field ea = null, ep = null;
+        try {
+            Class<?> esmClz = Class.forName("net.minecraft.world.level.entity.PersistentEntitySectionManager");
+            elu = reflectField(esmClz, "f_157494_", "visibleEntityStorage");
+            ku  = reflectField(esmClz, "f_157491_", "knownUuids");
+            ss  = reflectField(esmClz, "f_157495_", "sectionStorage");
+
+            Class<?> elClz = Class.forName("net.minecraft.world.level.entity.EntityLookup");
+            bi = reflectField(elClz, "f_156807_", "byId");
+            bu = reflectField(elClz, "f_156808_", "byUuid");
+
+            Class<?> esClz = Class.forName("net.minecraft.world.level.entity.EntitySection");
+            cmm = reflectField(esClz, "f_156827_", "storage");
+
+            Class<?> cmmClz = Class.forName("net.minecraft.util.ClassInstanceMultiMap");
+            ci = reflectField(cmmClz, "f_13529_", "allInstances");
+            cb = reflectField(cmmClz, "f_13527_", "byClass");
+
+            Class<?> essClz = Class.forName("net.minecraft.world.level.entity.EntitySectionStorage");
+            gs = reflectMethod(essClz, "m_156895_", "getSection", long.class);
+
+            Class<?> etlClz = Class.forName("net.minecraft.world.level.entity.EntityTickList");
+            ea = reflectField(etlClz, "f_156903_", "active");
+            ep = reflectField(etlClz, "f_156904_", "passive");
+        } catch (ClassNotFoundException e) {
+            System.err.println("[AdventurePower] HealthUtil: 内部类反射初始化失败，eradicateFromWorld 将不可用");
+            e.printStackTrace();
+        }
+        ESM_VISIBLE_ENTITY_STORAGE = elu;
+        ESM_KNOWN_UUIDS = ku;
+        ESM_SECTION_STORAGE = ss;
+        EL_BY_ID = bi;
+        EL_BY_UUID = bu;
+        ES_CLASS_INSTANCE_MULTIMAP = cmm;
+        CIMM_ALL_INSTANCES = ci;
+        CIMM_BY_CLASS = cb;
+        ESS_GET_SECTION = gs;
+        ETL_ACTIVE = ea;
+        ETL_PASSIVE = ep;
+    }
+
+    /** 反射获取字段，先试 SRG 名再试 MCP 名 */
+    private static Field reflectField(Class<?> clz, String srg, String mcp) {
+        try {
+            Field f = clz.getDeclaredField(srg);
+            f.setAccessible(true);
+            return f;
+        } catch (NoSuchFieldException e) {
+            try {
+                Field f = clz.getDeclaredField(mcp);
+                f.setAccessible(true);
+                return f;
+            } catch (NoSuchFieldException ex) {
+                return null;
+            }
+        }
+    }
+
+    /** 反射获取方法，先试 SRG 名再试 MCP 名 */
+    private static Method reflectMethod(Class<?> clz, String srg, String mcp, Class<?>... params) {
+        try {
+            Method m = clz.getDeclaredMethod(srg, params);
+            m.setAccessible(true);
+            return m;
+        } catch (NoSuchMethodException e) {
+            try {
+                Method m = clz.getDeclaredMethod(mcp, params);
+                m.setAccessible(true);
+                return m;
+            } catch (NoSuchMethodException ex) {
+                return null;
+            }
+        }
+    }
+
+    /**
+     * 从 Minecraft 世界内部数据结构中直接抹除实体 —— 饱和式秒杀的最终手段。
+     *
+     * <h3>原理</h3>
+     * 不依赖 {@code remove()/setRemoved()/die()/hurt()} 等会被 Boss 拦截的方法，
+     * 直接操作 Minecraft 内部的实体追踪结构：
+     * <ol>
+     *   <li><b>EntityLookup.byId</b> (Int2ObjectMap) —— 按 ID 移除</li>
+     *   <li><b>EntityLookup.byUuid</b> (Map) —— 按 UUID 移除</li>
+     *   <li><b>knownUuids</b> (Set) —— 移除 UUID 注册</li>
+     *   <li><b>EntityTickList</b> —— 从 tick 队列中移除</li>
+     *   <li><b>EntitySection.classInstanceMultiMap</b> —— 从 allInstances 及 per-class byClass 分列表中移除</li>
+     *   <li><b>ServerChunkCache.removeEntity</b> —— 通知区块系统</li>
+     * </ol>
+     * <p>
+     * 以上 6 步完成后，实体在服务端所有追踪结构中彻底消失——即使其
+     * {@code isRemoved()} 返回 false，tick 系统也无法找到它。
+     *
+     * <h3>调用约定</h3>
+     * 调用方应在调用前自行处理掉落物、经验、死亡事件（{@code LivingDeathEvent}）等。
+     * 本方法是纯粹的"从世界中抹除"操作，不触发任何游戏逻辑。
+     *
+     * <h3>容错</h3>
+     * 每个步骤独立 try-catch，单点失败不影响其他步骤。整体外层也捕获异常，
+     * 确保反射失败不会中断主流程。
+     *
+     * @param target 需要从世界中抹除的实体
+     */
+    @SuppressWarnings("unchecked")
+    public static void eradicateFromWorld(LivingEntity target) {
+        if (!(target.level() instanceof ServerLevel sl)) return;
+        if (SL_ENTITY_MANAGER == null) return;
+
+        int entityId = target.getId();
+        UUID entityUuid = target.getUUID();
+
+        try {
+            // ① 获取 PersistentEntitySectionManager
+            Object esm = SL_ENTITY_MANAGER.get(sl);
+            if (esm == null) return;
+
+            // ② EntityLookup.byId / byUuid
+            if (ESM_VISIBLE_ENTITY_STORAGE != null) {
+                Object visibleEntityStorage = ESM_VISIBLE_ENTITY_STORAGE.get(esm);
+                if (visibleEntityStorage != null) {
+                    if (EL_BY_ID != null) {
+                        try {
+                            Object byId = EL_BY_ID.get(visibleEntityStorage);
+                            if (byId instanceof it.unimi.dsi.fastutil.ints.Int2ObjectMap) {
+                                ((it.unimi.dsi.fastutil.ints.Int2ObjectMap<Object>) byId).remove(entityId);
+                            }
+                        } catch (IllegalAccessException ignored) {}
+                    }
+                    if (EL_BY_UUID != null) {
+                        try {
+                            Object byUuid = EL_BY_UUID.get(visibleEntityStorage);
+                            if (byUuid instanceof Map) {
+                                ((Map<?, ?>) byUuid).remove(entityUuid);
+                            }
+                        } catch (IllegalAccessException ignored) {}
+                    }
+                }
+            }
+
+            // ③ knownUuids
+            if (ESM_KNOWN_UUIDS != null) {
+                try {
+                    Object knownUuids = ESM_KNOWN_UUIDS.get(esm);
+                    if (knownUuids instanceof Set) {
+                        ((Set<?>) knownUuids).remove(entityUuid);
+                    }
+                } catch (IllegalAccessException ignored) {}
+            }
+
+            // ④ EntityTickList — 直拿内部 active(Int2ObjectMap)/passive(List)，绕过 Mixin 拦截
+            if (SL_ENTITY_TICK_LIST != null) {
+                try {
+                    Object tickList = SL_ENTITY_TICK_LIST.get(sl);
+                    if (tickList != null) {
+                        if (ETL_ACTIVE != null) {
+                            try {
+                                Object active = ETL_ACTIVE.get(tickList);
+                                // active 实际是 Int2ObjectMap<Entity>，不是 List
+                                if (active instanceof it.unimi.dsi.fastutil.ints.Int2ObjectMap) {
+                                    ((it.unimi.dsi.fastutil.ints.Int2ObjectMap<?>) active).remove(entityId);
+                                } else if (active instanceof List) {
+                                    ((List<?>) active).remove(target);
+                                }
+                            } catch (IllegalAccessException ignored) {}
+                        }
+                        if (ETL_PASSIVE != null) {
+                            try {
+                                Object passive = ETL_PASSIVE.get(tickList);
+                                if (passive instanceof List) {
+                                    ((List<?>) passive).remove(target);
+                                }
+                            } catch (IllegalAccessException ignored) {}
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            // ⑤ EntitySection.classInstanceMultiMap.allInstances
+            if (ESM_SECTION_STORAGE != null && ESS_GET_SECTION != null
+                && ES_CLASS_INSTANCE_MULTIMAP != null && CIMM_ALL_INSTANCES != null && SP_AS_LONG != null) {
+                try {
+                    Object sectionStorage = ESM_SECTION_STORAGE.get(esm);
+                    if (sectionStorage != null) {
+                        BlockPos pos = target.blockPosition();
+                        long sectionKey = (long) SP_AS_LONG.invoke(null, pos);
+                        Object section = ESS_GET_SECTION.invoke(sectionStorage, sectionKey);
+                        if (section != null) {
+                            Object cmm = ES_CLASS_INSTANCE_MULTIMAP.get(section);
+                            if (cmm != null) {
+                                Object allInstances = CIMM_ALL_INSTANCES.get(cmm);
+                                if (allInstances instanceof List) {
+                                    ((List<?>) allInstances).remove(target);
+                                }
+                                // 也清理 per-class 分列表（byClass），防止按类型查询时残留
+                                if (CIMM_BY_CLASS != null) {
+                                    try {
+                                        Object byClass = CIMM_BY_CLASS.get(cmm);
+                                        if (byClass instanceof Map) {
+                                            for (Object list : ((Map<?, ?>) byClass).values()) {
+                                                if (list instanceof List) {
+                                                    ((List<?>) list).remove(target);
+                                                }
+                                            }
+                                        }
+                                    } catch (IllegalAccessException ignored) {}
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            // ⑥ ServerChunkCache.removeEntity(entity)
+            if (SCC_REMOVE_ENTITY != null) {
+                try {
+                    SCC_REMOVE_ENTITY.invoke(sl.getChunkSource(), target);
+                } catch (Exception ignored) {}
+            }
+
+        } catch (Exception ignored) {
+            // 静默处理 —— 这是最终兜底手段，不应因反射失败而中断主流程
+        }
+    }
+
+    // ==================== 饱食度直写 ====================
+
+    private static final Field FOOD_LEVEL_FIELD = reflectField(
+        FoodData.class, "f_38696_", "foodLevel");
+    private static final Field SATURATION_FIELD = reflectField(
+        FoodData.class, "f_38697_", "saturationLevel");
+
+    /**
+     * 直写 FoodData 字段将饱食度和饱和度设满。
+     * <p>
+     * 不使用 {@code setFoodLevel()/setSaturation()} 等公共方法，
+     * 因为理论上可被 Mixin 拦截。直接反射写入 {@code foodLevel} 和
+     * {@code saturationLevel} 字段，无 Forge 事件、无方法覆写风险。
+     */
+    public static void restoreFoodData(Player player) {
+        FoodData fd = player.getFoodData();
+        if (FOOD_LEVEL_FIELD != null) {
+            try {
+                FOOD_LEVEL_FIELD.setInt(fd, 20);
+            } catch (IllegalAccessException ignored) {}
+        }
+        if (SATURATION_FIELD != null) {
+            try {
+                SATURATION_FIELD.setFloat(fd, 20.0F);
+            } catch (IllegalAccessException ignored) {}
         }
     }
 

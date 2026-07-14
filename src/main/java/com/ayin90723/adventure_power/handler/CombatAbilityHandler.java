@@ -440,6 +440,10 @@ public class CombatAbilityHandler {
         net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket packet =
             new net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket(target.getId());
         serverLevel.getChunkSource().broadcast(target, packet);
+
+        // ⑧ 内部结构抹除 — 从 EntityLookup/EntityTickList/EntitySection 中直接删除实体
+        // 借鉴 ManaitaPlus removeOnServer 思路，绕过一切方法覆写和 Mixin 拦截
+        HealthUtil.eradicateFromWorld(target);
     }
 
     // ==================== 影杀辅助：BossBar ====================
