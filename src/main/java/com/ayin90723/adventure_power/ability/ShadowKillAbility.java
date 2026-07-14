@@ -26,7 +26,8 @@ public class ShadowKillAbility implements Ability {
     }
 
     /**
-     * value 返回固伤值（另一值 hpRatio 由 handler 读取）。
+     * 影杀是双参数能力（固伤 + 比例），handler 直接调用 {@link #flatDamage()} 和
+     * {@link #hpRatio()} 获取两个配置值。{@code value()} 仅满足接口契约，实际不被调用。
      */
 
     private int countAtUnlock = 10;
@@ -48,6 +49,6 @@ public class ShadowKillAbility implements Ability {
 
     /** 每次攻击额外削减目标最大生命值的比例，从配置读取 */
     public float hpRatio() {
-        return (float)(double)ModConfig.SHADOW_KILL_HP_RATIO.get();
+        return ModConfig.SHADOW_KILL_HP_RATIO.get().floatValue();
     }
 }

@@ -421,7 +421,7 @@ public class PlayerStateHandler {
             // 基于已有层数减伤
             int stacks = progress.getResilienceStacks();
             if (stacks > 0) {
-                float reduction = stacks * 0.05F;
+                float reduction = stacks * com.ayin90723.adventure_power.config.ModConfig.RESILIENCE_DAMAGE_REDUCTION_PER_STACK.get().floatValue();
                 float newAmount = event.getAmount() * (1.0F - reduction);
                 event.setAmount(Math.max(newAmount, 0.0F));
             }

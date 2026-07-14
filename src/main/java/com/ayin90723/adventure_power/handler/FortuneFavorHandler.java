@@ -41,7 +41,7 @@ public class FortuneFavorHandler {
 
             int bonus = (int) ability.value(progress.getUnlockedMilestoneCount());
             if (progress.isFullyUnlocked()) {
-                bonus += 2;
+                bonus += com.ayin90723.adventure_power.config.ModConfig.AWAKEN_FORTUNE_FAVOR_BONUS.get();
             }
             event.setLootingLevel(event.getLootingLevel() + bonus);
         });

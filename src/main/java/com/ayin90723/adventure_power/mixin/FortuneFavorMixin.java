@@ -44,7 +44,7 @@ public class FortuneFavorMixin {
 
             int bonus = (int) ability.value(progress.getUnlockedMilestoneCount());
             if (FortuneContext.isAwakened()) {
-                bonus += 2;
+                bonus += com.ayin90723.adventure_power.config.ModConfig.AWAKEN_FORTUNE_FAVOR_BONUS.get();
             }
             cir.setReturnValue(cir.getReturnValue() + bonus);
         });

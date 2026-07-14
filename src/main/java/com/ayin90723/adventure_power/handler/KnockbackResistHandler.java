@@ -51,7 +51,7 @@ public class KnockbackResistHandler {
             if (ability != null) {
                 float percent = ability.value(progress.getUnlockedMilestoneCount());
                 if (progress.isFullyUnlocked()) {
-                    percent = Math.min(percent * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get().floatValue(), 100.0f);
+                    percent = Math.min(percent * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get().floatValue(), com.ayin90723.adventure_power.config.ModConfig.KNOCKBACK_RESIST_HARD_CAP.get().floatValue());
                 }
                 attr.setBaseValue(percent / 100.0);
             }
@@ -63,7 +63,7 @@ public class KnockbackResistHandler {
             if (ability != null) {
                 float percent = ability.value(progress.getUnlockedMilestoneCount());
                 if (progress.isFullyUnlocked()) {
-                    percent = Math.min(percent * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get().floatValue(), 100.0f);
+                    percent = Math.min(percent * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get().floatValue(), com.ayin90723.adventure_power.config.ModConfig.KNOCKBACK_RESIST_HARD_CAP.get().floatValue());
                 }
                 float expected = percent / 100.0f;
                 if (Math.abs(currentVal - expected) > 0.001) {
@@ -93,7 +93,7 @@ public class KnockbackResistHandler {
 
             float percent = ability.value(progress.getUnlockedMilestoneCount());
             if (progress.isFullyUnlocked()) {
-                percent = Math.min(percent * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get().floatValue(), 100.0f);
+                percent = Math.min(percent * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get().floatValue(), com.ayin90723.adventure_power.config.ModConfig.KNOCKBACK_RESIST_HARD_CAP.get().floatValue());
             }
             attr.setBaseValue(percent / 100.0);
         });

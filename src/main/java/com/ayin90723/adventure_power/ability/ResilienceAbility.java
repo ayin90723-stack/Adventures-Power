@@ -46,10 +46,10 @@ public class ResilienceAbility implements Ability {
     }
 
     /**
-     * 觉醒版本：在基础层数上额外 +6 层。
+     * 觉醒版本：在基础层数上额外增加层数（由配置决定，默认 6 层）。
      */
     public float value(int count, boolean awakened) {
         int base = (int) value(count);
-        return awakened ? base + 6 : base;
+        return awakened ? base + ModConfig.AWAKEN_RESILIENCE_BONUS_STACKS.get() : base;
     }
 }

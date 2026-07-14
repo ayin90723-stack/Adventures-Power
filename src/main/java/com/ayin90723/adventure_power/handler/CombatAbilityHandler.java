@@ -160,7 +160,8 @@ public class CombatAbilityHandler {
             .ifPresent(progress -> {
                 if (!progress.isFullyUnlocked()) return;
                 if (!progress.isAbilityEnabled("piercing_gaze")) return;
-                event.setAmount(event.getAmount() * 1.30f);
+                event.setAmount(event.getAmount()
+                    * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_PIERCING_GAZE_MULTIPLIER.get().floatValue());
             });
     }
 
@@ -214,12 +215,12 @@ public class CombatAbilityHandler {
                 + target.getHealth() * hpRatio;
 
             if (UndyingSlashEffect.isActive(target)) {
-                extraDamage *= 1.5f;
+                extraDamage *= com.ayin90723.adventure_power.config.ModConfig.SOUL_QUENCH_UNDYING_SLASH_MULTIPLIER.get().floatValue();
             }
 
             // 觉醒：斩杀线 — 目标低于阈值 HP 时伤害翻倍
             if (progress.isFullyUnlocked()) {
-                float threshold = (float) (double) com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SOUL_QUENCH_EXECUTE_THRESHOLD.get();
+                float threshold = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SOUL_QUENCH_EXECUTE_THRESHOLD.get().floatValue();
                 if (target.getHealth() <= target.getMaxHealth() * threshold) {
                     extraDamage *= 2.0F;
                 }
@@ -293,17 +294,7 @@ public class CombatAbilityHandler {
             long gameTime = attacker.level().getGameTime();
 
             // 懒清理过期条目
-            List<String> expiredKeys = new ArrayList<>();
-            for (String uuidKey : shadowData.getAllKeys()) {
-                CompoundTag entry = shadowData.getCompound(uuidKey);
-                if (entry.getLong(NBT_SP_END_TIME) <= gameTime) {
-                    expiredKeys.add(uuidKey);
-                }
-            }
-            for (String uuidKey : expiredKeys) {
-                shadowData.remove(uuidKey);
-                removeShadowHPBossBarByUUID(uuidKey);
-            }
+            cleanupExpiredShadowData(shadowData, gameTime);
 
             String targetKey = target.getUUID().toString();
             float totalHP, shadowHP;
@@ -327,7 +318,7 @@ public class CombatAbilityHandler {
             CompoundTag entry = new CompoundTag();
             entry.putFloat(NBT_SP_TOTAL_HP, totalHP);
             entry.putFloat(NBT_SP_SHADOW_HP, shadowHP);
-            entry.putLong(NBT_SP_END_TIME, gameTime + 6000L); // 5 分钟过期
+            entry.putLong(NBT_SP_END_TIME, gameTime + com.ayin90723.adventure_power.config.ModConfig.SHADOW_KILL_DATA_EXPIRE_TICKS.get());
             shadowData.put(targetKey, entry);
             playerData.put(NBT_SP_DATA, shadowData);
 
@@ -356,26 +347,10 @@ public class CombatAbilityHandler {
                 }
                 removeShadowHPBossBar(target);
 
-                DamageSource killSource = event.getSource();
                 event.setCanceled(true);  // 取消原事件伤害，避免与下面 hurt() 叠加
-
                 target.setLastHurtByMob(attacker);
                 target.setLastHurtByPlayer(attacker);
-                clearHurtTime(target);
-                target.invulnerableTime = 0;
-
-                // ★ 第一层：走标准 hurt() 管线
-                KILLING.add(target.getUUID());
-                try {
-                    target.hurt(killSource, Float.MAX_VALUE);
-                } finally {
-                    KILLING.remove(target.getUUID());
-                }
-
-                // ★ 第二层兜底：hurt() 被 Boss 拦截 → 饱和式秒杀
-                if (target.isAlive()) {
-                    saturationKill(target, killSource, attacker);
-                }
+                executeShadowKill(target, attacker, event.getSource());
 
                 // 觉醒：影杀 AOE 爆炸
                 if (progress.isFullyUnlocked()) {
@@ -474,6 +449,21 @@ public class CombatAbilityHandler {
         }
     }
 
+    /** 清理 shadowData 中所有已过期的条目及其 BossBar */
+    private static void cleanupExpiredShadowData(CompoundTag shadowData, long gameTime) {
+        java.util.List<String> expired = new java.util.ArrayList<>();
+        for (String uuidKey : shadowData.getAllKeys()) {
+            CompoundTag entry = shadowData.getCompound(uuidKey);
+            if (entry.getLong(NBT_SP_END_TIME) <= gameTime) {
+                expired.add(uuidKey);
+            }
+        }
+        for (String uuidKey : expired) {
+            shadowData.remove(uuidKey);
+            removeShadowHPBossBarByUUID(uuidKey);
+        }
+    }
+
     private static void removeShadowHPBossBarByUUID(String uuidStr) {
         try {
             UUID uuid = UUID.fromString(uuidStr);
@@ -482,10 +472,10 @@ public class CombatAbilityHandler {
         } catch (IllegalArgumentException ignored) {}
     }
 
-    /** 觉醒影杀 AOE：对斩杀目标周围实体施加影子血量削减 */
+    /** 觉醒影杀 AOE：对斩杀目标周围实体施加影子血量削减，归零时触发斩杀 */
     private static void shadowKillAoe(Player attacker, LivingEntity killed) {
         double radius = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SHADOW_KILL_AOE_RADIUS.get();
-        float ratio = (float) (double) com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SHADOW_KILL_AOE_RATIO.get();
+        float ratio = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SHADOW_KILL_AOE_RATIO.get().floatValue();
         int maxTargets = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SHADOW_KILL_AOE_MAX_TARGETS.get();
 
         AABB aabb = killed.getBoundingBox().inflate(radius);
@@ -499,39 +489,75 @@ public class CombatAbilityHandler {
         CompoundTag shadowData = playerData.getCompound(NBT_SP_DATA);
         long gameTime = attacker.level().getGameTime();
 
+        // 懒清理过期条目（与 handleShadowKill 保持一致）
+        cleanupExpiredShadowData(shadowData, gameTime);
+
+        long expireTicks = com.ayin90723.adventure_power.config.ModConfig.SHADOW_KILL_DATA_EXPIRE_TICKS.get();
         for (LivingEntity target : nearby) {
             if (count >= maxTargets) break;
 
-            float totalHP = target.getMaxHealth();
-            float aoeReduction = totalHP * ratio;
-
             String targetKey = target.getUUID().toString();
-            float existingShadow;
+            float totalHP, existingShadow;
             if (shadowData.contains(targetKey)) {
-                CompoundTag entry = shadowData.getCompound(targetKey);
-                existingShadow = entry.getFloat(NBT_SP_SHADOW_HP);
+                // 已有条目：保留原始 totalHP 快照，不被目标当前 maxHealth 变化污染
+                CompoundTag oldEntry = shadowData.getCompound(targetKey);
+                totalHP = oldEntry.getFloat(NBT_SP_TOTAL_HP);
+                existingShadow = oldEntry.getFloat(NBT_SP_SHADOW_HP);
             } else {
+                totalHP = target.getMaxHealth();
                 existingShadow = totalHP;
             }
+            float aoeReduction = totalHP * ratio;
             float newShadow = Math.max(0.0F, existingShadow - aoeReduction);
 
-            CompoundTag entry = new CompoundTag();
-            entry.putFloat(NBT_SP_TOTAL_HP, totalHP);
-            entry.putFloat(NBT_SP_SHADOW_HP, newShadow);
-            entry.putLong(NBT_SP_END_TIME, gameTime + 6000L);
-            shadowData.put(targetKey, entry);
-
-            updateShadowHPBossBar(target, attacker, newShadow, totalHP);
-            count++;
-
+            // 粒子反馈
             if (killed.level() instanceof ServerLevel sl) {
                 sl.sendParticles(ParticleTypes.SCULK_SOUL,
                     target.getX(), target.getY() + target.getBbHeight() * 0.5, target.getZ(),
                     10, 0.5, 0.5, 0.5, 0.02);
             }
+
+            // 影子血量归零 → 触发斩杀
+            if (newShadow <= 0.0F) {
+                shadowData.remove(targetKey);
+                removeShadowHPBossBar(target);
+                executeShadowKill(target, attacker, attacker.damageSources().playerAttack(attacker));
+                count++;
+                continue;
+            }
+
+            // 正常削减：写回 NBT
+            CompoundTag entry = new CompoundTag();
+            entry.putFloat(NBT_SP_TOTAL_HP, totalHP);
+            entry.putFloat(NBT_SP_SHADOW_HP, newShadow);
+            entry.putLong(NBT_SP_END_TIME, gameTime + expireTicks);
+            shadowData.put(targetKey, entry);
+
+            updateShadowHPBossBar(target, attacker, newShadow, totalHP);
+            count++;
         }
         if (!shadowData.isEmpty()) {
             playerData.put(NBT_SP_DATA, shadowData);
+        } else {
+            playerData.remove(NBT_SP_DATA);
+        }
+    }
+
+    /**
+     * 执行影杀斩杀：清无敌帧 → hurt(Float.MAX_VALUE) → saturationKill 兜底。
+     * NBT 清理和 BossBar 移除由调用方负责。
+     */
+    private static void executeShadowKill(LivingEntity target, Player attacker, DamageSource killSource) {
+        clearHurtTime(target);
+        target.invulnerableTime = 0;
+        KILLING.add(target.getUUID());
+        try {
+            target.hurt(killSource, Float.MAX_VALUE);
+        } finally {
+            KILLING.remove(target.getUUID());
+        }
+        if (target.isAlive()) {
+            saturationKill(target, killSource, attacker);
         }
     }
 
@@ -603,28 +629,12 @@ public class CombatAbilityHandler {
             if (shadowData.isEmpty()) continue;
 
             long gameTime = sp.level().getGameTime();
-            List<String> expired = new ArrayList<>();
-            for (String uuidKey : shadowData.getAllKeys()) {
-                CompoundTag entry = shadowData.getCompound(uuidKey);
-                if (entry.getLong(NBT_SP_END_TIME) <= gameTime) {
-                    expired.add(uuidKey);
-                }
-            }
+            cleanupExpiredShadowData(shadowData, gameTime);
 
-            if (!expired.isEmpty()) {
-                for (String uuidKey : expired) {
-                    shadowData.remove(uuidKey);
-                    try {
-                        UUID uuid = UUID.fromString(uuidKey);
-                        ServerBossEvent bar = SHADOW_HP_BARS.remove(uuid);
-                        if (bar != null) bar.removeAllPlayers();
-                    } catch (IllegalArgumentException ignored) {}
-                }
-                if (shadowData.isEmpty()) {
-                    playerData.remove(NBT_SP_DATA);
-                } else {
-                    playerData.put(NBT_SP_DATA, shadowData);
-                }
+            if (shadowData.isEmpty()) {
+                playerData.remove(NBT_SP_DATA);
+            } else {
+                playerData.put(NBT_SP_DATA, shadowData);
             }
         }
     }

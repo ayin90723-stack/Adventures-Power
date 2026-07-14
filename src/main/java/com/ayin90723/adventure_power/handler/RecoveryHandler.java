@@ -31,9 +31,6 @@ import java.util.concurrent.ConcurrentHashMap;
 @Mod.EventBusSubscriber(modid = AdventurePower.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class RecoveryHandler {
 
-    /** 脱战再生检查间隔（tick），每 3 秒检查一次 */
-    private static final int RECOVERY_CHECK_INTERVAL = 60;
-
     /** 上次再生检查时间缓存 */
     private static final Map<UUID, Long> lastRecoveryCheck = new ConcurrentHashMap<>();
 
@@ -84,7 +81,7 @@ public class RecoveryHandler {
             long lastCheck = lastRecoveryCheck.getOrDefault(player.getUUID(), -1L);
             if (lastCheck == -1L) {
                 lastRecoveryCheck.put(player.getUUID(), currentTime);
-            } else if (currentTime - lastCheck >= RECOVERY_CHECK_INTERVAL) {
+            } else if (currentTime - lastCheck >= ModConfig.RAPID_RECOVERY_CHECK_INTERVAL.get()) {
                 lastRecoveryCheck.put(player.getUUID(), currentTime);
 
                 int delayTicks = ModConfig.RAPID_RECOVERY_DELAY_TICKS.get();
@@ -96,9 +93,9 @@ public class RecoveryHandler {
                     Ability ability = AbilityRegistry.get("rapid_recovery");
                     if (ability != null) {
                         int amplifier = (int) ability.value(progress.getUnlockedMilestoneCount());
-                        // 觉醒：再生 +2 级
+                        // 觉醒：额外直写回血量（HP/周期）
                         if (progress.isFullyUnlocked()) {
-                            amplifier += 2;
+                            amplifier += ModConfig.AWAKEN_RAPID_RECOVERY_BONUS.get();
                         }
 
                         // ① 直写回血 — 绕过一切药水效果拦截（addEffect/MobEffectEvent 均不可靠）
@@ -163,8 +160,10 @@ public class RecoveryHandler {
             healAmount = Math.min(healAmount, cap);
 
             if (healAmount > 0.0F) {
-                float healthBeforeHeal = attacker.getHealth();
-                attacker.heal(healAmount);
+                // 直写血量绕过 heal() — 避免被外部模组（如泽林变体）在 heal() HEAD cancel 拦截
+                float healthBeforeHeal = HealthUtil.getHealthDirect(attacker);
+                float newHealth = Math.min(attacker.getMaxHealth(), healthBeforeHeal + healAmount);
+                HealthUtil.setAllHealthLikeRaw(attacker, newHealth);
                 // 觉醒：过量治疗转为吸收护盾
                 if (progress.isFullyUnlocked()) {
                     float toFull = attacker.getMaxHealth() - healthBeforeHeal;

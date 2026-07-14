@@ -56,25 +56,30 @@ public class ModConfig {
     public static final IntValue RESILIENCE_STACKS_8;
     public static final IntValue RESILIENCE_STACKS_9;
     public static final IntValue RESILIENCE_STACKS_10;
+    public static final DoubleValue RESILIENCE_DAMAGE_REDUCTION_PER_STACK;
 
     // --- 淬魂之力 ---
     public static final IntValue SOUL_QUENCH_FLAT_DAMAGE_9;
     public static final IntValue SOUL_QUENCH_FLAT_DAMAGE_10;
     public static final DoubleValue SOUL_QUENCH_HP_RATIO_9;
     public static final DoubleValue SOUL_QUENCH_HP_RATIO_10;
+    public static final DoubleValue SOUL_QUENCH_UNDYING_SLASH_MULTIPLIER;
 
     // --- 影杀 ---
     public static final IntValue SHADOW_KILL_FLAT_DAMAGE;
     public static final DoubleValue SHADOW_KILL_HP_RATIO;
+    public static final IntValue SHADOW_KILL_DATA_EXPIRE_TICKS;
 
     // --- 休养生息 ---
     public static final IntValue RAPID_RECOVERY_AMPLIFIER_BASE;
     public static final IntValue RAPID_RECOVERY_AMPLIFIER_STEP;
     public static final IntValue RAPID_RECOVERY_DELAY_TICKS;
+    public static final IntValue RAPID_RECOVERY_CHECK_INTERVAL;
 
     // --- 不动如山 ---
     public static final IntValue KNOCKBACK_RESIST_BASE;
     public static final IntValue KNOCKBACK_RESIST_PER_MILESTONE;
+    public static final DoubleValue KNOCKBACK_RESIST_HARD_CAP;
 
     // --- 嗜血 ---
     public static final IntValue LIFESTEAL_BASE;
@@ -128,6 +133,21 @@ public class ModConfig {
     // === 觉醒 — 不朽装备 ===
     public static final DoubleValue AWAKEN_UNDYING_ARMOR_BONUS;
     public static final DoubleValue AWAKEN_UNDYING_WEAPON_BONUS;
+
+    // === 觉醒 — 破敌之眼 ===
+    public static final DoubleValue AWAKEN_PIERCING_GAZE_MULTIPLIER;
+
+    // === 觉醒 — 拒绝篡改 ===
+    public static final DoubleValue AWAKEN_REJECT_MANIP_REFLECT_RATIO;
+
+    // === 觉醒 — 鸿运当头 ===
+    public static final IntValue AWAKEN_FORTUNE_FAVOR_BONUS;
+
+    // === 觉醒 — 受击坚韧 ===
+    public static final IntValue AWAKEN_RESILIENCE_BONUS_STACKS;
+
+    // === 觉醒 — 休养生息 ===
+    public static final IntValue AWAKEN_RAPID_RECOVERY_BONUS;
 
     static {
         BUILDER.push("冒险能力配置");
@@ -218,6 +238,8 @@ public class ModConfig {
             .defineInRange("resilience_stacks_9", 8, 0, 50);
         RESILIENCE_STACKS_10 = BUILDER.comment("里程碑10时的最大减伤层数")
             .defineInRange("resilience_stacks_10", 12, 0, 50);
+        RESILIENCE_DAMAGE_REDUCTION_PER_STACK = BUILDER.comment("每层提供的减伤比例")
+            .defineInRange("resilience_damage_reduction_per_stack", 0.05, 0.0, 1.0);
         BUILDER.pop();
 
         BUILDER.push("淬魂之力");
@@ -229,6 +251,8 @@ public class ModConfig {
             .defineInRange("soul_quench_hp_ratio_9", 0.01, 0.0, 1.0);
         SOUL_QUENCH_HP_RATIO_10 = BUILDER.comment("里程碑10时的生命百分比伤害")
             .defineInRange("soul_quench_hp_ratio_10", 0.02, 0.0, 1.0);
+        SOUL_QUENCH_UNDYING_SLASH_MULTIPLIER = BUILDER.comment("对不死斩标记目标的额外伤害倍率")
+            .defineInRange("soul_quench_undying_slash_multiplier", 1.5, 1.0, 10.0);
         BUILDER.pop();
 
         BUILDER.push("影杀");
@@ -236,6 +260,8 @@ public class ModConfig {
             .defineInRange("shadow_kill_flat_damage", 4, 0, 1000);
         SHADOW_KILL_HP_RATIO = BUILDER.comment("每次攻击额外削减目标最大生命值的比例")
             .defineInRange("shadow_kill_hp_ratio", 0.04, 0.0, 1.0);
+        SHADOW_KILL_DATA_EXPIRE_TICKS = BUILDER.comment("影子血量数据无操作过期时间（tick，默认6000=5分钟）")
+            .defineInRange("shadow_kill_data_expire_ticks", 6000, 200, 72000);
         BUILDER.pop();
 
         BUILDER.push("休养生息");
@@ -245,6 +271,8 @@ public class ModConfig {
             .defineInRange("rapid_recovery_amplifier_step", 1, 0, 5);
         RAPID_RECOVERY_DELAY_TICKS = BUILDER.comment("脱战后等待时间（tick），默认100=5秒")
             .defineInRange("rapid_recovery_delay_ticks", 100, 20, 1200);
+        RAPID_RECOVERY_CHECK_INTERVAL = BUILDER.comment("脱战再生检查间隔（tick），默认60=3秒")
+            .defineInRange("rapid_recovery_check_interval", 60, 10, 200);
         BUILDER.pop();
 
         BUILDER.push("不动如山");
@@ -252,6 +280,8 @@ public class ModConfig {
             .defineInRange("knockback_resist_base", 30, 0, 100);
         KNOCKBACK_RESIST_PER_MILESTONE = BUILDER.comment("每额外里程碑增加的抗击退率（%）")
             .defineInRange("knockback_resist_per_milestone", 7, 0, 30);
+        KNOCKBACK_RESIST_HARD_CAP = BUILDER.comment("抗击退率硬上限（%），觉醒后生效")
+            .defineInRange("knockback_resist_hard_cap", 100.0, 0.0, 100.0);
         BUILDER.pop();
 
         BUILDER.push("嗜血");
@@ -321,6 +351,16 @@ public class ModConfig {
             .defineInRange("awaken_undying_armor_bonus", 1.0, 0.0, 10.0);
         AWAKEN_UNDYING_WEAPON_BONUS = BUILDER.comment("觉醒不朽装备 — 主手武器伤害倍率")
             .defineInRange("awaken_undying_weapon_bonus", 0.15, 0.0, 2.0);
+        AWAKEN_PIERCING_GAZE_MULTIPLIER = BUILDER.comment("觉醒破敌之眼 — 对无敌目标伤害倍率")
+            .defineInRange("awaken_piercing_gaze_multiplier", 1.30, 1.0, 5.0);
+        AWAKEN_REJECT_MANIP_REFLECT_RATIO = BUILDER.comment("觉醒拒绝篡改 — 反弹被拒绝伤害的比例")
+            .defineInRange("awaken_reject_manip_reflect_ratio", 0.30, 0.0, 1.0);
+        AWAKEN_FORTUNE_FAVOR_BONUS = BUILDER.comment("觉醒鸿运当头 — 额外时运/抢夺等级")
+            .defineInRange("awaken_fortune_favor_bonus", 2, 0, 10);
+        AWAKEN_RESILIENCE_BONUS_STACKS = BUILDER.comment("觉醒受击坚韧 — 额外最大层数")
+            .defineInRange("awaken_resilience_bonus_stacks", 6, 0, 50);
+        AWAKEN_RAPID_RECOVERY_BONUS = BUILDER.comment("觉醒休养生息 — 每周期额外回血量（HP）")
+            .defineInRange("awaken_rapid_recovery_bonus", 2, 0, 20);
         BUILDER.pop(); // 觉醒强化
 
         BUILDER.pop(); // 能力数值

@@ -1,6 +1,7 @@
 package com.ayin90723.adventure_power.mixin;
 
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import com.ayin90723.adventure_power.util.RejectHealthManipUtil;
 import net.minecraft.world.entity.LivingEntity;
@@ -86,7 +87,7 @@ public abstract class RejectHealthManipMixin {
                   && progress.isAbilityEnabled("reject_manip")) {
                 ci.cancel();
                 // 觉醒：反弹 30% 被拒绝的伤害给攻击来源
-                float reflected = (currentHealth - newHealth) * 0.30f;
+                float reflected = (currentHealth - newHealth) * ModConfig.AWAKEN_REJECT_MANIP_REFLECT_RATIO.get().floatValue();
                 net.minecraft.world.entity.Entity lastAttacker = player.getLastHurtByMob();
                 if (lastAttacker != null && reflected > 0.0F && lastAttacker.isAlive()) {
                     lastAttacker.hurt(player.damageSources().magic(), reflected);
