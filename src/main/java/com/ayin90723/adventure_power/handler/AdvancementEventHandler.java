@@ -8,10 +8,13 @@ import net.minecraft.advancements.Advancement;
 import net.minecraft.advancements.AdvancementProgress;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.stats.Stats;
+import net.minecraft.world.entity.EntityType;
 import net.minecraftforge.event.entity.player.AdvancementEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber.Bus;
+import net.minecraftforge.registries.ForgeRegistries;
 
 /**
  * 成就事件处理器 —— 监听原版成就，匹配里程碑后直接解锁。
@@ -56,11 +59,18 @@ public class AdvancementEventHandler {
                     continue;
                 }
             }
-            // 再检查纯 trigger 是否已可触发（survive_night / y_below）
+            // 再检查 trigger 是否已可触发（所有 5 种类型均支持追赶）
             if (m.trigger() != null) {
                 boolean met = switch (m.trigger().type()) {
                     case "survive_night" -> player.level().getDayTime() > 24000 && player.level().isDay();
                     case "y_below" -> player.getY() < (m.trigger().y() != null ? m.trigger().y() : 0);
+                    case "first_death" -> player.getStats().getValue(Stats.CUSTOM.get(Stats.DEATHS)) > 0;
+                    case "first_trade" -> player.getStats().getValue(Stats.CUSTOM.get(Stats.TALKED_TO_VILLAGER)) > 0;
+                    case "first_kill" -> {
+                        if (m.trigger().entity() == null) yield false;
+                        EntityType<?> type = ForgeRegistries.ENTITY_TYPES.getValue(m.trigger().entity());
+                        yield type != null && player.getStats().getValue(Stats.ENTITY_KILLED.get(type)) > 0;
+                    }
                     default -> false;
                 };
                 if (met) {

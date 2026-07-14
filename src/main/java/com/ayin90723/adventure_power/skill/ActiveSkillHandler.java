@@ -89,6 +89,10 @@ public class ActiveSkillHandler {
         if (progressOpt.isEmpty()) return 0;
         var progress = progressOpt.get();
 
+        // 防御性门禁：仅觉醒冒险者可释放审判
+        if (!progress.isFullyUnlocked()) return 0;
+        if (!progress.isAbilityEnabled("active_skill")) return 0;
+
         int milestones = progress.getUnlockedMilestoneCount();
         if (milestones == 0) milestones = 1;
 
@@ -96,10 +100,8 @@ public class ActiveSkillHandler {
         float hpRatio = (float) (double) ModConfig.ACTIVE_SKILL_JUDGMENT_HP_RATIO.get() * milestones;
         double radius = ModConfig.ACTIVE_SKILL_JUDGMENT_RADIUS.get();
 
-        // 觉醒：审判范围 +50%
-        if (progress.isFullyUnlocked()) {
-            radius *= ModConfig.AWAKEN_JUDGMENT_RANGE_MULT.get();
-        }
+        // 觉醒：审判范围 +50%（此时 isFullyUnlocked 已由上方门禁保证为 true）
+        radius *= ModConfig.AWAKEN_JUDGMENT_RANGE_MULT.get();
 
         AABB aabb = player.getBoundingBox().inflate(radius);
         List<LivingEntity> targets = player.level().getEntitiesOfClass(LivingEntity.class, aabb,

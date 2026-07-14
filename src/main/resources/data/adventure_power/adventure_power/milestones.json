@@ -4,28 +4,28 @@
       "id": "first_night",
       "name": "初次夜冕",
       "abilities": ["agility", "digging_power", "perpetual_blessing"],
-      "advancement": "adventure_power:first_night",
+      "advancement": null,
       "trigger": { "type": "survive_night" }
     },
     {
       "id": "first_death",
       "name": "初尝败绩",
       "abilities": ["void_step", "rapid_recovery"],
-      "advancement": "adventure_power:first_death",
+      "advancement": null,
       "trigger": { "type": "first_death" }
     },
     {
       "id": "first_trade",
       "name": "初次交易",
       "abilities": ["soul_bind", "knockback_resist"],
-      "advancement": "adventure_power:first_trade",
+      "advancement": null,
       "trigger": { "type": "first_trade" }
     },
     {
       "id": "first_deep",
       "name": "初探地底",
       "abilities": ["damage_resist", "extended_reach"],
-      "advancement": "adventure_power:first_deep",
+      "advancement": null,
       "trigger": { "type": "y_below", "y": 0 }
     },
     {
@@ -46,14 +46,14 @@
       "id": "wither",
       "name": "凋零之陨",
       "abilities": ["healing_block", "vitality"],
-      "advancement": "minecraft:nether/summon_wither",
+      "advancement": null,
       "trigger": { "type": "first_kill", "entity": "minecraft:wither" }
     },
     {
       "id": "warden",
       "name": "幽匿之惧",
       "abilities": ["resilience", "purified_soul"],
-      "advancement": "minecraft:adventure/kill_a_mob",
+      "advancement": null,
       "trigger": { "type": "first_kill", "entity": "minecraft:warden" }
     },
     {

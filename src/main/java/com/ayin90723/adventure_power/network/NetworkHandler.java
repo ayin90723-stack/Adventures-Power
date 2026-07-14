@@ -298,7 +298,8 @@ public class NetworkHandler {
         public static void handle(AbilityTogglePacket msg, Supplier<NetworkEvent.Context> ctx) {
             ctx.get().enqueueWork(() -> {
                 ServerPlayer player = ctx.get().getSender();
-                if (player != null) {
+                if (player != null && (AdventureProgressCapability.isAdventurer(player)
+                    || AdventureProgressCapability.isFullyUnlocked(player))) {
                     AdventureProgressCapability.toggleAbility(player, msg.id);
                     AdventureProgressCapability.syncToClient(player);
 

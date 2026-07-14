@@ -866,6 +866,9 @@ public class AdventureProgressCapability {
             // 所有里程碑已在上面解锁，无需再授予成就
         }
 
+        // 门禁：非冒险者跳过后续的每 tick 能力处理（Buff 延长/环境免疫/受击坚韧/庇护过期）
+        if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
+
         // Buff 延长（每 3 秒）
         if (progress.isAbilityEnabled("perpetual_blessing")) {
             long lastCheck = lastBuffCheck.getOrDefault(player.getUUID(), -1L);

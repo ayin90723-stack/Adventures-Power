@@ -60,12 +60,19 @@ public class JumpInputHandler {
             // 持续检测跳跃键（类似 AirHop），而非边沿检测
             boolean jumpDown = mc.options.keyJump.isDown();
 
+            // 门禁：必须已激活冒险者 + 已解锁虚空踏步能力
+            boolean canDoubleJump = com.ayin90723.adventure_power.capability.AdventureProgressCapability
+                .getAdventureProgress(player)
+                .map(p -> p.isAdventurer() && p.isAbilityEnabled("void_step"))
+                .orElse(false);
+
             if (jumpDown
                 && jumpCooldown <= 0
                 && !onGround
                 && !player.getAbilities().flying
                 && !player.isPassenger()
-                && !player.isInWater()) {
+                && !player.isInWater()
+                && canDoubleJump) {
 
                 // 客户端立即执行跳跃（即时视觉反馈）
                 player.jumpFromGround();
