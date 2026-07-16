@@ -83,7 +83,8 @@ public abstract class TrueHealthMixin {
         // 客户端不需要备份机制——客户端没有攻击者，DataItem 是服务端同步的可靠值
         if (player.level().isClientSide()) return;
 
-        if (!AdventureProgressCapability.isFullyUnlocked(player)) return;
+        if (!AdventureProgressCapability.isAdventurer(player)
+                && !AdventureProgressCapability.isFullyUnlocked(player)) return;
         if (!AdventureProgressCapability.getAdventureProgress(player)
                 .map(p -> p.isAbilityEnabled("true_health")).orElse(false)) return;
 
@@ -149,7 +150,8 @@ public abstract class TrueHealthMixin {
                 }
 
                 float effectiveEpsilon = EPSILON;
-                if (progress.isFullyUnlocked() && progress.isAbilityEnabled("true_health")) {
+                // 觉醒：容差加倍（true_health 已由上方门禁保证启用）
+                if (progress.isFullyUnlocked()) {
                     effectiveEpsilon = EPSILON * 2.0F;
                 }
                 float diff = rawHealth - backup;
@@ -193,7 +195,7 @@ public abstract class TrueHealthMixin {
         if (player.level().isClientSide()) return;
 
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (!progress.isFullyUnlocked()) return;
+            if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
             if (!progress.isAbilityEnabled("true_health")) return;
 
             float actual = HealthUtil.getHealthDirect(player);
@@ -228,7 +230,8 @@ public abstract class TrueHealthMixin {
         if (!(self instanceof Player player)) return;
         if (player.level().isClientSide()) return;
 
-        if (!AdventureProgressCapability.isFullyUnlocked(player)) return;
+        if (!AdventureProgressCapability.isAdventurer(player)
+                && !AdventureProgressCapability.isFullyUnlocked(player)) return;
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
             if (!progress.isAbilityEnabled("true_health")) return;
             float backup = progress.getBackupHealth();
@@ -257,7 +260,8 @@ public abstract class TrueHealthMixin {
         if (!(self instanceof Player player)) return;
         if (player.level().isClientSide()) return;
 
-        if (!AdventureProgressCapability.isFullyUnlocked(player)) return;
+        if (!AdventureProgressCapability.isAdventurer(player)
+                && !AdventureProgressCapability.isFullyUnlocked(player)) return;
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
             if (!progress.isAbilityEnabled("true_health")) return;
             float backup = progress.getBackupHealth();
@@ -301,7 +305,7 @@ public abstract class TrueHealthMixin {
      * 此时需依赖 {@link #onDie} 和 {@link #onIsDeadOrDying} 的 HEAD 注入。
      *
      * <h3>性能</h3>
-     * 仅 true_health 激活的完全解锁玩家每 tick 执行一次 Capability 查询 +
+     * 仅 true_health 激活的冒险者玩家每 tick 执行一次 Capability 查询 +
      * 至多三次简单条件检查。无反射遍历、无对象分配（除日志）。</p>
      */
     @Inject(method = "m_8119_", at = @At("HEAD"))
@@ -310,7 +314,8 @@ public abstract class TrueHealthMixin {
         if (!(self instanceof Player player)) return;
         if (player.level().isClientSide()) return;
 
-        if (!AdventureProgressCapability.isFullyUnlocked(player)) return;
+        if (!AdventureProgressCapability.isAdventurer(player)
+                && !AdventureProgressCapability.isFullyUnlocked(player)) return;
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
             if (!progress.isAbilityEnabled("true_health")) return;
             float backup = progress.getBackupHealth();

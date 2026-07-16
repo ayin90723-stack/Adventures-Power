@@ -48,7 +48,7 @@ public class RejectHealthManipAttributeMixin {
 
             // 找到所有者，检查能力
             AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-                if (progress.isFullyUnlocked()
+                if ((progress.isAdventurer() || progress.isFullyUnlocked())
                       && progress.isAbilityEnabled("reject_manip")) {
                     ci.cancel();
                 }

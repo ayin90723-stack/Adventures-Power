@@ -83,14 +83,16 @@ public abstract class RejectHealthManipMixin {
 
         // 外部直接 setHealth 降血 → 检查能力
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (progress.isFullyUnlocked()
+            if ((progress.isAdventurer() || progress.isFullyUnlocked())
                   && progress.isAbilityEnabled("reject_manip")) {
                 ci.cancel();
                 // 觉醒：反弹 30% 被拒绝的伤害给攻击来源
-                float reflected = (currentHealth - newHealth) * ModConfig.AWAKEN_REJECT_MANIP_REFLECT_RATIO.get().floatValue();
-                net.minecraft.world.entity.Entity lastAttacker = player.getLastHurtByMob();
-                if (lastAttacker != null && reflected > 0.0F && lastAttacker.isAlive()) {
-                    lastAttacker.hurt(player.damageSources().magic(), reflected);
+                if (progress.isFullyUnlocked()) {
+                    float reflected = (currentHealth - newHealth) * ModConfig.AWAKEN_REJECT_MANIP_REFLECT_RATIO.get().floatValue();
+                    net.minecraft.world.entity.Entity lastAttacker = player.getLastHurtByMob();
+                    if (lastAttacker != null && reflected > 0.0F && lastAttacker.isAlive()) {
+                        lastAttacker.hurt(player.damageSources().magic(), reflected);
+                    }
                 }
             }
         });

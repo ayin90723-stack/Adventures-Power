@@ -36,8 +36,8 @@ import net.minecraftforge.fml.common.Mod;
  *   <li>受击坚韧 (resilience) — 受伤叠层减伤</li>
  * </ul>
  * <p>
- * 门禁检查：soul_bind / purified_soul / soar 需要 isAdventurer() 或 isFullyUnlocked()；
- * resilience 需要 isFullyUnlocked()（已在 AdventureProgressCapability.FULLY_UNLOCKED_ABILITIES 中）。
+ * 门禁检查：所有能力统一需要 isAdventurer() 或 isFullyUnlocked()，
+ * 里程碑归属由 isAbilityEnabled() 内置硬门禁判定（解锁即用）。
  */
 @Mod.EventBusSubscriber(modid = AdventurePower.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class PlayerStateHandler {
@@ -227,8 +227,8 @@ public class PlayerStateHandler {
         if (player.level().isClientSide()) return;
 
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (!progress.isAbilityEnabled("env_immunity")) return;
             if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
+            if (!progress.isAbilityEnabled("env_immunity")) return;
 
             DamageSource source = event.getSource();
 
@@ -265,6 +265,31 @@ public class PlayerStateHandler {
                 || "dryOut".equals(msgId)) {
                 event.setCanceled(true);
             }
+        });
+    }
+
+    // ========================================================================
+    //  1.5 旅者庇护 (Sanctuary) — 无敌期伤害拦截
+    // ========================================================================
+
+    /**
+     * 庇护无敌：无敌期内取消所有攻击事件。
+     * <p>
+     * HIGHEST 优先级——在伤害处理中优先于其他防御（灵巧闪避/伤害抗性等）。
+     * 与原版无敌语义一致，{@code BYPASSES_INVULNERABILITY}（/kill、虚空）不拦截。
+     */
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onSanctuaryDamage(LivingAttackEvent event) {
+        if (event.isCanceled()) return;
+        if (!(event.getEntity() instanceof Player player)) return;
+        if (player.level().isClientSide()) return;
+
+        AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
+            if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
+            if (!progress.isAbilityEnabled("active_skill")) return;
+            if (!progress.isSanctuaryInvulnerable(player.level().getGameTime())) return;
+            if (event.getSource().is(DamageTypeTags.BYPASSES_INVULNERABILITY)) return;
+            event.setCanceled(true);
         });
     }
 
@@ -373,21 +398,23 @@ public class PlayerStateHandler {
             removeUndyingGearAwakened(player);
         }
 
-        // ---- 旅者庇护觉醒：减速而非锁定 ----
+        // ---- 旅者庇护：非觉醒锁定移动，觉醒减速移动 ----
         long sanctuaryNow = player.level().getGameTime();
         boolean inSanctuary = progress.getSanctuaryInvulEnd() > sanctuaryNow
-            && progress.isFullyUnlocked()
             && progress.isAbilityEnabled("active_skill");
         var sanctuarySpeedAttr = player.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED);
         if (inSanctuary && sanctuarySpeedAttr != null) {
-            double target = 0.1 * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SANCTUARY_SPEED.get();
+            double target = progress.isFullyUnlocked()
+                ? 0.1 * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SANCTUARY_SPEED.get()
+                : 0.0;
             if (Math.abs(sanctuarySpeedAttr.getBaseValue() - target) > 0.001) {
                 sanctuarySpeedAttr.setBaseValue(target);
             }
         } else if (!inSanctuary && sanctuarySpeedAttr != null) {
-            // 庇护结束后恢复原版移动速度
+            // 庇护结束后恢复原版移动速度（仅当仍处于本模组写入的锁定/减速值时）
             double slowSpeed = 0.1 * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SANCTUARY_SPEED.get();
-            if (Math.abs(sanctuarySpeedAttr.getBaseValue() - slowSpeed) < 0.001) {
+            double base = sanctuarySpeedAttr.getBaseValue();
+            if (Math.abs(base - slowSpeed) < 0.001 || Math.abs(base) < 0.001) {
                 sanctuarySpeedAttr.setBaseValue(0.1);
             }
         }
@@ -413,7 +440,7 @@ public class PlayerStateHandler {
         if (player.level().isClientSide()) return;
 
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (!progress.isFullyUnlocked()) return;
+            if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
             if (!progress.isAbilityEnabled("resilience")) return;
 
             long currentTime = player.level().getGameTime();

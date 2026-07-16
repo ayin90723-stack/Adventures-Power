@@ -86,8 +86,9 @@ public class InputHandler {
                 }
             }
 
-            // 主动技能 — 门禁检查
-            if (AdventureProgressCapability.isFullyUnlocked(mc.player)) {
+            // 主动技能 — 门禁检查（体验预检，服务端另有校验）
+            if (AdventureProgressCapability.isAdventurer(mc.player)
+                || AdventureProgressCapability.isFullyUnlocked(mc.player)) {
                 // 玩家引用变化 → 重置追踪状态
                 if (mc.player != lastActiveSkillPlayer) {
                     lastActiveSkillPlayer = mc.player;

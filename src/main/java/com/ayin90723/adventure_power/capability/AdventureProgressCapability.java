@@ -131,9 +131,6 @@ public class AdventureProgressCapability {
         KNOWN_ABILITIES.put("active_skill", Component.translatable("ability.adventure_power.active_skill"));
     }
 
-    /** 需要 fullyUnlocked 的能力 ID（已废弃 — 改为里程碑制，保留空集以兼容现有调用方） */
-    private static final Set<String> FULLY_UNLOCKED_ABILITIES = Set.of();
-
     /** 检查指定能力在当前玩家进度下是否可用（基于里程碑数） */
     public static boolean isAbilityAvailable(Player player, String id) {
         if (!KNOWN_ABILITIES.containsKey(id)) return false;
@@ -769,7 +766,7 @@ public class AdventureProgressCapability {
         if (player.level().isClientSide()) return;
 
         getAdventureProgress(player).ifPresent(progress -> {
-            if (!progress.isFullyUnlocked()) return;
+            if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
             if (!progress.isAbilityEnabled("death_defy")) return;
 
             long currentTime = player.level().getGameTime();

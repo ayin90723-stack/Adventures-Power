@@ -38,7 +38,7 @@ public class ActiveSkillHudOverlay {
         if (progressOpt.isEmpty()) return;
         var progress = progressOpt.get();
 
-        if (!progress.isFullyUnlocked()) return;
+        if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
         if (!progress.isAbilityEnabled("active_skill")) return;
 
         long currentTime = mc.level.getGameTime();

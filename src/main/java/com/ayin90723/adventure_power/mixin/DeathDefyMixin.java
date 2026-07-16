@@ -46,7 +46,7 @@ public abstract class DeathDefyMixin {
         if (newHealth >= currentHealth) return;
 
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (progress.isFullyUnlocked()
+            if ((progress.isAdventurer() || progress.isFullyUnlocked())
                   && progress.isAbilityEnabled("death_defy")
                   && progress.isDeathDefyInvulnerable(player.level().getGameTime())) {
                 ci.cancel();
@@ -71,7 +71,7 @@ public abstract class DeathDefyMixin {
         if (player.level().isClientSide()) return;
 
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (!progress.isFullyUnlocked()) return;
+            if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
             if (!progress.isAbilityEnabled("death_defy")) return;
             if (!progress.isDeathDefyInvulnerable(player.level().getGameTime())) return;
 
