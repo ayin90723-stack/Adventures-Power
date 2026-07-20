@@ -121,7 +121,6 @@ public class ModConfig {
 
     // === 觉醒 — 嗜血 ===
     public static final DoubleValue AWAKEN_LIFESTEAL_SHIELD_CAP;
-    public static final IntValue AWAKEN_LIFESTEAL_SHIELD_DURATION;
 
     // === 觉醒 — 净魂 ===
     public static final IntValue AWAKEN_PURIFIED_SOUL_RADIUS;
@@ -339,8 +338,6 @@ public class ModConfig {
             .defineInRange("awaken_shadow_kill_aoe_max_targets", 16, 1, 200);
         AWAKEN_LIFESTEAL_SHIELD_CAP = BUILDER.comment("觉醒嗜血 — 吸收护盾上限（生命比例）")
             .defineInRange("awaken_lifesteal_shield_cap", 0.2, 0.0, 1.0);
-        AWAKEN_LIFESTEAL_SHIELD_DURATION = BUILDER.comment("觉醒嗜血 — 吸收护盾持续时间（tick）")
-            .defineInRange("awaken_lifesteal_shield_duration", 100, 20, 72000);
         AWAKEN_PURIFIED_SOUL_RADIUS = BUILDER.comment("觉醒净魂 — 虚弱光环半径（格）")
             .defineInRange("awaken_purified_soul_radius", 16, 1, 128);
         AWAKEN_JUDGMENT_RANGE_MULT = BUILDER.comment("觉醒旅者审判 — 范围倍率")
