@@ -4,10 +4,10 @@ import com.ayin90723.adventure_power.config.ModConfig;
 import net.minecraft.network.chat.Component;
 
 /**
- * 虚空踏步 — 跳跃高度提升（跳跃倍率）。
+ * 虚空踏步 - 空中多段跳。
  * 解锁条件：2 里程碑
- * 成长公式：base + per_milestone × (count - required)
- * 默认范围：1.0x → 1.24x
+ * 数值：固定跳跃力度倍率（{@link ModConfig#VOID_STEP_POWER}），无里程碑成长。
+ * 觉醒后由 {@link ModConfig#AWAKEN_VOID_STEP_JUMPS} 控制三段跳。
  */
 public class VoidStepAbility implements Ability {
 
@@ -27,18 +27,10 @@ public class VoidStepAbility implements Ability {
     }
 
     /**
-     * 返回跳跃倍率。从配置读取 base + per_milestone × (count - required)。
+     * 返回空中跳跃力度倍率（固定值，由 {@code VOID_STEP_POWER} 配置）。
      */
-
-    private int countAtUnlock = 2;
-
-    @Override
-    public void setCountAtUnlock(int n) {
-        this.countAtUnlock = n;
-    }
-
     @Override
     public float value(int count) {
-        return (float)(ModConfig.VOID_STEP_BASE.get() + ModConfig.VOID_STEP_PER_MILESTONE.get() * (count - countAtUnlock));
+        return ModConfig.VOID_STEP_POWER.get().floatValue();
     }
 }

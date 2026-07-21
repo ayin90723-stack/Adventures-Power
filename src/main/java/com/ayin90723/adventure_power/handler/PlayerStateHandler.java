@@ -8,6 +8,8 @@ import java.util.UUID;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.network.protocol.game.ClientboundSetExperiencePacket;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.effect.MobEffectCategory;
@@ -66,12 +68,15 @@ public class PlayerStateHandler {
     // ========================================================================
 
     /**
-     * 玩家死亡前保存活跃效果和经验值到 persistentData。
+     * 玩家死亡前保存正面效果和经验到 persistentData。
      * <p>
-     * 优先级 HIGHEST 以确保在其他修改死亡的逻辑之前保存数据。
-     * 即使死亡被其他 handler 取消，数据已写入也不影响（clone 时会按数据恢复）。
+     * 优先级 LOW：让死亡抗拒（DeathDefy，HIGHEST）等可能取消死亡的逻辑先执行，
+     * 仅在死亡确认不被取消时才保存与清零，避免"死亡被救却已清零经验、key 残留"的错乱。
+     * <p>
+     * 清零经验等级防止死亡掉落经验球（原版 {@code LivingEntity.dropExperience} 对玩家亦生效，
+     * 被玩家击杀时会掉落）。经验已先保存到 persistentData，重生时按精确值恢复，故清零不丢数据。
      */
-    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    @SubscribeEvent(priority = EventPriority.LOW)
     public static void onPlayerDeath(LivingDeathEvent event) {
         if (!(event.getEntity() instanceof Player player)) return;
         if (player.level().isClientSide()) return;
@@ -80,24 +85,29 @@ public class PlayerStateHandler {
             if (!progress.isAbilityEnabled("soul_bind")) return;
             if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
 
-            // 保存所有活跃效果（包括正面和负面，死后复活时统一恢复原状）
+            // 只保存正面效果（与能力描述"保留正面效果"一致），负面效果随死亡清除
             CompoundTag buffsTag = new CompoundTag();
             ListTag effectList = new ListTag();
             for (MobEffectInstance effect : player.getActiveEffects()) {
-                effectList.add(effect.save(new CompoundTag()));
+                if (effect.getEffect().getCategory() == MobEffectCategory.BENEFICIAL) {
+                    effectList.add(effect.save(new CompoundTag()));
+                }
             }
             buffsTag.put("effects", effectList);
             player.getPersistentData().put(SOUL_BIND_BUFFS_KEY, buffsTag);
 
-            // 保存总经验值
-            player.getPersistentData().putInt(SOUL_BIND_EXP_KEY, player.totalExperience);
+            // 保存经验三字段（level/progress/total），重生时精确恢复而非累加重算
+            CompoundTag expTag = new CompoundTag();
+            expTag.putInt("level", player.experienceLevel);
+            expTag.putFloat("progress", player.experienceProgress);
+            expTag.putInt("total", player.totalExperience);
+            player.getPersistentData().put(SOUL_BIND_EXP_KEY, expTag);
 
-            // 觉醒：死亡时清零经验等级防止掉落经验球（经验值已在上方保存，重生后恢复）
-            if (progress.isFullyUnlocked()) {
-                player.experienceLevel = 0;
-                player.experienceProgress = 0.0F;
-                player.totalExperience = 0;
-            }
+            // 清零经验等级防止死亡掉落经验球（否则重生恢复 + 捡经验球 = 双倍）。
+            // 经验已在上方保存，清零不丢数据；对所有情况生效（旧版仅觉醒清零，非觉醒会双倍）。
+            player.experienceLevel = 0;
+            player.experienceProgress = 0.0F;
+            player.totalExperience = 0;
         });
     }
 
@@ -117,7 +127,7 @@ public class PlayerStateHandler {
         if (player.level().isClientSide()) return;
 
         if (event.isWasDeath()) {
-            // 死亡 clone：恢复保存的 Buff 和经验
+            // 死亡 clone：恢复保存的正面 Buff 和经验
             CompoundTag buffsTag = original.getPersistentData().getCompound(SOUL_BIND_BUFFS_KEY);
             if (!buffsTag.isEmpty()) {
                 ListTag effectList = buffsTag.getList("effects", Tag.TAG_COMPOUND);
@@ -130,16 +140,25 @@ public class PlayerStateHandler {
                 original.getPersistentData().remove(SOUL_BIND_BUFFS_KEY);
             }
 
-            if (original.getPersistentData().contains(SOUL_BIND_EXP_KEY)) {
-                int savedExp = original.getPersistentData().getInt(SOUL_BIND_EXP_KEY);
-                if (savedExp > 0) {
-                    player.giveExperiencePoints(savedExp);
-                }
+            // 精确恢复经验三字段（直接赋值，避免 giveExperiencePoints 的 increaseScore 副作用与 level 重算偏差）
+            if (original.getPersistentData().contains(SOUL_BIND_EXP_KEY, Tag.TAG_COMPOUND)) {
+                CompoundTag expTag = original.getPersistentData().getCompound(SOUL_BIND_EXP_KEY);
+                player.experienceLevel = expTag.getInt("level");
+                player.experienceProgress = expTag.getFloat("progress");
+                player.totalExperience = expTag.getInt("total");
                 original.getPersistentData().remove(SOUL_BIND_EXP_KEY);
+
+                // 防御性同步：显式发包确保客户端立即显示正确经验，
+                // 兜住 respawn 时序或其他 mod 干扰导致的客户端显示不同步
+                if (player instanceof ServerPlayer serverPlayer) {
+                    serverPlayer.connection.send(new ClientboundSetExperiencePacket(
+                        player.experienceProgress, player.totalExperience, player.experienceLevel));
+                }
             }
         } else {
-            // 非死亡 clone（维度切换）：转移可能残留的 soul_bind 数据
-            transferSoulBindData(original, player);
+            // 非死亡 clone（维度切换）：无需转移 soul_bind 数据。
+            // SOUL_BIND_*_KEY 仅在死亡时写入并由死亡分支消费 + remove，维度切换时 original 不持有这些 key；
+            // 经验由原版 restoreFrom 复制，buff 由原版保留，灵魂绑定不干预维度切换。
         }
 
         // 维度切换后恢复翱翔飞行能力（mayfly 被重置）
@@ -172,20 +191,6 @@ public class PlayerStateHandler {
             player.getAbilities().mayfly = true;
             progress.setSoarGrantedFlight(true);
             player.onUpdateAbilities();
-        }
-    }
-
-    /** 跨维度转移 soul_bind 持久数据，防止末地返回传送门等场景下数据丢失 */
-    private static void transferSoulBindData(Player original, Player player) {
-        CompoundTag buffsTag = original.getPersistentData().getCompound(SOUL_BIND_BUFFS_KEY);
-        if (!buffsTag.isEmpty()) {
-            player.getPersistentData().put(SOUL_BIND_BUFFS_KEY, buffsTag);
-        }
-        if (original.getPersistentData().contains(SOUL_BIND_EXP_KEY)) {
-            int exp = original.getPersistentData().getInt(SOUL_BIND_EXP_KEY);
-            if (exp > 0) {
-                player.getPersistentData().putInt(SOUL_BIND_EXP_KEY, exp);
-            }
         }
     }
 

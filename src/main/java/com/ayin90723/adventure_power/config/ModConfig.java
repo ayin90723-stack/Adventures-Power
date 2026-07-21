@@ -45,8 +45,7 @@ public class ModConfig {
     public static final IntValue HEALING_BLOCK_PER_MILESTONE;
 
     // --- 虚空踏步 ---
-    public static final DoubleValue VOID_STEP_BASE;
-    public static final DoubleValue VOID_STEP_PER_MILESTONE;
+    public static final DoubleValue VOID_STEP_POWER;
 
     // --- 恩赐永驻 ---
     public static final IntValue PERPETUAL_BLESSING_BASE;
@@ -225,10 +224,8 @@ public class ModConfig {
         BUILDER.pop();
 
         BUILDER.push("虚空踏步");
-        VOID_STEP_BASE = BUILDER.comment("基础跳跃倍率，里程碑2时的值")
-            .defineInRange("void_step_base", 1.0, 0.5, 5.0);
-        VOID_STEP_PER_MILESTONE = BUILDER.comment("每额外里程碑增加的跳跃倍率")
-            .defineInRange("void_step_per_milestone", 0.03, 0.0, 1.0);
+        VOID_STEP_POWER = BUILDER.comment("空中跳跃力度倍率（在原版 0.42 跳跃力基础上叠加），客户端预测与服务端权威共用，保证两端一致")
+            .defineInRange("void_step_power", 1.2, 0.5, 5.0);
         BUILDER.pop();
 
         BUILDER.push("恩赐永驻");
