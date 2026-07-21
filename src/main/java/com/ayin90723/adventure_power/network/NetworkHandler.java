@@ -67,9 +67,9 @@ public class NetworkHandler {
 
     // ===== 发送方法 =====
 
-    /** 客户端发送二段跳请求 */
-    public static void sendDoubleJumpRequest() {
-        INSTANCE.sendToServer(new DoubleJumpPacket());
+    /** 客户端发送二段跳请求（携带当前空气周期 ID 用于陈旧包校验） */
+    public static void sendDoubleJumpRequest(int airPhaseId) {
+        INSTANCE.sendToServer(new DoubleJumpPacket(airPhaseId));
     }
 
     /** 客户端请求同步排除列表 */
@@ -101,20 +101,20 @@ public class NetworkHandler {
 
     /** 客户端→服务端：二段跳请求 */
     public static class DoubleJumpPacket {
-        public DoubleJumpPacket() {}
-        public DoubleJumpPacket(FriendlyByteBuf buf) {}
+        public final int airPhaseId;
+        public DoubleJumpPacket() { this(0); }
+        public DoubleJumpPacket(int airPhaseId) { this.airPhaseId = airPhaseId; }
+        public DoubleJumpPacket(FriendlyByteBuf buf) { this.airPhaseId = buf.readVarInt(); }
 
-        public static void encode(DoubleJumpPacket msg, FriendlyByteBuf buf) {}
+        public static void encode(DoubleJumpPacket msg, FriendlyByteBuf buf) { buf.writeVarInt(msg.airPhaseId); }
 
-        public static DoubleJumpPacket decode(FriendlyByteBuf buf) {
-            return new DoubleJumpPacket(buf);
-        }
+        public static DoubleJumpPacket decode(FriendlyByteBuf buf) { return new DoubleJumpPacket(buf); }
 
         public static void handle(DoubleJumpPacket msg, Supplier<NetworkEvent.Context> ctx) {
             ctx.get().enqueueWork(() -> {
                 ServerPlayer player = ctx.get().getSender();
                 if (player != null) {
-                    DoubleJumpHandler.handleDoubleJump(player);
+                    DoubleJumpHandler.handleDoubleJump(player, msg.airPhaseId);
                 }
             });
             ctx.get().setPacketHandled(true);

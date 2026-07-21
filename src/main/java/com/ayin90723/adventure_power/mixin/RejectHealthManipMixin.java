@@ -112,9 +112,16 @@ public abstract class RejectHealthManipMixin {
 
     @Inject(method = "m_21051_", at = @At("RETURN"))
     private void trackAttrOwner(Attribute attribute, CallbackInfoReturnable<AttributeInstance> cir) {
+        if (attribute != Attributes.MAX_HEALTH) return;
         AttributeInstance instance = cir.getReturnValue();
-        if (attribute == Attributes.MAX_HEALTH && instance != null) {
-            RejectHealthManipUtil.ATTR_OWNER.put(instance, (LivingEntity) (Object) this);
-        }
+        if (instance == null) return;
+        LivingEntity self = (LivingEntity) (Object) this;
+        // 门禁前置：reject_manip 只对冒险者生效，非冒险者玩家与所有非玩家实体直接跳过，
+        // 避免对绝大多数 getAttribute(MAX_HEALTH) 调用做无意义的 map 操作
+        if (!(self instanceof Player player)) return;
+        if (!AdventureProgressCapability.isAdventurer(player)
+            && !AdventureProgressCapability.isFullyUnlocked(player)) return;
+        // putIfAbsent：同一 instance 首次追踪后跳过，避免重复 put 开销
+        RejectHealthManipUtil.ATTR_OWNER.putIfAbsent(instance, player);
     }
 }

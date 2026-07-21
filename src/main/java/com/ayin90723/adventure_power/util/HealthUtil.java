@@ -123,7 +123,9 @@ public class HealthUtil {
                 }
             }
             if (DATA_HEALTH_ID != null) {
-                target.getEntityData().set(DATA_HEALTH_ID, health);
+                // 直写 DataItem.value（绕过 SynchedEntityData.set），避免触发 onSyncedDataUpdated：
+                // 某些实体重写 onSyncedDataUpdated 在血量变化时调 move 等重操作导致卡死
+                writeValueDirect(target.getEntityData(), DATA_HEALTH_ID, health);
             }
         } catch (IllegalAccessException | ClassCastException e) {
             e.printStackTrace();
@@ -206,6 +208,38 @@ public class HealthUtil {
      * @param health 目标血量值
      */
     @SuppressWarnings("unchecked")
+    /** DataItem.setValue 方法反射（直写 value + setDirty，绕过 onSyncedDataUpdated） */
+    private static java.lang.reflect.Method DATA_ITEM_SET_VALUE_METHOD;
+
+    /**
+     * 直写 EntityDataAccessor 对应 DataItem 的 value（调用 DataItem.setValue），
+     * 绕过 SynchedEntityData.set，避免触发 onSyncedDataUpdated。
+     *
+     * <p>某些实体（如天境史维特）重写 onSyncedDataUpdated，在特定 accessor 变化时
+     * 调 move() 触发重碰撞计算。若通过 data.set() 写入会触发该回调导致卡死。
+     * 本方法直接写 DataItem.value + setDirty（保证客户端同步），不触发任何 onSyncedDataUpdated。</p>
+     */
+    @SuppressWarnings("unchecked")
+    private static <T> void writeValueDirect(SynchedEntityData data, EntityDataAccessor<T> key, T value) {
+        if (ENTITY_DATA_ITEMS_FIELD == null) {
+            data.set(key, value);  // 反射初始化失败，降级为标准路径
+            return;
+        }
+        try {
+            Map<Integer, Object> items = (Map<Integer, Object>) ENTITY_DATA_ITEMS_FIELD.get(data);
+            if (items == null) { data.set(key, value); return; }
+            Object dataItem = items.get(key.getId());
+            if (dataItem == null) { data.set(key, value); return; }
+            if (DATA_ITEM_SET_VALUE_METHOD == null) {
+                DATA_ITEM_SET_VALUE_METHOD = dataItem.getClass().getDeclaredMethod("setValue", Object.class);
+                DATA_ITEM_SET_VALUE_METHOD.setAccessible(true);
+            }
+            DATA_ITEM_SET_VALUE_METHOD.invoke(dataItem, value);
+        } catch (Exception e) {
+            data.set(key, value);  // 反射失败，降级
+        }
+    }
+
     public static void setAllHealthLikeDirect(LivingEntity target, float health) {
         // ① 原版血条
         setHealthDirect(target, health);
@@ -218,7 +252,7 @@ public class HealthUtil {
         net.minecraft.network.syncher.SynchedEntityData data = target.getEntityData();
         for (EntityDataAccessor<Float> key : customKeys) {
             try {
-                data.set(key, health);
+                writeValueDirect(data, key, health);
             } catch (Exception ignored) {
                 // 极少见：entity 销毁后调用 / 类型不匹配 —— 静默跳过
             }
@@ -358,6 +392,8 @@ public class HealthUtil {
     private static Set<EntityDataAccessor<Float>> scanCustomHealthKeys(LivingEntity target) {
         Set<EntityDataAccessor<Float>> keys = new LinkedHashSet<>();
         net.minecraft.network.syncher.SynchedEntityData data = target.getEntityData();
+        // 扫描时的当前血量：用于区分血量条目与非血量 Float 条目（如水伤害比例）
+        float currentHealth = getHealthDirect(target);
 
         Class<?> current = target.getClass();
         while (current != null && current != Object.class) {
@@ -373,10 +409,13 @@ public class HealthUtil {
                     // 排除已知的原版血量 key（由 setHealthDirect 单独处理）
                     if (DATA_HEALTH_ID != null && accessor == DATA_HEALTH_ID) continue;
 
-                    // 验证实际存储值为 Float 类型
+                    // 验证值为 Float 类型且约等于当前血量，排除非血量 Float
+                    // （如天境史维特的 DATA_WATER_DAMAGE_SCALE 值 0-1，非血量，
+                    //  误写入会触发 onSyncedDataUpdated -> Slime.move -> 碰撞计算卡死）
                     try {
                         Object value = data.get(accessor);
-                        if (value instanceof Float) {
+                        if (value instanceof Float f
+                            && Math.abs(f - currentHealth) <= Math.max(1.0F, currentHealth * 0.1F)) {
                             keys.add((EntityDataAccessor<Float>) accessor);
                         }
                     } catch (Exception e) {

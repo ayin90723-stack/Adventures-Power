@@ -13,103 +13,95 @@ import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
 /**
  * 空中多段跳客户端输入检测。
  * <p>
- * 参照 AirHop 的设计：使用持续跳跃键检测（而非边沿检测），配合冷却机制防止连发。
- * 与原版 {@code noJumpDelay} 行为等价：玩家起跳后按住空格，冷却到期自动触发空中跳跃。
+ * 采用<b>边沿检测</b>：追踪空格「按下瞬间」，按一下跳一次，松开再按再触发下一次。
+ * 地面起跳仍走原版（按住空格由原版 noJumpDelay 控制连续地面跳），空中跳必须松开空格再按。
+ * 这样玩家从地面起跳后可立即按出二段跳，无强制冷却等待，手感对齐其他多段跳模组。
  * </p>
  * <p>
- * 冷却逻辑：
- * </p>
- * <ol>
- *   <li>地面起跳瞬间 -> 冷却设为 10 tick（匹配原版 noJumpDelay 行为）</li>
- *   <li>每 tick 递减冷却</li>
- *   <li>冷却归零 + 空中 + 按住空格 + 仍有剩余跳数 -> 触发多段跳 -> 冷却重置为 10</li>
- *   <li>落地时冷却与跳数清零</li>
- * </ol>
- * <p>
- * <b>客户端跳数限制（关键）</b>：客户端必须自行维护 {@code clientJumpsUsed} 并以
- * {@link VoidStepMovement#getMaxAirJumps} 为天花板。否则超过服务端允许次数后，客户端仍会持续
- * 施力（覆盖 Y + 疾跑水平冲量），而服务端不再发 motion 包纠正 -> 水平速度累积飞出、垂直悬停，
- * 即历史"突然飞出去"bug 的根因。
+ * <b>陈旧网络包防护</b>：每个空中周期（落地->起跳->落地）分配唯一递增 {@code airPhaseId}，
+ * 请求携带此 id，服务端比对不匹配直接丢弃，防止网络延迟导致陈旧包在新周期重新通过校验并叠加冲量。
  * </p>
  * <p>
- * <b>施力一致性</b>：客户端预测调用 {@link VoidStepMovement#applyJump}，与服务端完全相同的公式，
- * 服务端 motion 包到达时数值一致，无抖动。
+ * <b>客户端跳数限制</b>：客户端必须自行维护 {@code clientJumpsUsed} 并以
+ * {@link VoidStepMovement#getMaxAirJumps} 为天花板，避免超过服务端允许次数后客户端仍持续施力。
+ * </p>
+ * <p>
+ * <b>施力分工</b>：客户端预测仅动 Y（{@code addSprintBoost=false}），水平冲量交服务端施加。
+ * 避免两端 {@code isSprinting()} 采样不同步导致 motion 包覆盖时水平跳变，
+ * 亦防止服务端静默 return 时客户端保留水平冲量斜飞（配合 {@link DoubleJumpHandler} 的统一 motion 同步兜底）。
  * </p>
  */
 @EventBusSubscriber(Dist.CLIENT)
 public class JumpInputHandler {
-    /** 空中跳跃冷却（tick），模拟原版 noJumpDelay 行为 */
-    private static int jumpCooldown = 0;
     /** 上一 tick 的 onGround 状态，用于检测"刚离开地面"的瞬间 */
     private static boolean wasOnGround = true;
-    /** 客户端已消耗的空中跳跃次数（与服务端 JUMPS_USED 对齐），落地清零 */
+    /** 客户端已消耗的空中跳跃次数（与服务端对齐），落地清零 */
     private static int clientJumpsUsed = 0;
+    /** 当前空中周期 ID，落地递增，用于陈旧网络包防护 */
+    private static int currentAirPhaseId = 0;
+    /** 上一 tick 的空格按下状态，用于边沿检测（按下瞬间触发一次） */
+    private static boolean wasJumpDown = false;
     /** 上一 tick 的玩家引用，用于检测死亡重生/跨维度导致的实体替换 */
     private static Player lastPlayer = null;
 
     @SubscribeEvent
     public static void onClientTick(ClientTickEvent event) {
-        if (event.phase == Phase.END) {
-            var mc = Minecraft.getInstance();
-            var player = mc.player;
-            if (player == null || mc.level == null) return;
+        if (event.phase != Phase.END) return;
 
-            // 玩家引用变化（死亡重生/跨维度）-> 重置全部状态，避免残留导致异常
-            if (player != lastPlayer) {
-                lastPlayer = player;
-                jumpCooldown = 0;
-                wasOnGround = true;
-                clientJumpsUsed = 0;
-            }
+        var mc = Minecraft.getInstance();
+        var player = mc.player;
+        if (player == null || mc.level == null) return;
 
-            boolean onGround = player.onGround();
+        // 玩家引用变化（死亡重生/跨维度）-> 重置跳数与按键状态，保留 airPhaseId 继续递增
+        // （避免重生后 id 回到 0 与服务端残留 state 冲突；id 单调递增保证新周期必被识别）
+        if (player != lastPlayer) {
+            lastPlayer = player;
+            wasOnGround = true;
+            clientJumpsUsed = 0;
+            wasJumpDown = false;
+        }
 
-            // 刚离开地面 -> 设置初始冷却（与原版 noJumpDelay = 10 行为一致）
-            if (wasOnGround && !onGround && jumpCooldown <= 0) {
-                jumpCooldown = 10;
-            }
+        boolean onGround = player.onGround();
 
-            // 冷却递减
-            if (jumpCooldown > 0) {
-                jumpCooldown--;
-            }
+        // 刚离开地面 -> 新空中周期，id 递增（不再设冷却，消除"跳起后要等"的延迟）
+        if (wasOnGround && !onGround) {
+            currentAirPhaseId++;
+        }
 
-            // 落地 -> 重置冷却与跳数
-            if (onGround) {
-                jumpCooldown = 0;
-                clientJumpsUsed = 0;
-            }
+        // 落地 -> 重置跳数，保持周期 id（下次离开地面再递增）
+        if (onGround) {
+            clientJumpsUsed = 0;
+        }
+        wasOnGround = onGround;
 
-            wasOnGround = onGround;
+        // 边沿检测：先算边沿（用上一帧 wasJumpDown），再更新 wasJumpDown
+        boolean jumpDown = mc.options.keyJump.isDown();
+        boolean jumpEdge = jumpDown && !wasJumpDown;
+        wasJumpDown = jumpDown;
 
-            // 持续检测跳跃键（类似 AirHop），而非边沿检测
-            boolean jumpDown = mc.options.keyJump.isDown();
+        // 门禁：必须已激活冒险者 + 已解锁虚空踏步能力
+        boolean abilityReady = AdventureProgressCapability.getAdventureProgress(player)
+            .map(p -> p.isAdventurer() && p.isAbilityEnabled("void_step"))
+            .orElse(false);
+        if (!abilityReady) return;
 
-            // 门禁：必须已激活冒险者 + 已解锁虚空踏步能力
-            boolean abilityReady = AdventureProgressCapability.getAdventureProgress(player)
-                .map(p -> p.isAdventurer() && p.isAbilityEnabled("void_step"))
-                .orElse(false);
+        int maxJumps = VoidStepMovement.getMaxAirJumps(player);
 
-            if (jumpDown
-                && jumpCooldown <= 0
-                && !onGround
-                && !player.getAbilities().flying
-                && !player.isPassenger()
-                && !player.isInWater()
-                && abilityReady
-                && clientJumpsUsed < VoidStepMovement.getMaxAirJumps(player)) {
+        if (jumpEdge
+            && !onGround
+            && !player.getAbilities().flying
+            && !player.isPassenger()
+            && !player.isInWater()
+            && clientJumpsUsed < maxJumps) {
 
-                // 客户端预测：与服务端相同的 Y 计算，水平冲量不加（由服务端加，避免重复叠加）
-                float power = VoidStepMovement.calculateJumpPower(player);
-                VoidStepMovement.applyJump(player, power, false);
+            // 客户端预测：仅动 Y（水平冲量交服务端），公式与服务端一致，motion 包到达时数值一致无抖动
+            float power = VoidStepMovement.calculateJumpPower(player);
+            VoidStepMovement.applyJump(player, power, false);
 
-                // 防止连发
-                jumpCooldown = 10;
-                // 消耗客户端跳数（与服务端对齐）
-                clientJumpsUsed++;
-                // 发送请求到服务端执行正式逻辑（服务端再校验跳数并同步 motion）
-                NetworkHandler.sendDoubleJumpRequest();
-            }
+            // 消耗客户端跳数（与服务端对齐）
+            clientJumpsUsed++;
+            // 发送请求到服务端执行正式逻辑，携带当前 airPhaseId 用于陈旧包校验
+            NetworkHandler.sendDoubleJumpRequest(currentAirPhaseId);
         }
     }
 }

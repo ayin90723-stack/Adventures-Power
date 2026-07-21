@@ -66,8 +66,12 @@ public class CombatAbilityHandler {
     /** 防重入：正在斩杀中的目标 */
     private static final Set<UUID> KILLING = ConcurrentHashMap.newKeySet();
 
-    /** BossBar 缓存 */
-    private static final Map<UUID, ServerBossEvent> SHADOW_HP_BARS = new ConcurrentHashMap<>();
+    /**
+     * 每攻击者对每目标的影子血量 BossBar：attacker UUID -> target UUID -> bar。
+     * <p>多人独立：A、B 同打一 Boss 各有独立 bar 显示各自影子血量，互不干扰；
+     * 玩家登出只清自己的 bar，不影响他人；target 死亡时清所有攻击者对该 target 的 bar。</p>
+     */
+    private static final Map<UUID, Map<UUID, ServerBossEvent>> SHADOW_HP_BARS = new ConcurrentHashMap<>();
 
     /** 影子血量过期清理 tick 计数器，每 200 tick（10秒）执行一次全局清理 */
     private static int shadowHpCleanupTick = 0;
@@ -430,22 +434,29 @@ public class CombatAbilityHandler {
         String nameShadow = String.format("%.1f", shadowHP);
         String nameTotal = String.format("%.1f", totalHP);
 
-        ServerBossEvent bar = SHADOW_HP_BARS.computeIfAbsent(target.getUUID(), uuid -> {
-            ServerBossEvent b = new ServerBossEvent(
-                Component.translatable("ability.adventure_power.shadow_kill.bar", nameShadow, nameTotal),
-                BossBarColor.PURPLE, BossBarOverlay.PROGRESS);
-            b.setVisible(true);
-            return b;
-        });
+        // 双层 computeIfAbsent：每个攻击者对每个目标拥有独立 BossBar，多人同打一 Boss 互不覆盖
+        ServerBossEvent bar = SHADOW_HP_BARS
+            .computeIfAbsent(player.getUUID(), k -> new ConcurrentHashMap<>())
+            .computeIfAbsent(target.getUUID(), uuid -> {
+                ServerBossEvent b = new ServerBossEvent(
+                    Component.translatable("ability.adventure_power.shadow_kill.bar", nameShadow, nameTotal),
+                    BossBarColor.PURPLE, BossBarOverlay.PROGRESS);
+                b.setVisible(true);
+                return b;
+            });
         bar.setName(Component.translatable("ability.adventure_power.shadow_kill.bar", nameShadow, nameTotal));
         bar.setProgress(progress);
         bar.addPlayer(sp);
     }
 
     private static void removeShadowHPBossBar(LivingEntity target) {
-        ServerBossEvent bar = SHADOW_HP_BARS.remove(target.getUUID());
-        if (bar != null) {
-            bar.removeAllPlayers();
+        // target 死亡/斩杀：遍历所有攻击者，移除他们对该 target 的 BossBar
+        UUID targetUuid = target.getUUID();
+        for (Map<UUID, ServerBossEvent> inner : SHADOW_HP_BARS.values()) {
+            ServerBossEvent bar = inner.remove(targetUuid);
+            if (bar != null) {
+                bar.removeAllPlayers();
+            }
         }
     }
 
@@ -467,8 +478,11 @@ public class CombatAbilityHandler {
     private static void removeShadowHPBossBarByUUID(String uuidStr) {
         try {
             UUID uuid = UUID.fromString(uuidStr);
-            ServerBossEvent bar = SHADOW_HP_BARS.remove(uuid);
-            if (bar != null) bar.removeAllPlayers();
+            // 过期清理：遍历所有攻击者，移除他们对该 target 的 BossBar
+            for (Map<UUID, ServerBossEvent> inner : SHADOW_HP_BARS.values()) {
+                ServerBossEvent bar = inner.remove(uuid);
+                if (bar != null) bar.removeAllPlayers();
+            }
         } catch (IllegalArgumentException ignored) {}
     }
 
@@ -552,7 +566,9 @@ public class CombatAbilityHandler {
         target.invulnerableTime = 0;
         KILLING.add(target.getUUID());
         try {
-            target.hurt(killSource, Float.MAX_VALUE);
+            // 用 maxHealth×10 替代 Float.MAX_VALUE：足够秒杀任何 Boss，
+            // 又不会让其他模组做 amount×ratio 时溢出为 Infinity/NaN 导致异常/卡死
+            target.hurt(killSource, target.getMaxHealth() * 10F);
         } finally {
             KILLING.remove(target.getUUID());
         }
@@ -643,17 +659,16 @@ public class CombatAbilityHandler {
      * 玩家登出时清理该玩家关联的所有影子血量 BossBar，
      * 防止 BossBar 持有的 ServerPlayer 引用在玩家离线后变为无效，造成内存泄漏。
      * 影子血量数据本身保留在 persistentData 中，下次登录时继续使用。
+     * <p>多人安全：仅移除该攻击者自己的 bar（attacker UUID 为外层 key），
+     * 不影响其他玩家对同一目标的 bar。</p>
      */
     @SubscribeEvent
     public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
-        CompoundTag playerData = event.getEntity().getPersistentData();
-        CompoundTag shadowData = playerData.getCompound(NBT_SP_DATA);
-        for (String uuidKey : shadowData.getAllKeys()) {
-            try {
-                UUID uuid = UUID.fromString(uuidKey);
-                ServerBossEvent bar = SHADOW_HP_BARS.remove(uuid);
-                if (bar != null) bar.removeAllPlayers();
-            } catch (IllegalArgumentException ignored) {}
+        Map<UUID, ServerBossEvent> inner = SHADOW_HP_BARS.remove(event.getEntity().getUUID());
+        if (inner != null) {
+            for (ServerBossEvent bar : inner.values()) {
+                bar.removeAllPlayers();
+            }
         }
     }
 

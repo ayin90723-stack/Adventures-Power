@@ -51,16 +51,21 @@ public final class VoidStepMovement {
     }
 
     /**
-     * 施加空中跳跃力。覆盖 Y 速度 + （可选）疾跑水平冲量 + hasImpulse + 摔落距离清零。
+     * 施加空中跳跃力。Y 取 {@code max(当前Y, power)} + （可选）疾跑水平冲量 + hasImpulse + 摔落距离清零。
      * <p>
-     * 客户端预测时 {@code addSprintBoost = false}：仅覆盖 Y，水平冲量留给服务端加，避免重复叠加导致加倍弹飞。
+     * Y 用 max 而非硬覆盖：上升中再跳不减速（消除三段跳顿挫），下落中拉起到 power。
+     * 客户端预测与服务端权威共用此公式，两端一致。
+     * </p>
+     * <p>
+     * 客户端预测时 {@code addSprintBoost = false}：仅动 Y，水平冲量留给服务端加。
+     * 原因：两端 {@code isSprinting()} 采样时刻不同，客户端若也加水平冲量会在服务端 motion 包覆盖时产生水平跳变；
+     * 且服务端若未通过校验（静默 return），客户端保留的水平冲量会导致斜飞。
      * 服务端权威执行时 {@code addSprintBoost = true}：完整添加水平冲量。
      * </p>
-     * 与原版 {@code jumpFromGround} 行为对齐，但 Y 倍率由 {@code VOID_STEP_POWER} 控制。
      */
     public static void applyJump(LivingEntity entity, float power, boolean addSprintBoost) {
         Vec3 motion = entity.getDeltaMovement();
-        entity.setDeltaMovement(motion.x(), power, motion.z());
+        entity.setDeltaMovement(motion.x(), Math.max(motion.y, power), motion.z());
         entity.hasImpulse = true;
         entity.fallDistance = 0.0F;
 
