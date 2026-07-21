@@ -4,8 +4,8 @@
   "item.adventure_power.adventure_begin": "冒险的开始",
   "item.adventure_power.adventure_end": "冒险的终点",
 
-  "item.adventure_power.adventure_begin.lore_intro": "佩戴此物，踏上力量觉醒之路。完成十大里程碑，解放沉睡于灵魂深处的二十五种内在之力。",
-  "item.adventure_power.adventure_end.lore_intro": "十道试炼皆已征服，二十五种力量尽数觉醒。你已超越凡人之躯——你就是冒险的化身。",
+  "item.adventure_power.adventure_begin.lore_intro": "佩戴此物，踏上力量觉醒之路。完成十大里程碑，解放沉睡于灵魂深处的二十六种内在之力。",
+  "item.adventure_power.adventure_end.lore_intro": "十道试炼皆已征服，二十六种力量尽数觉醒。你已超越凡人之躯——你就是冒险的化身。",
   "item.adventure_power.adventure_end.lore_footer": "— 力量属于冒险者自身 —",
 
   "item.adventure_power.lore.loading": "§7加载中...",
@@ -16,7 +16,7 @@
   "item.adventure_power.lore.milestone.first_enchant": "§6初次附魔  §8»  §7不朽装备 §8· §7鸿运当头",
   "item.adventure_power.lore.milestone.nether": "§6炽热之门  §8»  §7环境免疫 §8· §7嗜血",
   "item.adventure_power.lore.milestone.wither": "§6凋零之陨  §8»  §7禁疗之触 §8· §7坚韧之躯",
-  "item.adventure_power.lore.milestone.warden": "§6幽匿之惧  §8»  §7受击坚韧 §8· §7净魂",
+  "item.adventure_power.lore.milestone.warden": "§6幽匿之惧  §8»  §7受击坚韧 §8· §7净魂 §8· §7满载而归",
   "item.adventure_power.lore.milestone.dragon": "§6终末之翼  §8»  §7淬魂之力 §8· §7破敌之眼 §8· §7死亡抗拒 §8· §7翱翔",
   "item.adventure_power.lore.milestone.elytra": "§6苍穹之证  §8»  §7影杀 §8· §7真实血量 §8· §7拒绝篡改 §8· §7旅者之力",
 
@@ -27,7 +27,7 @@
   "item.adventure_power.lore.milestone_4": "§6初次附魔  §8»  §7不朽装备 §8· §7鸿运当头",
   "item.adventure_power.lore.milestone_5": "§6炽热之门  §8»  §7环境免疫 §8· §7嗜血",
   "item.adventure_power.lore.milestone_6": "§6凋零之陨  §8»  §7禁疗之触 §8· §7坚韧之躯",
-  "item.adventure_power.lore.milestone_7": "§6幽匿之惧  §8»  §7受击坚韧 §8· §7净魂",
+  "item.adventure_power.lore.milestone_7": "§6幽匿之惧  §8»  §7受击坚韧 §8· §7净魂 §8· §7满载而归",
   "item.adventure_power.lore.milestone_8": "§6终末之翼  §8»  §7淬魂之力 §8· §7破敌之眼 §8· §7死亡抗拒 §8· §7翱翔",
   "item.adventure_power.lore.milestone_9": "§6苍穹之证  §8»  §7影杀 §8· §7真实血量 §8· §7拒绝篡改 §8· §7旅者之力",
 
@@ -65,6 +65,8 @@
   "ability.adventure_power.resilience.desc": "受击叠层获得减伤",
   "ability.adventure_power.purified_soul": "净魂",
   "ability.adventure_power.purified_soul.desc": "免疫所有负面效果",
+  "ability.adventure_power.loot_all": "满载而归",
+  "ability.adventure_power.loot_all.desc": "击杀生物额外掉落所有可能掉落物",
   "ability.adventure_power.soar": "翱翔",
   "ability.adventure_power.soar.desc": "获得创造飞行能力",
   "ability.adventure_power.soul_quench": "淬魂之力",
@@ -125,7 +127,7 @@
   "advancement.adventure_power.warden.desc": "击败监守者，直面幽匿深渊",
   "advancement.adventure_power.dragon.desc": "击败末影龙，翱翔于终末之空",
   "advancement.adventure_power.elytra.desc": "获得鞘翅——天空即为极限",
-  "advancement.adventure_power.end.desc": "解锁全部 18 种内在能力",
+  "advancement.adventure_power.end.desc": "解锁全部 26 种内在能力",
 
   "death.attack.judgment": "%1$s 被旅者审判处决",
   "death.attack.soul_strike": "%1$s 的灵魂被淬魂之力击碎",
@@ -143,6 +145,7 @@
   "ability.adventure_power.soul_quench.awakened": "§6[觉醒] §e目标低于20%HP伤害翻倍",
   "ability.adventure_power.lifesteal.awakened": "§6[觉醒] §e过量治疗转吸收护盾",
   "ability.adventure_power.purified_soul.awakened": "§6[觉醒] §e周围敌对生物虚弱II",
+  "ability.adventure_power.loot_all.awakened": "§6[觉醒] §e每样取最大数量",
   "ability.adventure_power.active_skill.awakened": "§6[觉醒] §e审判范围+50%，庇护可移动",
   "ability.adventure_power.env_immunity.awakened": "§6[觉醒] §e免疫所有无源伤害",
   "ability.adventure_power.piercing_gaze.awakened": "§6[觉醒] §e对无敌目标+30%伤害",

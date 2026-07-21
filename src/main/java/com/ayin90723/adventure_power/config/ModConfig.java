@@ -102,6 +102,10 @@ public class ModConfig {
     public static final DoubleValue VITALITY_BASE;
     public static final DoubleValue VITALITY_PER_MILESTONE;
 
+    // --- 满载而归 ---
+    public static final IntValue LOOT_ALL_COPIES;
+    public static final IntValue LOOT_ALL_MAX_ITEMS;
+
     // === 觉醒全局 ===
     public static final DoubleValue AWAKEN_MULTIPLIER;
 
@@ -147,6 +151,10 @@ public class ModConfig {
 
     // === 觉醒 — 休养生息 ===
     public static final IntValue AWAKEN_RAPID_RECOVERY_BONUS;
+
+    // === 觉醒 - 满载而归 ===
+    public static final BooleanValue LOOT_ALL_AWAKENED_MAX_COUNT;
+    public static final IntValue LOOT_ALL_AWAKENED_COPIES;
 
     static {
         BUILDER.push("冒险能力配置");
@@ -320,6 +328,13 @@ public class ModConfig {
             .defineInRange("vitality_per_milestone", 2.0, 0.0, 50.0);
         BUILDER.pop();
 
+        BUILDER.push("满载而归");
+        LOOT_ALL_COPIES = BUILDER.comment("基础：每样掉落物给几份")
+            .defineInRange("loot_all_copies", 1, 0, 64);
+        LOOT_ALL_MAX_ITEMS = BUILDER.comment("单次击杀额外掉落物总数量上限（防极端配置卡服）")
+            .defineInRange("loot_all_max_items", 100, 1, 1000);
+        BUILDER.pop();
+
         BUILDER.push("觉醒强化");
         AWAKEN_MULTIPLIER = BUILDER.comment("觉醒数值强化倍率")
             .defineInRange("awaken_multiplier", 1.3, 0.5, 10.0);
@@ -358,6 +373,10 @@ public class ModConfig {
             .defineInRange("awaken_resilience_bonus_stacks", 6, 0, 50);
         AWAKEN_RAPID_RECOVERY_BONUS = BUILDER.comment("觉醒休养生息 — 每周期额外回血量（HP）")
             .defineInRange("awaken_rapid_recovery_bonus", 2, 0, 20);
+        LOOT_ALL_AWAKENED_MAX_COUNT = BUILDER.comment("觉醒满载而归 - 每样取掉落表最大数量")
+            .define("loot_all_awakened_max_count", true);
+        LOOT_ALL_AWAKENED_COPIES = BUILDER.comment("觉醒满载而归 - 每样份数")
+            .defineInRange("loot_all_awakened_copies", 2, 0, 64);
         BUILDER.pop(); // 觉醒强化
 
         BUILDER.pop(); // 能力数值

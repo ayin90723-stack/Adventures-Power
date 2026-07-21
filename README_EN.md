@@ -9,7 +9,7 @@
 
 > **Power belongs to the adventurer, not the enchantments.**
 >
-> Conquer 10 milestones, unlock 25 inner abilities. When the journey ends, the Awakening transcends you beyond mortality.
+> Conquer 10 milestones, unlock 26 inner abilities. When the journey ends, the Awakening transcends you beyond mortality.
 
 [![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1-80BA15?logo=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAAbwAAAG8B8aLcQwAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAEESURBVDiNpZMxTsNAEEX/rNeOAwUlHVdA4gJcAokLUNDRcAQkLkCBaOgouQIVHReIxCRKApGd2Zn1UsTJIln8p5H+/Pk7OyuEEN5zzjkiss4555xzLggE3vuu67rneZ6P67qeOOc657TWJEmSYNu253meX/M8v5JS3gkhMGstAEBEFCEEcs65n6ZpehzH6+8FSimkaZq/OeeUUgpJkpytta9pmuZRFP1+HMcRIYQQEWGMQSmFaZqO4zi+CiEAAM/zAOccY4xBCOH3fd99338CwO/3ZVm+cM6vtdY/a61vhmH4TJJk4b0H5xze+/8T3G63T8653vt+v2/bdtd13UfTNK88SX13XfcqhPiQUt5LKXe73e6DbNv253k+v91u/xbzPB8ZY5i1Fv8AY60cDO1A9iUAAAAASUVORK5CYII=)](https://www.minecraft.net/)
 [![Forge](https://img.shields.io/badge/Forge-47.4.10-F16436)](https://files.minecraftforge.net/)
@@ -30,10 +30,10 @@
 
 ## Overview
 
-**Adventure's Power** is a Minecraft Forge 1.20.1 mod that ties player progression directly to adventure milestones — not to gear, not to levels, but to the journey itself. Every milestone you reach unlocks new inner abilities. Every ability is yours to toggle freely. At the end of the road, the **Adventurer's Awakening** elevates all 25 abilities to their ultimate form.
+**Adventure's Power** is a Minecraft Forge 1.20.1 mod that ties player progression directly to adventure milestones — not to gear, not to levels, but to the journey itself. Every milestone you reach unlocks new inner abilities. Every ability is yours to toggle freely. At the end of the road, the **Adventurer's Awakening** elevates all 26 abilities to their ultimate form.
 
 - 🎯 **10 Milestones** — From surviving your first night to obtaining the Elytra
-- ⚡ **25 Innate Abilities** — Dodge, flight, lifesteal, death defiance, true damage… all toggleable
+- ⚡ **26 Innate Abilities** — Dodge, flight, lifesteal, death defiance, true damage… all toggleable
 - 🌟 **The Awakening (Stage 11)** — 14 mechanical transformations + 11 numerical amplifications
 - 🔗 **Vanilla Advancement Integration** — Completing vanilla advancements unlocks milestones and vice versa
 - 🎛️ **Full Player Control** — Open the ability panel (K key) and enable/disable any ability at will
@@ -56,7 +56,7 @@ Complete 10 milestones (tracked in the Advancements screen)
   ↓
 All milestones complete → "Adventure's Beginning" evolves into "Adventure's End"
   ↓
-Activate "Adventurer's Awakening" — all 25 abilities + awakening buffs
+Activate "Adventurer's Awakening" — all 26 abilities + awakening buffs
 ```
 
 ### 10 Milestones
@@ -70,13 +70,13 @@ Activate "Adventurer's Awakening" — all 25 abilities + awakening buffs
 | 5 | `first_enchant` | ✨ First Enchantment | Enchant at an Enchanting Table | 2 |
 | 6 | `nether` | 🔥 Gates of Fire | Enter the Nether | 2 |
 | 7 | `wither` | 💀 Fall of the Wither | Defeat the Wither | 2 |
-| 8 | `warden` | 👁️ Fear of the Sculk | Defeat the Warden | 2 |
+| 8 | `warden` | 👁️ Fear of the Sculk | Defeat the Warden | 3 |
 | 9 | `dragon` | 🐉 Wings of the End | Defeat the Ender Dragon | 4 |
 | 10 | `elytra` | 🪶 Proof of the Sky | Obtain Elytra | 4 |
 
 ---
 
-## 25 Abilities
+## 26 Abilities
 
 ### 🗡️ Combat (7)
 
@@ -111,11 +111,12 @@ Activate "Adventurer's Awakening" — all 25 abilities + awakening buffs
 | **Earthly Power** | Increase mining speed for all blocks | 1.75x | **2.28x** |
 | **Unseen Hand** | Increase block interaction range | +2.8 blocks | **+3.6 blocks** |
 
-### 💰 Gathering (1)
+### 💰 Gathering (2)
 
 | Ability | Effect | Max Growth | Awakening |
 |---------|--------|-----------|-----------|
 | **Fortune's Favor** | Fortune & Looting bonus (stacks with tool enchantments) | +3 levels | **+5 levels** |
+| **Loot All** | Extra drops of all possible items on kill (ignores conditions) | One of each | **Max count per item** 🆕 |
 
 ### ✨ Survival (6)
 
@@ -235,7 +236,7 @@ This project is licensed under the **MIT License** — see [LICENSE](LICENSE) fo
 
 ---
 
-> *"All ten trials conquered, all twenty-five powers awakened. You have transcended mortality — you are the embodiment of adventure itself."*
+> *"All ten trials conquered, all twenty-six powers awakened. You have transcended mortality — you are the embodiment of adventure itself."*
 >
 > — Adventure's End
 

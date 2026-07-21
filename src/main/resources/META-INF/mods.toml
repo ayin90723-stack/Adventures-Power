@@ -8,7 +8,7 @@ version="${mod_version}"
 displayName="Adventure's Power"
 authors="ayin90723-stack"
 description='''Adventure's Power — 冒险的力量。以冒险旅程驱动成长的 Minecraft 模组。
-经历 10 个里程碑，解锁 25 种内在能力。力量属于冒险者自身，而非装备。'''
+经历 10 个里程碑，解锁 26 种内在能力。力量属于冒险者自身，而非装备。'''
 logoFile="logo.png"
 
 [[dependencies.${mod_id}]]

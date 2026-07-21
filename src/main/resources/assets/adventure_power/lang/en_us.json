@@ -4,8 +4,8 @@
   "item.adventure_power.adventure_begin": "Adventure's Beginning",
   "item.adventure_power.adventure_end": "Adventure's End",
 
-  "item.adventure_power.adventure_begin.lore_intro": "Don this curio and set forth on the path of awakening. Conquer the ten milestones, and unleash the twenty-five inner powers slumbering within your soul.",
-  "item.adventure_power.adventure_end.lore_intro": "All ten trials conquered, all twenty-five powers awakened. You have transcended mortality — you are the embodiment of adventure itself.",
+  "item.adventure_power.adventure_begin.lore_intro": "Don this curio and set forth on the path of awakening. Conquer the ten milestones, and unleash the twenty-six inner powers slumbering within your soul.",
+  "item.adventure_power.adventure_end.lore_intro": "All ten trials conquered, all twenty-six powers awakened. You have transcended mortality — you are the embodiment of adventure itself.",
   "item.adventure_power.adventure_end.lore_footer": "— Power belongs to the adventurer —",
 
   "item.adventure_power.lore.loading": "§7Loading...",
@@ -16,7 +16,7 @@
   "item.adventure_power.lore.milestone.first_enchant": "§6First Enchantment  §8»  §7Undying Gear §8· §7Fortune's Favor",
   "item.adventure_power.lore.milestone.nether": "§6Gates of Fire  §8»  §7Env. Immunity §8· §7Lifesteal",
   "item.adventure_power.lore.milestone.wither": "§6Fall of the Wither  §8»  §7Healing Block §8· §7Iron Constitution",
-  "item.adventure_power.lore.milestone.warden": "§6Fear of the Sculk  §8»  §7Resilience §8· §7Purified Soul",
+  "item.adventure_power.lore.milestone.warden": "§6Fear of the Sculk  §8»  §7Resilience §8· §7Purified Soul §8· §7Loot All",
   "item.adventure_power.lore.milestone.dragon": "§6Wings of the End  §8»  §7Soul Quench §8· §7Piercing Gaze §8· §7Death Defy §8· §7Soar",
   "item.adventure_power.lore.milestone.elytra": "§6Proof of the Sky  §8»  §7Shadow Kill §8· §7True Health §8· §7Reject Manip. §8· §7Traveler's Power",
 
@@ -27,7 +27,7 @@
   "item.adventure_power.lore.milestone_4": "§6First Enchantment  §8»  §7Undying Gear §8· §7Fortune's Favor",
   "item.adventure_power.lore.milestone_5": "§6Gates of Fire  §8»  §7Env. Immunity §8· §7Lifesteal",
   "item.adventure_power.lore.milestone_6": "§6Fall of the Wither  §8»  §7Healing Block §8· §7Iron Constitution",
-  "item.adventure_power.lore.milestone_7": "§6Fear of the Sculk  §8»  §7Resilience §8· §7Purified Soul",
+  "item.adventure_power.lore.milestone_7": "§6Fear of the Sculk  §8»  §7Resilience §8· §7Purified Soul §8· §7Loot All",
   "item.adventure_power.lore.milestone_8": "§6Wings of the End  §8»  §7Soul Quench §8· §7Piercing Gaze §8· §7Death Defy §8· §7Soar",
   "item.adventure_power.lore.milestone_9": "§6Proof of the Sky  §8»  §7Shadow Kill §8· §7True Health §8· §7Reject Manip. §8· §7Traveler's Power",
 
@@ -65,6 +65,8 @@
   "ability.adventure_power.resilience.desc": "Gain damage reduction stacks when hit",
   "ability.adventure_power.purified_soul": "Purified Soul",
   "ability.adventure_power.purified_soul.desc": "Immune to all negative effects",
+  "ability.adventure_power.loot_all": "Loot All",
+  "ability.adventure_power.loot_all.desc": "Extra drops of all possible items on kill",
   "ability.adventure_power.soar": "Soar",
   "ability.adventure_power.soar.desc": "Gain creative flight",
   "ability.adventure_power.soul_quench": "Soul Quench",
@@ -125,7 +127,7 @@
   "advancement.adventure_power.warden.desc": "Defeat the Warden, face the Sculk abyss",
   "advancement.adventure_power.dragon.desc": "Defeat the Ender Dragon, soar through the End skies",
   "advancement.adventure_power.elytra.desc": "Obtain Elytra — the sky is the limit",
-  "advancement.adventure_power.end.desc": "Unlock all 18 inner abilities",
+  "advancement.adventure_power.end.desc": "Unlock all 26 inner abilities",
 
   "death.attack.judgment": "%1$s was judged by the Traveler",
   "death.attack.soul_strike": "%1$s's soul was shattered by Soul Quench",
@@ -143,6 +145,7 @@
   "ability.adventure_power.soul_quench.awakened": "§6[Awakened] §eDouble damage below 20% HP",
   "ability.adventure_power.lifesteal.awakened": "§6[Awakened] §eExcess healing → absorption shield",
   "ability.adventure_power.purified_soul.awakened": "§6[Awakened] §eWeakness II aura (16 blocks)",
+  "ability.adventure_power.loot_all.awakened": "§6[Awakened] §eMax count per item",
   "ability.adventure_power.active_skill.awakened": "§6[Awakened] §eJudgment +50% range, Sanctuary allows slow move",
   "ability.adventure_power.env_immunity.awakened": "§6[Awakened] §eImmune to all sourceless damage",
   "ability.adventure_power.piercing_gaze.awakened": "§6[Awakened] §e+30% damage to invulnerable targets",

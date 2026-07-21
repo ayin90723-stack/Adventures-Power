@@ -216,7 +216,7 @@ public class MilestoneRegistry {
             + "{\"id\":\"first_enchant\",\"name\":\"初次附魔\",\"abilities\":[\"undying_gear\",\"fortune_favor\"],\"advancement\":\"minecraft:story/enchant_item\"},"
             + "{\"id\":\"nether\",\"name\":\"炽热之门\",\"abilities\":[\"env_immunity\",\"lifesteal\"],\"advancement\":\"minecraft:story/enter_the_nether\"},"
             + "{\"id\":\"wither\",\"name\":\"凋零之陨\",\"abilities\":[\"healing_block\",\"vitality\"],\"trigger\":{\"type\":\"first_kill\",\"entity\":\"minecraft:wither\"}},"
-            + "{\"id\":\"warden\",\"name\":\"幽匿之惧\",\"abilities\":[\"resilience\",\"purified_soul\"],\"trigger\":{\"type\":\"first_kill\",\"entity\":\"minecraft:warden\"}},"
+            + "{\"id\":\"warden\",\"name\":\"幽匿之惧\",\"abilities\":[\"resilience\",\"purified_soul\",\"loot_all\"],\"trigger\":{\"type\":\"first_kill\",\"entity\":\"minecraft:warden\"}},"
             + "{\"id\":\"dragon\",\"name\":\"终末之翼\",\"abilities\":[\"soar\",\"soul_quench\",\"piercing_gaze\",\"death_defy\"],\"advancement\":\"minecraft:end/kill_dragon\"},"
             + "{\"id\":\"elytra\",\"name\":\"苍穹之证\",\"abilities\":[\"shadow_kill\",\"true_health\",\"reject_manip\",\"active_skill\"],\"advancement\":\"minecraft:end/elytra\"}"
             + "]}";

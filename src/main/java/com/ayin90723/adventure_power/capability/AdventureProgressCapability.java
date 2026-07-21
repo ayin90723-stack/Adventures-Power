@@ -121,6 +121,7 @@ public class AdventureProgressCapability {
         KNOWN_ABILITIES.put("vitality", Component.translatable("ability.adventure_power.vitality"));
         KNOWN_ABILITIES.put("resilience", Component.translatable("ability.adventure_power.resilience"));
         KNOWN_ABILITIES.put("purified_soul", Component.translatable("ability.adventure_power.purified_soul"));
+        KNOWN_ABILITIES.put("loot_all", Component.translatable("ability.adventure_power.loot_all"));
         KNOWN_ABILITIES.put("soar", Component.translatable("ability.adventure_power.soar"));
         KNOWN_ABILITIES.put("soul_quench", Component.translatable("ability.adventure_power.soul_quench"));
         KNOWN_ABILITIES.put("piercing_gaze", Component.translatable("ability.adventure_power.piercing_gaze"));

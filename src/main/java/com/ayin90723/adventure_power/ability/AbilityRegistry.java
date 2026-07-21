@@ -5,7 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 能力注册表 — 25 种冒险能力，按面板显示顺序排列。
+ * 能力注册表 — 26 种冒险能力，按面板显示顺序排列。
  * countAtUnlock 映射由 MilestoneRegistry 在加载 JSON 后填充。
  */
 public class AbilityRegistry {
@@ -33,6 +33,7 @@ public class AbilityRegistry {
         register(new VitalityAbility());
         register(new ResilienceAbility());
         register(new PurifiedSoulAbility());
+        register(new LootAllAbility());
         register(new SoarAbility());
         register(new SoulQuenchAbility());
         register(new PiercingGazeAbility());

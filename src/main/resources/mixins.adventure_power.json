@@ -17,7 +17,12 @@
         "DeathDefyMixin",
         "LegacyHurtAndBreakMixin",
         "PurifiedSoulMixin",
-        "FortuneFavorMixin"
+        "FortuneFavorMixin",
+        "LootPoolEntryContainerMixin",
+        "LootPoolMixin",
+        "LootPoolAccessor",
+        "LootContextBuilderMixin",
+        "LootItemConditionalFunctionMixin"
     ],
     "injectors": {
         "defaultRequire": 1

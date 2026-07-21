@@ -33,7 +33,7 @@
     {
       "id": "enter_nether",
       "name": "炽热之门",
-      "abilities": ["env_immunity", "lifesteal", "vitality", "resilience", "purified_soul"],
+      "abilities": ["env_immunity", "lifesteal", "vitality", "resilience", "purified_soul", "loot_all"],
       "advancement": "minecraft:story/enter_the_nether"
     },
     {
