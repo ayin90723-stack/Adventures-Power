@@ -26,6 +26,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.level.Level;
@@ -134,21 +135,33 @@ public class CombatAbilityHandler {
 
     // ==================== 2~5: LivingHurtEvent 入口 ====================
 
-    @SubscribeEvent
+    @SubscribeEvent(receiveCanceled = true)
     public static void onLivingHurt(LivingHurtEvent event) {
-        if (event.isCanceled()) return;
         LivingEntity target = event.getEntity();
         if (target.level().isClientSide()) return;
 
         DamageSource source = event.getSource();
 
-        // 受伤方能力
-        handleDamageResist(event, target);
+        // 兼容拔刀剑/投射物等 causingEntity 缺失的伤害：getEntity() 非 Player 时从直接伤害实体取 owner
+        Entity rawAttacker = source.getEntity();
+        if (!(rawAttacker instanceof Player)) {
+            Entity direct = source.getDirectEntity();
+            if (direct instanceof Player p) {
+                rawAttacker = p;
+            } else if (direct instanceof Projectile proj && proj.getOwner() instanceof Player ownerPlayer) {
+                rawAttacker = ownerPlayer;
+            }
+        }
+
+        // 受伤方能力仅处理未取消的事件
+        if (!event.isCanceled()) {
+            handleDamageResist(event, target);
+        }
 
         // 攻击方能力（需攻击者为冒险者）
-        if (source.getEntity() instanceof Player attacker) {
+        if (rawAttacker instanceof Player attacker) {
             if (FriendlyFireProtection.isOwnerTarget(attacker, target)) return;
-            if (!AdventureProgressCapability.isAdventurer(attacker)) return;
+            if (!AdventureProgressCapability.isAdventurer(attacker) && !AdventureProgressCapability.isFullyUnlocked(attacker)) return;
 
             handleHealingBlock(event, target, attacker);
             handlePiercingGazeAwakened(event, target, attacker);

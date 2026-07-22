@@ -381,7 +381,15 @@ public class AdventureProgressCapability {
     private static void checkAndActivateAdventurer(Player player) {
         if (!(player instanceof ServerPlayer sp)) return;
         getAdventureProgress(player).ifPresent(progress -> {
-            if (progress.isAdventurer() || progress.isFullyUnlocked()) return;
+            if (progress.isAdventurer()) return;
+            // 版本飞升可能导致 fullyUnlocked=true 但 adventurer=false（数据不一致），
+            // 此时直接补激活 adventurer，避免 onLivingHurt 等只查 isAdventurer 的门禁误拦。
+            if (progress.isFullyUnlocked()) {
+                progress.activateAdventurer();
+                syncCapabilityToPersistent(player, progress);
+                syncToClient(player);
+                return;
+            }
             if (playerHasAdventureItem(player)) {
                 progress.activateAdventurer();
                 syncCapabilityToPersistent(player, progress);

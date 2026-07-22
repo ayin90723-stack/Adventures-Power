@@ -123,9 +123,7 @@ public class HealthUtil {
                 }
             }
             if (DATA_HEALTH_ID != null) {
-                // 直写 DataItem.value（绕过 SynchedEntityData.set），避免触发 onSyncedDataUpdated：
-                // 某些实体重写 onSyncedDataUpdated 在血量变化时调 move 等重操作导致卡死
-                writeValueDirect(target.getEntityData(), DATA_HEALTH_ID, health);
+                target.getEntityData().set(DATA_HEALTH_ID, health);
             }
         } catch (IllegalAccessException | ClassCastException e) {
             e.printStackTrace();
@@ -207,39 +205,6 @@ public class HealthUtil {
      * @param target 目标实体
      * @param health 目标血量值
      */
-    @SuppressWarnings("unchecked")
-    /** DataItem.setValue 方法反射（直写 value + setDirty，绕过 onSyncedDataUpdated） */
-    private static java.lang.reflect.Method DATA_ITEM_SET_VALUE_METHOD;
-
-    /**
-     * 直写 EntityDataAccessor 对应 DataItem 的 value（调用 DataItem.setValue），
-     * 绕过 SynchedEntityData.set，避免触发 onSyncedDataUpdated。
-     *
-     * <p>某些实体（如天境史维特）重写 onSyncedDataUpdated，在特定 accessor 变化时
-     * 调 move() 触发重碰撞计算。若通过 data.set() 写入会触发该回调导致卡死。
-     * 本方法直接写 DataItem.value + setDirty（保证客户端同步），不触发任何 onSyncedDataUpdated。</p>
-     */
-    @SuppressWarnings("unchecked")
-    private static <T> void writeValueDirect(SynchedEntityData data, EntityDataAccessor<T> key, T value) {
-        if (ENTITY_DATA_ITEMS_FIELD == null) {
-            data.set(key, value);  // 反射初始化失败，降级为标准路径
-            return;
-        }
-        try {
-            Map<Integer, Object> items = (Map<Integer, Object>) ENTITY_DATA_ITEMS_FIELD.get(data);
-            if (items == null) { data.set(key, value); return; }
-            Object dataItem = items.get(key.getId());
-            if (dataItem == null) { data.set(key, value); return; }
-            if (DATA_ITEM_SET_VALUE_METHOD == null) {
-                DATA_ITEM_SET_VALUE_METHOD = dataItem.getClass().getDeclaredMethod("setValue", Object.class);
-                DATA_ITEM_SET_VALUE_METHOD.setAccessible(true);
-            }
-            DATA_ITEM_SET_VALUE_METHOD.invoke(dataItem, value);
-        } catch (Exception e) {
-            data.set(key, value);  // 反射失败，降级
-        }
-    }
-
     public static void setAllHealthLikeDirect(LivingEntity target, float health) {
         // ① 原版血条
         setHealthDirect(target, health);
@@ -252,7 +217,7 @@ public class HealthUtil {
         net.minecraft.network.syncher.SynchedEntityData data = target.getEntityData();
         for (EntityDataAccessor<Float> key : customKeys) {
             try {
-                writeValueDirect(data, key, health);
+                data.set(key, health);
             } catch (Exception ignored) {
                 // 极少见：entity 销毁后调用 / 类型不匹配 —— 静默跳过
             }
@@ -388,12 +353,27 @@ public class HealthUtil {
      * <p>
      * 不依赖字段名（无法预测 Boss 使用的混淆字段名），
      * 纯粹通过运行时类型检查定位自定义血量 key。
+     * <p>
+     * <b>参照血量选择（架空判断）</b>：默认用原版血条 {@link #getHealthDirect} 作参照，
+     * 排除值不像血量的 Float（如史维特 {@code DATA_WATER_DAMAGE_SCALE} 值 0-1，误写入触发
+     * onSyncedDataUpdated -> Slime.move -> 卡死）。但部分 Boss（如亚波伦）把真实血量存在
+     * 自定义 EntityDataAccessor 里，重写 getHealth 返回该值、setHealth 不调 super --
+     * 原版血条被架空（停在初始值不动），与自定义血量脱钩。此时若仍用原版血条作参照，
+     * 自定义血量值（几百~几万）与架空的原版值差距巨大，10% 容差内无法命中，扫不到。
+     * <p>
+     * 因此先比较 {@code target.getHealth()} 与 {@code getHealthDirect(target)}：差值超过 1.0
+     * 即判定原版血条被架空，改用 {@code target.getHealth()}（即被重写返回的真实血量）作参照。
+     * 此时自定义血量 accessor 的值 ≈ 参照值（亚波伦的 getHealth 恰返回该 accessor 值），
+     * 必然命中，且与血量数值大小无关。负值 delta（如终焉秩序维系者注入的负值 Float）
+     * 远离正数参照，仍被容差自然排除。
      */
     private static Set<EntityDataAccessor<Float>> scanCustomHealthKeys(LivingEntity target) {
         Set<EntityDataAccessor<Float>> keys = new LinkedHashSet<>();
         net.minecraft.network.syncher.SynchedEntityData data = target.getEntityData();
-        // 扫描时的当前血量：用于区分血量条目与非血量 Float 条目（如水伤害比例）
-        float currentHealth = getHealthDirect(target);
+        // 参照血量：原版血条被架空（getHealth 与原版脱钩）时改用 getHealth()，否则用原版血条值
+        float directHealth = getHealthDirect(target);
+        float reportedHealth = target.getHealth();
+        float currentHealth = Math.abs(reportedHealth - directHealth) > 1.0F ? reportedHealth : directHealth;
 
         Class<?> current = target.getClass();
         while (current != null && current != Object.class) {

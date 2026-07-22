@@ -67,6 +67,7 @@ public class AdventureProgress implements IAdventureProgress {
     @Override
     public void activateFullyUnlocked() {
         this.fullyUnlocked = true;
+        this.adventurer = true;  // 全解锁蕴含冒险者，防止 fullyUnlocked=true / adventurer=false 不一致
     }
 
     // ===== 里程碑 =====
