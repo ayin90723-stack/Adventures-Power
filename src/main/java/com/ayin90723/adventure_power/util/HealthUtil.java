@@ -35,11 +35,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * 直接写入 {@code entity.getEntityData().set(DATA_HEALTH_ID, value)}，
  * 等价于原版内部的血量更新路径，但完全绕开 Java 方法覆写链。
  * <p>
- * 独立工具类，可被 {@code EnchantmentHandler}、{@code UndyingSlashEffect}、
+ * 独立工具类，可被 {@code CombatAbilityHandler}、{@code HealingBlockEffect}、
  * 以及任何需要直接操作血量的 Mixin 或事件处理器共用。
  *
- * @see com.main.mymoreenchantments.buff.UndyingSlashEffect.EventHandler#onLivingTick
- * @see com.main.mymoreenchantments.EnchantmentHandler#handleSoulStrikePlus
+ * @see com.ayin90723.adventure_power.effect.HealingBlockEffect.EventHandler#onLivingTick
+ * @see com.ayin90723.adventure_power.handler.CombatAbilityHandler
  */
 public class HealthUtil {
 
@@ -354,7 +354,7 @@ public class HealthUtil {
      *
      * <h3>调用方</h3>
      * 仅供 TrueHealth 防御侧使用（目标为玩家自身）。
-     * 攻击侧（淬魂/影杀/审判/见既斩等）<b>不应</b>调用此方法——
+     * 攻击侧（淬魂/影杀/审判/破敌之眼等）<b>不应</b>调用此方法——
      * Boss 的负值 Float DataItem 通常与血量压制无关，清零反而可能误伤。
      *
      * @param target 目标实体（通常为玩家自身）

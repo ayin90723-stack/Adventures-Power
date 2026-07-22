@@ -23,15 +23,13 @@ import java.lang.reflect.Field;
  *       在 {@code actuallyHurt()} 中被设置，导致后续 {@code hurt()} 提前返回
  *       false 且不调用 {@code super.hurt()}</li>
  *   <li>Mowzie 钢铁守护者 — 未激活时 {@code vulnerable = false}，{@code hurt()}
- *       检测后直接返回 false 且不调用 {@code super.hurt()}，完全绕过见既斩两
+ *       检测后直接返回 false 且不调用 {@code super.hurt()}，完全绕过破敌之眼两
  *       层 Mixin 注入点</li>
  * </ul>
  * <p>
- * 独立工具类（非 Mixin），可被 {@code EnchantmentHandler.onAttackEntity}、
- * {@code EnchantmentHandler.onProjectileImpact} 和
- * {@code SeeAndSlashLivingEntityMixin} 共用。
+ * 独立工具类（非 Mixin），可被 {@code PiercingGazeLivingEntityMixin} 共用。
  *
- * @see com.main.mymoreenchantments.mixin.SeeAndSlashLivingEntityMixin
+ * @see com.ayin90723.adventure_power.mixin.PiercingGazeLivingEntityMixin
  */
 public class InvulClearUtil {
 

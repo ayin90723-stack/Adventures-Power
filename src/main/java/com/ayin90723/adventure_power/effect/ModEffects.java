@@ -8,7 +8,7 @@ import net.minecraftforge.registries.RegistryObject;
 
 public class ModEffects {
    public static final DeferredRegister<MobEffect> EFFECTS = DeferredRegister.create(ForgeRegistries.MOB_EFFECTS, "adventure_power");
-   public static final RegistryObject<MobEffect> UNDYING_SLASH = EFFECTS.register("undying_slash", UndyingSlashEffect::new);
+   public static final RegistryObject<MobEffect> UNDYING_SLASH = EFFECTS.register("undying_slash", HealingBlockEffect::new);
 
    public static void register(IEventBus eventBus) {
       EFFECTS.register(eventBus);

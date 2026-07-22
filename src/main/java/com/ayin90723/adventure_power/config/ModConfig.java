@@ -62,7 +62,7 @@ public class ModConfig {
     public static final IntValue SOUL_QUENCH_FLAT_DAMAGE_10;
     public static final DoubleValue SOUL_QUENCH_HP_RATIO_9;
     public static final DoubleValue SOUL_QUENCH_HP_RATIO_10;
-    public static final DoubleValue SOUL_QUENCH_UNDYING_SLASH_MULTIPLIER;
+    public static final DoubleValue SOUL_QUENCH_HEALING_BLOCK_MULTIPLIER;
 
     // --- 影杀 ---
     public static final IntValue SHADOW_KILL_FLAT_DAMAGE;
@@ -255,8 +255,8 @@ public class ModConfig {
             .defineInRange("soul_quench_hp_ratio_9", 0.01, 0.0, 1.0);
         SOUL_QUENCH_HP_RATIO_10 = BUILDER.comment("里程碑10时的生命百分比伤害")
             .defineInRange("soul_quench_hp_ratio_10", 0.02, 0.0, 1.0);
-        SOUL_QUENCH_UNDYING_SLASH_MULTIPLIER = BUILDER.comment("对不死斩标记目标的额外伤害倍率")
-            .defineInRange("soul_quench_undying_slash_multiplier", 1.5, 1.0, 10.0);
+        SOUL_QUENCH_HEALING_BLOCK_MULTIPLIER = BUILDER.comment("对禁疗之触标记目标的额外伤害倍率")
+            .defineInRange("soul_quench_healing_block_multiplier", 1.5, 1.0, 10.0);
         BUILDER.pop();
 
         BUILDER.push("影杀");

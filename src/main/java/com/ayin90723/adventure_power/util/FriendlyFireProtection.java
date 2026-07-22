@@ -14,9 +14,9 @@ import net.minecraft.world.entity.TamableAnimal;
  * <p>
  * 调用点：
  * <ul>
- *   <li>{@code EnchantmentHandler.onLivingHurt()} — 事件入口统一拦截</li>
- *   <li>{@code SeeAndSlashMixin.onIsInvulnerableTo()} — 见既斩 Mixin Layer1</li>
- *   <li>{@code SeeAndSlashLivingEntityMixin.onHurtReturn()} — 见既斩 Mixin Layer2</li>
+ *   <li>{@code CombatAbilityHandler.onLivingHurt()} — 事件入口统一拦截</li>
+ *   <li>{@code PiercingGazeMixin.onIsInvulnerableTo()} — 破敌之眼 Mixin Layer1</li>
+ *   <li>{@code PiercingGazeLivingEntityMixin.onHurtReturn()} — 破敌之眼 Mixin Layer2</li>
  * </ul>
  */
 public class FriendlyFireProtection {

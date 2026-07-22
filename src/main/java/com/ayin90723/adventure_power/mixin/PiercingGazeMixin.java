@@ -15,22 +15,22 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * 见既斩 Mixin — 穿透目标的 isInvulnerableTo() 无敌状态。
+ * 破敌之眼 Mixin — 穿透目标的 isInvulnerableTo() 无敌状态。
  * <p>
  * 注入点: Entity.isInvulnerableTo() 的 HEAD。
  * 之前使用 @Redirect 拦截 LivingEntity.hurt() 内部的 isInvulnerableTo() 调用，
  * 但 Forge 的类加载期 patch 会修改 hurt() 的字节码结构，导致 @At(INVOKE) 匹配失败。
- * 改为直接在 isInvulnerableTo() 入口处截断：若攻击者持有见既斩，立即返回 false，
+ * 改为直接在 isInvulnerableTo() 入口处截断：若攻击者持有破敌之眼，立即返回 false，
  * 对一切实体（含 Boss、模组生物）生效，且不受 Forge 字节码 patch 影响。
  * <p>
- * 第二层兜底由 {@link SeeAndSlashLivingEntityMixin} 提供：拦截直接重写 hurt()
+ * 第二层兜底由 {@link PiercingGazeLivingEntityMixin} 提供：拦截直接重写 hurt()
  * 而不调用 isInvulnerableTo() 的自定义无敌。
  */
 @Mixin(Entity.class)
-public class SeeAndSlashMixin {
+public class PiercingGazeMixin {
 
     /**
-     * 在 isInvulnerableTo() 入口处检查攻击者是否持有见既斩。
+     * 在 isInvulnerableTo() 入口处检查攻击者是否持有破敌之眼。
      * 若持有 → 返回 false（穿透一切无敌），不执行原方法。
      */
     @Inject(
@@ -58,8 +58,8 @@ public class SeeAndSlashMixin {
         if (attacker instanceof Projectile projectile) {
             attacker = projectile.getOwner();
         }
-        // 攻击者持有见既斩 → 强制穿透无敌
-        if (attacker instanceof LivingEntity living && hasSeeAndSlash(living)) {
+        // 攻击者持有破敌之眼 → 强制穿透无敌
+        if (attacker instanceof LivingEntity living && hasPiercingGaze(living)) {
             // 友好火力保护：不穿透自己驯服生物的无敌
             if (self instanceof LivingEntity target
                 && FriendlyFireProtection.isOwnerTarget(living, target)) {
@@ -70,10 +70,10 @@ public class SeeAndSlashMixin {
     }
 
     /**
-     * 检查 LivingEntity 主手或副手物品是否拥有见既斩附魔，
+     * 检查 LivingEntity 主手或副手物品是否拥有破敌之眼附魔，
      * 且（对于玩家）是否佩戴了冒险的终点饰品。
      */
-    private static boolean hasSeeAndSlash(LivingEntity entity) {
+    private static boolean hasPiercingGaze(LivingEntity entity) {
         return AdventurePower.hasPiercingGaze(entity)
             && (!(entity instanceof Player player)
                 || AdventureProgressCapability.isAbilityAvailable(player, "piercing_gaze"));

@@ -29,15 +29,15 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 不死斩效果 —— 禁止回血与复活（纯辅助）
+ * 禁疗之触效果 —— 禁止回血与复活（纯辅助）
  * 以 NBT 持久化标记为真实判断依据，MobEffect 仅作为视觉指示器
  */
-public class UndyingSlashEffect extends MobEffect {
-   /** NBT 中存储不死斩效果到期时间的 key */
+public class HealingBlockEffect extends MobEffect {
+   /** NBT 中存储禁疗之触效果到期时间的 key */
    public static final String NBT_KEY = "MME_UndyingSlashEndTime";
    /** NBT 中存储强制击杀标记的 key（跨优先级传递） */
    public static final String FORCE_KILL_KEY = "MME_UndyingSlash_ForceKill";
-   /** 记录实体在不死斩期间的最近已知血量，用于拦截 setHealth() 直接回血 */
+   /** 记录实体在禁疗之触期间的最近已知血量，用于拦截 setHealth() 直接回血 */
    private static final Map<UUID, Float> TRACKED_HEALTH = new ConcurrentHashMap<>();
    /** 跨维度传送宽限期：记录实体连续未在维度中找到的 tick 数，防止传送时误清理 */
    private static final Map<UUID, Integer> MISSING_TICKS = new ConcurrentHashMap<>();
@@ -45,7 +45,7 @@ public class UndyingSlashEffect extends MobEffect {
    // TODO: 临时字段，后续改为从配置系统读取
    private static final boolean ALLOW_BOSS_PHASE_TWO = true;
 
-   public UndyingSlashEffect() {
+   public HealingBlockEffect() {
       super(MobEffectCategory.HARMFUL, 0x8B0000); // 暗红色
    }
 
@@ -53,7 +53,7 @@ public class UndyingSlashEffect extends MobEffect {
       return true;
    }
 
-   /** 检查实体当前是否受不死斩效果影响（以 NBT 为准，过期自动清理） */
+   /** 检查实体当前是否受禁疗之触效果影响（以 NBT 为准，过期自动清理） */
    public static boolean isActive(LivingEntity entity) {
       if (entity == null || entity.level().isClientSide()) {
          return false;
@@ -70,7 +70,7 @@ public class UndyingSlashEffect extends MobEffect {
       return true;
    }
 
-   /** 向目标施加不死斩标记，持续时间单位：tick */
+   /** 向目标施加禁疗之触标记，持续时间单位：tick */
    public static void apply(LivingEntity target, int durationTicks) {
       long endTime = target.level().getGameTime() + durationTicks;
       target.getPersistentData().putLong(NBT_KEY, endTime);
@@ -143,7 +143,7 @@ public class UndyingSlashEffect extends MobEffect {
          }
       }
 
-      /** 预先标记：HIGHEST 优先级记录不死斩实体即将死亡 */
+      /** 预先标记：HIGHEST 优先级记录禁疗之触实体即将死亡 */
       @SubscribeEvent(priority = EventPriority.HIGHEST)
       public static void onLivingDeathPreMark(LivingDeathEvent event) {
          if (isActive(event.getEntity())) {
@@ -209,7 +209,7 @@ public class UndyingSlashEffect extends MobEffect {
       @SubscribeEvent(priority = EventPriority.LOWEST)
       public static void onLivingDeath(LivingDeathEvent event) {
          LivingEntity entity = event.getEntity();
-         // 死亡时清理追踪记录、宽限期与不死斩 NBT 标记（防止玩家复活后残留禁疗）
+         // 死亡时清理追踪记录、宽限期与禁疗之触 NBT 标记（防止玩家复活后残留禁疗）
          TRACKED_HEALTH.remove(entity.getUUID());
          MISSING_TICKS.remove(entity.getUUID());
          entity.getPersistentData().remove(NBT_KEY);

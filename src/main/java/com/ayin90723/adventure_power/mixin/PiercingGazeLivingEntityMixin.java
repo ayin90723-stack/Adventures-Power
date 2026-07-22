@@ -24,9 +24,9 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 
 /**
- * 见既斩 Mixin（第二层 + 兜底） - 穿透通过重写 {@code hurt()} 实现的自定义无敌。
+ * 破敌之眼 Mixin（第二层 + 兜底） - 穿透通过重写 {@code hurt()} 实现的自定义无敌。
  * <p>
- * 第一层 {@link SeeAndSlashMixin} 拦截 {@code isInvulnerableTo()} 检查，
+ * 第一层 {@link PiercingGazeMixin} 拦截 {@code isInvulnerableTo()} 检查，
  * 处理原版及大多数基于该方法实现的模组无敌。但部分 Boss（如钢铁守护者）直接重写
  * {@code hurt()} 方法，在其内部返回 false 来实现无敌，完全绕过了
  * {@code isInvulnerableTo()}。
@@ -57,8 +57,8 @@ import java.util.Deque;
  * 通过 {@link #PIERCING_EVENT_POSTED} 标记区分 A 与 C。
  *
  * <h3>防事件风暴（核心）</h3>
- * 第三方模组若在 LivingHurtEvent 监听器里再调 {@code target.hurt()}（见既斩源），
- * 会形成递归事件风暴。{@link #IN_PIERCING} 风暴守卫检测"是否已在外层见既斩穿透内"，
+ * 第三方模组若在 LivingHurtEvent 监听器里再调 {@code target.hurt()}（破敌之眼源），
+ * 会形成递归事件风暴。{@link #IN_PIERCING} 风暴守卫检测"是否已在外层破敌之眼穿透内"，
  * 若是则走原版 ForgeHooks.onLivingHurt（不手动 post），阻断递归。
  *
  * <h3>栈式隔离</h3>
@@ -68,14 +68,14 @@ import java.util.Deque;
  * 外层标记完整保留。
  */
 @Mixin(LivingEntity.class)
-public abstract class SeeAndSlashLivingEntityMixin {
+public abstract class PiercingGazeLivingEntityMixin {
 
-    // ===== actuallyHurt Invoker 已迁移至 SeeAndSlashLivingEntityAccessor =====
-    // 通过 ((SeeAndSlashLivingEntityAccessor)this).invokeActuallyHurt(...) 调用
+    // ===== actuallyHurt Invoker 已迁移至 PiercingGazeLivingEntityAccessor =====
+    // 通过 ((PiercingGazeLivingEntityAccessor)this).invokeActuallyHurt(...) 调用
 
-    // ===== ThreadLocal：本层见既斩穿透状态（栈式隔离递归调用） =====
+    // ===== ThreadLocal：本层破敌之眼穿透状态（栈式隔离递归调用） =====
 
-    /** 风暴守卫：本层是否已在见既斩穿透内（redirect 手动 post 后置 true） */
+    /** 风暴守卫：本层是否已在破敌之眼穿透内（redirect 手动 post 后置 true） */
     private static final ThreadLocal<Boolean> IN_PIERCING = ThreadLocal.withInitial(() -> false);
     /** 本层 LivingHurtEvent 是否已被 redirect 手动 post 过（区分情况 A 与 C） */
     private static final ThreadLocal<Boolean> PIERCING_EVENT_POSTED = ThreadLocal.withInitial(() -> false);
@@ -98,7 +98,7 @@ public abstract class SeeAndSlashLivingEntityMixin {
 
     /**
      * 在 {@code hurt()} 返回 false 时做兜底检查：
-     * 若攻击者持有见既斩，按情况 A/C 决定是否补 post LivingHurtEvent，再调用
+     * 若攻击者持有破敌之眼，按情况 A/C 决定是否补 post LivingHurtEvent，再调用
      * {@code actuallyHurt()} 穿透自定义无敌逻辑。
      *
      * <h3>手动发事件的副作用</h3>
@@ -108,7 +108,7 @@ public abstract class SeeAndSlashLivingEntityMixin {
      *   <li><b>淬魂递归保护</b>：淬魂内部调用 {@code target.hurt(soul_strike_source)}
      *       时会再次触发本 Mixin，但 {@code isMmeInternalSource} 会直接 return，
      *       且栈式隔离保证递归不清外层标记，不会无限递归。</li>
-     *   <li><b>事件取消</b>：即使其他 mod 在监听器中取消了事件，见既斩仍会穿透 -
+     *   <li><b>事件取消</b>：即使其他 mod 在监听器中取消了事件，破敌之眼仍会穿透 -
      *       作为万能钥匙，不受外部事件取消的影响。</li>
      * </ul>
      */
@@ -129,7 +129,7 @@ public abstract class SeeAndSlashLivingEntityMixin {
                 return;
             }
 
-            // 风暴守卫：外层已在见既斩穿透内（栈顶 IN_PIERCING=true）-> 本层是递归 hurt，跳过穿透逻辑防风暴。
+            // 风暴守卫：外层已在破敌之眼穿透内（栈顶 IN_PIERCING=true）-> 本层是递归 hurt，跳过穿透逻辑防风暴。
             // redirect 已不 post 事件；此处跳过补 post / actuallyHurt / 血量检测 / 清无敌，
             // 否则情况 A 补 post 会再次触发监听器递归
             Deque<Object[]> stackCheck = PIERCING_STACK.get();
@@ -148,15 +148,15 @@ public abstract class SeeAndSlashLivingEntityMixin {
             }
 
             // 反重入：MME 内部穿透伤害（soul_strike / vengeance）走原版管线，
-            // 外层见既斩的 hurt() 已处理过穿透+清除自定义无敌计时器，内层无需重复。
+            // 外层破敌之眼的 hurt() 已处理过穿透+清除自定义无敌计时器，内层无需重复。
             // 使用精确 msgId 匹配而非 BYPASSES_INVULNERABILITY 标签检查，
             // 避免将 RevelationFix fe_power 误判为 MME 内部调用。
             if (isMmeInternalSource(source)) {
                 return;
             }
 
-            // 攻击者持有见既斩 -> 穿透该实体的一切无敌手段
-            if (attacker instanceof LivingEntity living && hasSeeAndSlash(living)) {
+            // 攻击者持有破敌之眼 -> 穿透该实体的一切无敌手段
+            if (attacker instanceof LivingEntity living && hasPiercingGaze(living)) {
                 // 友好火力保护：不穿透自己驯服生物的无敌
                 if (FriendlyFireProtection.isOwnerTarget(living, self)) {
                     return;
@@ -180,8 +180,8 @@ public abstract class SeeAndSlashLivingEntityMixin {
                         MinecraftForge.EVENT_BUS.post(hurtEvent);
                         effectiveAmount = hurtEvent.getAmount();
                     }
-                    // 不检查事件是否被取消 - 见既斩作为万能钥匙，不受其他 mod 取消事件的影响
-                    ((SeeAndSlashLivingEntityAccessor)this).invokeActuallyHurt(source, effectiveAmount);
+                    // 不检查事件是否被取消 - 破敌之眼作为万能钥匙，不受其他 mod 取消事件的影响
+                    ((PiercingGazeLivingEntityAccessor)this).invokeActuallyHurt(source, effectiveAmount);
                     cir.setReturnValue(true);
                 } else {
                     // 情况 B：正常流程，actuallyHurt 已由原版管线执行
@@ -197,11 +197,11 @@ public abstract class SeeAndSlashLivingEntityMixin {
                     HealthUtil.setAllHealthLikeRaw(self, Math.max(0.0F, healthBefore - effectiveAmount));
                 }
 
-                // 无论伤害是否被阻止，只要攻击者持有见既斩就清除目标的自定义无敌计时器。
+                // 无论伤害是否被阻止，只要攻击者持有破敌之眼就清除目标的自定义无敌计时器。
                 // 部分 Boss（如 Goety Apostle）在 actuallyHurt() 中设置 moddedInvul 等字段，
                 // 若不清除，下一次 hurt() 检测到 >0 会直接 return false 且不调用
                 // super.hurt()，导致 LivingEntity.hurt() 不被调用、本 Mixin 不再触发、
-                // 淬魂Plus 的 NBT 影子血量也无法更新。
+                // 影杀 的 NBT 影子血量也无法更新。
                 InvulClearUtil.clearCustomInvulTimers(self);
             }
         } finally {
@@ -231,12 +231,12 @@ public abstract class SeeAndSlashLivingEntityMixin {
      * <p>
      * 正常流程中 {@code ForgeHooks.onLivingHurt()} 会 post {@link LivingHurtEvent}，
      * Boss 限伤模组在此事件中通过 {@code setAmount()} 压低伤害值。
-     * 本 Redirect 在见既斩攻击下替换该调用：
+     * 本 Redirect 在破敌之眼攻击下替换该调用：
      * <ul>
-     *   <li>手动 post LivingHurtEvent（让淬魂/淬魂Plus 正常追加百分比伤害）</li>
-     *   <li>返回值取 {@code Math.max(原始值, 事件值)} - 见既斩下伤害只能涨不能降</li>
+     *   <li>手动 post LivingHurtEvent（让淬魂/影杀 正常追加百分比伤害）</li>
+     *   <li>返回值取 {@code Math.max(原始值, 事件值)} - 破敌之眼下伤害只能涨不能降</li>
      *   <li>设 {@link #PIERCING_EVENT_POSTED} 标记，告知 onHurtReturn 已 post 过</li>
-     *   <li>风暴守卫：检测栈顶外层 IN_PIERCING，若外层已在见既斩穿透内则走原版，防事件风暴</li>
+     *   <li>风暴守卫：检测栈顶外层 IN_PIERCING，若外层已在破敌之眼穿透内则走原版，防事件风暴</li>
      * </ul>
      * 不取消事件是因为淬魂需在 LivingHurtEvent 中正常计算百分比伤害和写入 NBT。
      *
@@ -259,12 +259,12 @@ public abstract class SeeAndSlashLivingEntityMixin {
             return ForgeHooks.onLivingHurt(entity, source, amount);
         }
 
-        // 非见既斩攻击 -> 走原版管线
-        if (!isSeeAndSlashAttack(source, entity)) {
+        // 非破敌之眼攻击 -> 走原版管线
+        if (!isPiercingGazeAttack(source, entity)) {
             return ForgeHooks.onLivingHurt(entity, source, amount);
         }
 
-        // 风暴守卫：外层已在见既斩穿透内（栈顶 IN_PIERCING=true）-> 不 post 事件，直接返回原 amount。
+        // 风暴守卫：外层已在破敌之眼穿透内（栈顶 IN_PIERCING=true）-> 不 post 事件，直接返回原 amount。
         // 走原版 ForgeHooks.onLivingHurt 仍会 post 事件触发监听器导致递归，无法防风暴；
         // 返回 amount 跳过 post，递归 hurt 不触发 LivingHurtEvent 监听器，打破递归链
         Deque<Object[]> stack = PIERCING_STACK.get();
@@ -288,10 +288,10 @@ public abstract class SeeAndSlashLivingEntityMixin {
     }
 
     /**
-     * 检查攻击源是否来自见既斩持有者，且非自身/友好火力/重入调用。
+     * 检查攻击源是否来自破敌之眼持有者，且非自身/友好火力/重入调用。
      */
     @Unique
-    private static boolean isSeeAndSlashAttack(DamageSource source, LivingEntity target) {
+    private static boolean isPiercingGazeAttack(DamageSource source, LivingEntity target) {
         // 追溯到真正的攻击者
         Entity attacker = source.getEntity();
         if (attacker == null) {
@@ -303,7 +303,7 @@ public abstract class SeeAndSlashLivingEntityMixin {
         if (!(attacker instanceof LivingEntity living)) {
             return false;
         }
-        if (!hasSeeAndSlash(living)) {
+        if (!hasPiercingGaze(living)) {
             return false;
         }
         // 友好火力保护：不穿透自己驯服生物
@@ -314,11 +314,11 @@ public abstract class SeeAndSlashLivingEntityMixin {
     }
 
     /**
-     * 检查 LivingEntity 主手或副手物品是否拥有见既斩附魔，
+     * 检查 LivingEntity 主手或副手物品是否拥有破敌之眼附魔，
      * 且（对于玩家）是否佩戴了冒险的终点饰品。
      */
     @Unique
-    private static boolean hasSeeAndSlash(LivingEntity entity) {
+    private static boolean hasPiercingGaze(LivingEntity entity) {
         return AdventurePower.hasPiercingGaze(entity)
             && (!(entity instanceof Player player)
                 || AdventureProgressCapability.isAbilityAvailable(player, "piercing_gaze"));
@@ -328,7 +328,7 @@ public abstract class SeeAndSlashLivingEntityMixin {
      * 检查伤害源是否为 MME 内部穿透伤害类型，用于反重入保护。
      * <p>
      * MME 的淬魂/复仇等附魔在处理器内部构造 DamageSource 并调用
-     * {@code target.hurt()}，这会再次触发本 Mixin。外层见既斩已处理过
+     * {@code target.hurt()}，这会再次触发本 Mixin。外层破敌之眼已处理过
      * 穿透与清除自定义无敌计时器，内层无需重复。
      * <p>
      * 使用精确的 DamageType message_id 匹配（{@code mme.soul_strike} /

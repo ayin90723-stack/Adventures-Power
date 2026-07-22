@@ -1,6 +1,6 @@
 package com.ayin90723.adventure_power.mixin;
 
-import com.ayin90723.adventure_power.effect.UndyingSlashEffect;
+import com.ayin90723.adventure_power.effect.HealingBlockEffect;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import net.minecraft.world.entity.LivingEntity;
 import org.spongepowered.asm.mixin.Mixin;
@@ -9,7 +9,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * 不死斩 —— 双向 Mixin：跟踪血量 + 深层钳制。
+ * 禁疗之触 —— 双向 Mixin：跟踪血量 + 深层钳制。
  * <p>
  * <b>跟踪层 ({@code setHealth} RETURN)</b>：记录每次合法血量下降后的新低点，
  * 只要实体走 {@code LivingEntity.setHealth()} 路径就会同步追踪值。
@@ -24,7 +24,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * 无论回血走了什么方法调用链。
  */
 @Mixin(value = LivingEntity.class, priority = 2000)
-public class UndyingSlashMixin {
+public class HealingBlockMixin {
 
     /** 跟踪层：{@code setHealth()} RETURN 时同步追踪低点 */
     @Inject(method = "m_21153_", at = @At("RETURN"))
@@ -33,13 +33,13 @@ public class UndyingSlashMixin {
         if (self.level().isClientSide()) {
             return;
         }
-        if (!UndyingSlashEffect.isActive(self)) {
+        if (!HealingBlockEffect.isActive(self)) {
             return;
         }
-        Float tracked = UndyingSlashEffect.getTrackedHealth(self);
+        Float tracked = HealingBlockEffect.getTrackedHealth(self);
         float current = self.getHealth();
         if (tracked != null) {
-            UndyingSlashEffect.updateTrackedHealth(self, Math.min(current, tracked));
+            HealingBlockEffect.updateTrackedHealth(self, Math.min(current, tracked));
         }
     }
 
@@ -56,10 +56,10 @@ public class UndyingSlashMixin {
         if (self.level().isClientSide()) {
             return;
         }
-        if (!UndyingSlashEffect.isActive(self)) {
+        if (!HealingBlockEffect.isActive(self)) {
             return;
         }
-        Float tracked = UndyingSlashEffect.getTrackedHealth(self);
+        Float tracked = HealingBlockEffect.getTrackedHealth(self);
         if (tracked == null) {
             return;
         }
@@ -67,6 +67,6 @@ public class UndyingSlashMixin {
         if (current > tracked) {
             HealthUtil.setAllHealthLikeRaw(self, tracked);
         }
-        UndyingSlashEffect.updateTrackedHealth(self, Math.min(current, tracked));
+        HealingBlockEffect.updateTrackedHealth(self, Math.min(current, tracked));
     }
 }

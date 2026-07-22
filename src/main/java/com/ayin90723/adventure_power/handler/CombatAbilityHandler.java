@@ -6,7 +6,7 @@ import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.ability.ShadowKillAbility;
 import com.ayin90723.adventure_power.ability.SoulQuenchAbility;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
-import com.ayin90723.adventure_power.effect.UndyingSlashEffect;
+import com.ayin90723.adventure_power.effect.HealingBlockEffect;
 import com.ayin90723.adventure_power.util.FriendlyFireProtection;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import net.minecraft.core.particles.ParticleTypes;
@@ -218,8 +218,8 @@ public class CombatAbilityHandler {
                 + target.getMaxHealth() * hpRatio
                 + target.getHealth() * hpRatio;
 
-            if (UndyingSlashEffect.isActive(target)) {
-                extraDamage *= com.ayin90723.adventure_power.config.ModConfig.SOUL_QUENCH_UNDYING_SLASH_MULTIPLIER.get().floatValue();
+            if (HealingBlockEffect.isActive(target)) {
+                extraDamage *= com.ayin90723.adventure_power.config.ModConfig.SOUL_QUENCH_HEALING_BLOCK_MULTIPLIER.get().floatValue();
             }
 
             // 觉醒：斩杀线 — 目标低于阈值 HP 时伤害翻倍
@@ -690,7 +690,7 @@ public class CombatAbilityHandler {
                 durationSeconds = (int) Math.ceil(durationSeconds * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get());
             }
             int durationTicks = durationSeconds * 20;
-            UndyingSlashEffect.apply(target, durationTicks);
+            HealingBlockEffect.apply(target, durationTicks);
         });
     }
 }
