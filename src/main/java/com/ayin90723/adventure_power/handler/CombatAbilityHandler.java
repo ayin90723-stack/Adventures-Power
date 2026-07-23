@@ -35,6 +35,7 @@ import net.minecraftforge.event.TickEvent.Phase;
 import net.minecraftforge.event.TickEvent.ServerTickEvent;
 import net.minecraftforge.event.entity.living.LivingAttackEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
+import net.minecraftforge.event.entity.living.LivingEvent.LivingTickEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -63,6 +64,12 @@ public class CombatAbilityHandler {
     private static final String NBT_SP_TOTAL_HP = "totalHP";
     private static final String NBT_SP_SHADOW_HP = "shadowHP";
     private static final String NBT_SP_END_TIME = "endTime";
+
+    /** 禁疗之触觉醒易伤 - 目标侧标记到期时间（gameTime） */
+    private static final String HEALING_BLOCK_VULN_END_KEY = "AP_HealingBlock_Vuln_End";
+
+    /** 破敌之眼觉醒禁无敌帧 - 目标侧标记到期时间（gameTime） */
+    private static final String PIERCING_GAZE_NO_IFRAME_END_KEY = "AP_PiercingGaze_NoIframe_End";
 
     /** 防重入：正在斩杀中的目标 */
     private static final Set<UUID> KILLING = ConcurrentHashMap.newKeySet();
@@ -155,6 +162,7 @@ public class CombatAbilityHandler {
 
         // 受伤方能力仅处理未取消的事件
         if (!event.isCanceled()) {
+            handleHealingBlockVuln(event, target);
             handleDamageResist(event, target);
         }
 
@@ -170,15 +178,16 @@ public class CombatAbilityHandler {
         }
     }
 
-    /** 破敌之眼觉醒：对无敌帧中的目标 +30% 伤害 */
+    /** 破敌之眼觉醒：破无敌一击后，目标 3 秒内无法获得无敌帧 */
     private static void handlePiercingGazeAwakened(LivingHurtEvent event, LivingEntity target, Player attacker) {
         if (target.invulnerableTime <= 0) return;
         com.ayin90723.adventure_power.capability.AdventureProgressCapability.getAdventureProgress(attacker)
             .ifPresent(progress -> {
                 if (!progress.isFullyUnlocked()) return;
                 if (!progress.isAbilityEnabled("piercing_gaze")) return;
-                event.setAmount(event.getAmount()
-                    * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_PIERCING_GAZE_MULTIPLIER.get().floatValue());
+                // 标记目标禁无敌帧 3 秒（60 tick）
+                long endTime = target.level().getGameTime() + 60;
+                target.getPersistentData().putLong(PIERCING_GAZE_NO_IFRAME_END_KEY, endTime);
             });
     }
 
@@ -699,11 +708,44 @@ public class CombatAbilityHandler {
             if (ability == null) return;
 
             int durationSeconds = (int) ability.value(milestones);
-            if (progress.isFullyUnlocked()) {
-                durationSeconds = (int) Math.ceil(durationSeconds * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get());
-            }
             int durationTicks = durationSeconds * 20;
             HealingBlockEffect.apply(target, durationTicks);
+
+            // 觉醒：禁疗+易伤 - 标记目标易伤（与禁疗同期到期）
+            if (progress.isFullyUnlocked()) {
+                long endTime = target.level().getGameTime() + durationTicks;
+                target.getPersistentData().putLong(HEALING_BLOCK_VULN_END_KEY, endTime);
+            }
         });
+    }
+
+    /** 禁疗之触觉醒易伤：被禁疗标记的目标受伤 +X%（与禁疗同期到期） */
+    private static void handleHealingBlockVuln(LivingHurtEvent event, LivingEntity target) {
+        CompoundTag data = target.getPersistentData();
+        if (!data.contains(HEALING_BLOCK_VULN_END_KEY)) return;
+        long endTime = data.getLong(HEALING_BLOCK_VULN_END_KEY);
+        if (target.level().getGameTime() > endTime) {
+            data.remove(HEALING_BLOCK_VULN_END_KEY);
+            return;
+        }
+        float mult = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_HEALING_BLOCK_VULN.get().floatValue();
+        event.setAmount(event.getAmount() * mult);
+    }
+
+    /** 破敌之眼觉醒：标记期间目标无法获得无敌帧 */
+    @SubscribeEvent
+    public static void onLivingTick(LivingTickEvent event) {
+        LivingEntity entity = event.getEntity();
+        if (entity.level().isClientSide()) return;
+        CompoundTag data = entity.getPersistentData();
+        if (!data.contains(PIERCING_GAZE_NO_IFRAME_END_KEY)) return;
+        long endTime = data.getLong(PIERCING_GAZE_NO_IFRAME_END_KEY);
+        if (entity.level().getGameTime() > endTime) {
+            data.remove(PIERCING_GAZE_NO_IFRAME_END_KEY);
+            return;
+        }
+        if (entity.invulnerableTime > 0) {
+            entity.invulnerableTime = 0;
+        }
     }
 }

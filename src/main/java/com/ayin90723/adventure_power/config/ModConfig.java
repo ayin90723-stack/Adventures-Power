@@ -136,9 +136,6 @@ public class ModConfig {
     public static final DoubleValue AWAKEN_UNDYING_ARMOR_BONUS;
     public static final DoubleValue AWAKEN_UNDYING_WEAPON_BONUS;
 
-    // === 觉醒 — 破敌之眼 ===
-    public static final DoubleValue AWAKEN_PIERCING_GAZE_MULTIPLIER;
-
     // === 觉醒 — 拒绝篡改 ===
     public static final DoubleValue AWAKEN_REJECT_MANIP_REFLECT_RATIO;
 
@@ -147,6 +144,9 @@ public class ModConfig {
 
     // === 觉醒 — 受击坚韧 ===
     public static final IntValue AWAKEN_RESILIENCE_BONUS_STACKS;
+
+    // === 觉醒 - 禁疗之触 ===
+    public static final DoubleValue AWAKEN_HEALING_BLOCK_VULN;
 
     // === 觉醒 — 休养生息 ===
     public static final IntValue AWAKEN_RAPID_RECOVERY_BONUS;
@@ -334,7 +334,7 @@ public class ModConfig {
 
         BUILDER.push("觉醒强化");
         AWAKEN_MULTIPLIER = BUILDER.comment("觉醒数值强化倍率")
-            .defineInRange("awaken_multiplier", 1.3, 0.5, 10.0);
+            .defineInRange("awaken_multiplier", 1.5, 0.5, 10.0);
 
         AWAKEN_VOID_STEP_JUMPS = BUILDER.comment("觉醒虚空踏步 — 总跳跃次数")
             .defineInRange("awaken_void_step_jumps", 3, 2, 10);
@@ -357,19 +357,19 @@ public class ModConfig {
         AWAKEN_SANCTUARY_SPEED = BUILDER.comment("觉醒旅者庇护 — 可移动速度倍率")
             .defineInRange("awaken_sanctuary_speed", 0.3, 0.0, 1.0);
         AWAKEN_UNDYING_ARMOR_BONUS = BUILDER.comment("觉醒不朽装备 — 每件护甲额外护甲值")
-            .defineInRange("awaken_undying_armor_bonus", 1.0, 0.0, 10.0);
+            .defineInRange("awaken_undying_armor_bonus", 2.0, 0.0, 10.0);
         AWAKEN_UNDYING_WEAPON_BONUS = BUILDER.comment("觉醒不朽装备 — 主手武器伤害倍率")
-            .defineInRange("awaken_undying_weapon_bonus", 0.15, 0.0, 2.0);
-        AWAKEN_PIERCING_GAZE_MULTIPLIER = BUILDER.comment("觉醒破敌之眼 — 对无敌目标伤害倍率")
-            .defineInRange("awaken_piercing_gaze_multiplier", 1.30, 1.0, 5.0);
+            .defineInRange("awaken_undying_weapon_bonus", 0.25, 0.0, 2.0);
         AWAKEN_REJECT_MANIP_REFLECT_RATIO = BUILDER.comment("觉醒拒绝篡改 — 反弹被拒绝伤害的比例")
             .defineInRange("awaken_reject_manip_reflect_ratio", 0.30, 0.0, 1.0);
         AWAKEN_FORTUNE_FAVOR_BONUS = BUILDER.comment("觉醒鸿运当头 — 额外时运/抢夺等级")
             .defineInRange("awaken_fortune_favor_bonus", 2, 0, 10);
         AWAKEN_RESILIENCE_BONUS_STACKS = BUILDER.comment("觉醒受击坚韧 — 额外最大层数")
             .defineInRange("awaken_resilience_bonus_stacks", 6, 0, 50);
+        AWAKEN_HEALING_BLOCK_VULN = BUILDER.comment("觉醒禁疗之触 - 易伤倍率")
+            .defineInRange("awaken_healing_block_vuln", 1.2, 1.0, 5.0);
         AWAKEN_RAPID_RECOVERY_BONUS = BUILDER.comment("觉醒休养生息 — 每周期额外回血量（HP）")
-            .defineInRange("awaken_rapid_recovery_bonus", 2, 0, 20);
+            .defineInRange("awaken_rapid_recovery_bonus", 5, 0, 20);
         LOOT_ALL_AWAKENED_MAX_COUNT = BUILDER.comment("觉醒满载而归 - 每样取掉落表最大数量")
             .define("loot_all_awakened_max_count", true);
         LOOT_ALL_AWAKENED_COPIES = BUILDER.comment("觉醒满载而归 - 每样份数")
