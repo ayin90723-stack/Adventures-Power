@@ -11,7 +11,11 @@ import net.minecraft.network.chat.Component;
  * <p>
  * 不使用药水效果（addEffect），避免被 MobEffectEvent / removeAllEffects 拦截。
  */
-public class RapidRecoveryAbility implements Ability {
+public class RapidRecoveryAbility extends StepGrowthAbility {
+
+    public RapidRecoveryAbility() {
+        super(2);
+    }
 
     @Override
     public String id() {
@@ -28,22 +32,13 @@ public class RapidRecoveryAbility implements Ability {
         return Component.translatable("ability.adventure_power.rapid_recovery.desc");
     }
 
-    /**
-     * 返回直写回血的 amplifier 等级。
-     * 每 2 个里程碑升一级，handler 按 (amplifier + 1) HP/3s 执行。
-     */
-
-    private int countAtUnlock = 2;
-
     @Override
-    public void setCountAtUnlock(int n) {
-        this.countAtUnlock = n;
+    protected float base() {
+        return ModConfig.RAPID_RECOVERY_AMPLIFIER_BASE.get();
     }
 
     @Override
-    public float value(int count) {
-        int steps = (count - countAtUnlock) / 2;
-        return ModConfig.RAPID_RECOVERY_AMPLIFIER_BASE.get()
-            + ModConfig.RAPID_RECOVERY_AMPLIFIER_STEP.get() * steps;
+    protected float step() {
+        return ModConfig.RAPID_RECOVERY_AMPLIFIER_STEP.get();
     }
 }

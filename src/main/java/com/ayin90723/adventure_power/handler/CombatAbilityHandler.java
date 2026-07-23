@@ -3,46 +3,27 @@ package com.ayin90723.adventure_power.handler;
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
-import com.ayin90723.adventure_power.ability.ShadowKillAbility;
 import com.ayin90723.adventure_power.ability.SoulQuenchAbility;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.effect.HealingBlockEffect;
+import com.ayin90723.adventure_power.util.AbilityGate;
+import com.ayin90723.adventure_power.util.DamageUtil;
 import com.ayin90723.adventure_power.util.FriendlyFireProtection;
 import com.ayin90723.adventure_power.util.HealthUtil;
+import com.ayin90723.adventure_power.util.PersistentDataKeys;
+import com.ayin90723.adventure_power.util.PiercingGazeUtil;
 import net.minecraft.core.particles.ParticleTypes;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerBossEvent;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.BossEvent.BossBarColor;
-import net.minecraft.world.BossEvent.BossBarOverlay;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.entity.projectile.Projectile;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.phys.AABB;
-import net.minecraft.world.level.Level;
-import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.event.TickEvent.Phase;
-import net.minecraftforge.event.TickEvent.ServerTickEvent;
 import net.minecraftforge.event.entity.living.LivingAttackEvent;
-import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingEvent.LivingTickEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
-import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
-
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 战斗类能力效果处理器。
@@ -52,37 +33,18 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li>灵巧 (Agility) — LivingAttackEvent 中概率闪避</li>
  *   <li>伤害抗性 (DamageResist) — LivingHurtEvent 中全伤害减免</li>
  *   <li>淬魂之力 (SoulQuench) — 真实伤害（绕过护甲/抗性）</li>
- *   <li>影杀 (ShadowKill) — 攻击者侧影子血量 + 饱和式秒杀</li>
+ *   <li>影杀 (ShadowKill) — 攻击者侧影子血量 + 饱和式秒杀（委托 {@link ShadowKillHelper}）</li>
  *   <li>禁疗之触 (HealingBlock) — 对目标施加禁疗标记</li>
  * </ul>
  */
 @Mod.EventBusSubscriber(modid = AdventurePower.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class CombatAbilityHandler {
 
-    // ==================== 影杀 — 影子血量 NBT 键 (攻击者侧存储) ====================
-    private static final String NBT_SP_DATA = "AP_ShadowHP_Data";
-    private static final String NBT_SP_TOTAL_HP = "totalHP";
-    private static final String NBT_SP_SHADOW_HP = "shadowHP";
-    private static final String NBT_SP_END_TIME = "endTime";
-
     /** 禁疗之触觉醒易伤 - 目标侧标记到期时间（gameTime） */
-    private static final String HEALING_BLOCK_VULN_END_KEY = "AP_HealingBlock_Vuln_End";
+    private static final String HEALING_BLOCK_VULN_END_KEY = PersistentDataKeys.HEALING_BLOCK_VULN_END;
 
     /** 破敌之眼觉醒禁无敌帧 - 目标侧标记到期时间（gameTime） */
-    private static final String PIERCING_GAZE_NO_IFRAME_END_KEY = "AP_PiercingGaze_NoIframe_End";
-
-    /** 防重入：正在斩杀中的目标 */
-    private static final Set<UUID> KILLING = ConcurrentHashMap.newKeySet();
-
-    /**
-     * 每攻击者对每目标的影子血量 BossBar：attacker UUID -> target UUID -> bar。
-     * <p>多人独立：A、B 同打一 Boss 各有独立 bar 显示各自影子血量，互不干扰；
-     * 玩家登出只清自己的 bar，不影响他人；target 死亡时清所有攻击者对该 target 的 bar。</p>
-     */
-    private static final Map<UUID, Map<UUID, ServerBossEvent>> SHADOW_HP_BARS = new ConcurrentHashMap<>();
-
-    /** 影子血量过期清理 tick 计数器，每 200 tick（10秒）执行一次全局清理 */
-    private static int shadowHpCleanupTick = 0;
+    private static final String PIERCING_GAZE_NO_IFRAME_END_KEY = PersistentDataKeys.PIERCING_GAZE_NO_IFRAME_END;
 
     // ==================== 1. 灵巧 — 概率闪避 ====================
 
@@ -93,18 +55,12 @@ public class CombatAbilityHandler {
         if (!(receiver instanceof Player player)) return;
         if (receiver.level().isClientSide()) return;
 
-        AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (!progress.isAdventurer()) return;
-            if (!progress.isAbilityEnabled("agility")) return;
-
+        AbilityGate.getActiveProgress(player, "agility").ifPresent(progress -> {
             int milestones = progress.getUnlockedMilestoneCount();
             Ability ability = AbilityRegistry.get("agility");
             if (ability == null) return;
 
-            float chance = ability.value(milestones) / 100.0f;
-            if (progress.isFullyUnlocked()) {
-                chance = Math.min(chance * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get().floatValue(), 0.95f);
-            }
+            float chance = AbilityGate.awakenedRatio(ability, milestones, progress.isFullyUnlocked());
             if (player.getRandom().nextFloat() < chance) {
                 event.setCanceled(true);
                 if (player.level() instanceof ServerLevel serverLevel) {
@@ -116,30 +72,6 @@ public class CombatAbilityHandler {
         });
     }
 
-    // ==================== 影杀辅助：实体死亡时清理残留 ====================
-
-    /** 任意实体死亡时，遍历所有在线玩家清理该目标的影子血量数据和 BossBar */
-    @SubscribeEvent
-    public static void onLivingDeath(LivingDeathEvent event) {
-        LivingEntity target = event.getEntity();
-        if (target.level().isClientSide()) return;
-
-        removeShadowHPBossBar(target);
-        String targetKey = target.getUUID().toString();
-        for (Player onlinePlayer : target.level().players()) {
-            CompoundTag playerData = onlinePlayer.getPersistentData();
-            CompoundTag shadowData = playerData.getCompound(NBT_SP_DATA);
-            if (shadowData.contains(targetKey)) {
-                shadowData.remove(targetKey);
-                if (shadowData.isEmpty()) {
-                    playerData.remove(NBT_SP_DATA);
-                } else {
-                    playerData.put(NBT_SP_DATA, shadowData);
-                }
-            }
-        }
-    }
-
     // ==================== 2~5: LivingHurtEvent 入口 ====================
 
     @SubscribeEvent(receiveCanceled = true)
@@ -149,16 +81,8 @@ public class CombatAbilityHandler {
 
         DamageSource source = event.getSource();
 
-        // 兼容拔刀剑/投射物等 causingEntity 缺失的伤害：getEntity() 非 Player 时从直接伤害实体取 owner
-        Entity rawAttacker = source.getEntity();
-        if (!(rawAttacker instanceof Player)) {
-            Entity direct = source.getDirectEntity();
-            if (direct instanceof Player p) {
-                rawAttacker = p;
-            } else if (direct instanceof Projectile proj && proj.getOwner() instanceof Player ownerPlayer) {
-                rawAttacker = ownerPlayer;
-            }
-        }
+        // 兼容拔刀剑/投射物等 causingEntity 缺失的伤害：通过 resolveAttacker 追溯真正的攻击者
+        Entity rawAttacker = PiercingGazeUtil.resolveAttacker(source);
 
         // 受伤方能力仅处理未取消的事件
         if (!event.isCanceled()) {
@@ -174,40 +98,29 @@ public class CombatAbilityHandler {
             handleHealingBlock(event, target, attacker);
             handlePiercingGazeAwakened(event, target, attacker);
             handleSoulQuench(event, target, attacker);
-            handleShadowKill(event, target, attacker);
+            ShadowKillHelper.handleShadowKill(event, target, attacker);
         }
     }
 
-    /** 破敌之眼觉醒：破无敌一击后，目标 3 秒内无法获得无敌帧 */
+    /** 破敌之眼觉醒：破无敌一击后，目标 N tick 内无法获得无敌帧 */
     private static void handlePiercingGazeAwakened(LivingHurtEvent event, LivingEntity target, Player attacker) {
         if (target.invulnerableTime <= 0) return;
-        com.ayin90723.adventure_power.capability.AdventureProgressCapability.getAdventureProgress(attacker)
-            .ifPresent(progress -> {
-                if (!progress.isFullyUnlocked()) return;
-                if (!progress.isAbilityEnabled("piercing_gaze")) return;
-                // 标记目标禁无敌帧 3 秒（60 tick）
-                long endTime = target.level().getGameTime() + 60;
-                target.getPersistentData().putLong(PIERCING_GAZE_NO_IFRAME_END_KEY, endTime);
-            });
+        if (!AbilityGate.getActiveProgress(attacker, "piercing_gaze").filter(p -> p.isFullyUnlocked()).isPresent()) return;
+        // 标记目标禁无敌帧
+        long endTime = target.level().getGameTime() + com.ayin90723.adventure_power.config.ModConfig.AWAKEN_PIERCING_GAZE_NO_IFRAME_TICKS.get();
+        target.getPersistentData().putLong(PIERCING_GAZE_NO_IFRAME_END_KEY, endTime);
     }
 
     // ==================== 2. 伤害抗性 — 全伤害减免 ====================
 
     private static void handleDamageResist(LivingHurtEvent event, LivingEntity target) {
         if (!(target instanceof Player player)) return;
-
-        AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (!progress.isAdventurer()) return;
-            if (!progress.isAbilityEnabled("damage_resist")) return;
-
+        AbilityGate.getActiveProgress(player, "damage_resist").ifPresent(progress -> {
             int milestones = progress.getUnlockedMilestoneCount();
             Ability ability = AbilityRegistry.get("damage_resist");
             if (ability == null) return;
 
-            float ratio = ability.value(milestones) / 100.0f;
-            if (progress.isFullyUnlocked()) {
-                ratio = Math.min(ratio * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get().floatValue(), 0.95f);
-            }
+            float ratio = AbilityGate.awakenedRatio(ability, milestones, progress.isFullyUnlocked());
             event.setAmount(event.getAmount() * (1.0f - ratio));
         });
     }
@@ -223,11 +136,10 @@ public class CombatAbilityHandler {
      * mod 拦截则通过 HealthUtil 直写血量兜底。
      */
     private static void handleSoulQuench(LivingHurtEvent event, LivingEntity target, Player attacker) {
-        AdventureProgressCapability.getAdventureProgress(attacker).ifPresent(progress -> {
-            if (!progress.isAbilityEnabled("soul_quench")) return;
+        AbilityGate.getActiveProgress(attacker, "soul_quench").ifPresent(progress -> {
 
             // 跳过自身造成的穿透伤害，防递归
-            if (isInternalSource(event.getSource())) return;
+            if (DamageUtil.isInternalSource(event.getSource())) return;
 
             int milestones = progress.getUnlockedMilestoneCount();
             Ability raw = AbilityRegistry.get("soul_quench");
@@ -255,11 +167,7 @@ public class CombatAbilityHandler {
             if (extraDamage <= 0.0F) return;
 
             // 构建穿透伤害类型：绕过护甲/无敌/附魔保护/攻击冷却
-            var key = ResourceKey.create(Registries.DAMAGE_TYPE,
-                new ResourceLocation("adventure_power", "soul_strike"));
-            var registry = target.level().registryAccess().registryOrThrow(Registries.DAMAGE_TYPE);
-            var holder = registry.getHolderOrThrow(key);
-            var source = new DamageSource(holder, null, attacker);
+            var source = DamageUtil.createSoulStrike(target.level(), attacker);
 
             float healthBefore = target.getHealth();
             target.hurt(source, extraDamage);
@@ -287,320 +195,8 @@ public class CombatAbilityHandler {
         });
     }
 
-    // ==================== 4. 影杀 — 影子血量 + 饱和式秒杀 ====================
-
-    /**
-     * 影杀：在攻击者 NBT 中维护每个目标的独立影子血量，每次攻击按
-     * (flatDamage + maxHP×hpRatio) 削减。影子血量归零时触发饱和式秒杀。
-     * <p>
-     * 影子血量存储在<b>攻击者（玩家）</b>侧 persistentData，而非目标侧——
-     * Boss 无法通过 NBT 清理/阶段切换等手段逃脱。
-     */
-    private static void handleShadowKill(LivingHurtEvent event, LivingEntity target, Player attacker) {
-        if (target instanceof Player) return;  // PVP 无效
-        if (!target.isAlive()) return;
-
-        AdventureProgressCapability.getAdventureProgress(attacker).ifPresent(progress -> {
-            if (!progress.isAbilityEnabled("shadow_kill")) return;
-
-            // 跳过内部穿透伤害，防重入
-            if (isInternalSource(event.getSource())) return;
-            if (KILLING.contains(target.getUUID())) return;
-
-            int milestones = progress.getUnlockedMilestoneCount();
-            Ability raw = AbilityRegistry.get("shadow_kill");
-            if (!(raw instanceof ShadowKillAbility ability)) return;
-
-            float flatDamage = ability.flatDamage();
-            float hpRatio = ability.hpRatio();
-
-            // 从攻击者侧读取影子血量
-            CompoundTag playerData = attacker.getPersistentData();
-            CompoundTag shadowData = playerData.getCompound(NBT_SP_DATA);
-            long gameTime = attacker.level().getGameTime();
-
-            // 懒清理过期条目
-            cleanupExpiredShadowData(shadowData, gameTime);
-
-            String targetKey = target.getUUID().toString();
-            float totalHP, shadowHP;
-            boolean isNew = false;
-
-            if (shadowData.contains(targetKey)) {
-                CompoundTag entry = shadowData.getCompound(targetKey);
-                totalHP = entry.getFloat(NBT_SP_TOTAL_HP);
-                shadowHP = entry.getFloat(NBT_SP_SHADOW_HP);
-            } else {
-                totalHP = target.getMaxHealth();
-                shadowHP = totalHP;
-                isNew = true;
-            }
-
-            // 削减影子血量
-            float damage = flatDamage + totalHP * hpRatio;
-            shadowHP = Math.max(0.0F, shadowHP - damage);
-
-            // 写回攻击者侧 NBT
-            CompoundTag entry = new CompoundTag();
-            entry.putFloat(NBT_SP_TOTAL_HP, totalHP);
-            entry.putFloat(NBT_SP_SHADOW_HP, shadowHP);
-            entry.putLong(NBT_SP_END_TIME, gameTime + com.ayin90723.adventure_power.config.ModConfig.SHADOW_KILL_DATA_EXPIRE_TICKS.get());
-            shadowData.put(targetKey, entry);
-            playerData.put(NBT_SP_DATA, shadowData);
-
-            // 更新 BossBar
-            updateShadowHPBossBar(target, attacker, shadowHP, totalHP);
-
-            // 粒子反馈
-            if (target.level() instanceof ServerLevel sl) {
-                sl.sendParticles(ParticleTypes.SOUL_FIRE_FLAME,
-                    target.getX(), target.getY() + target.getBbHeight() * 0.7, target.getZ(),
-                    5, 0.3, 0.3, 0.3, 0.02);
-                if (isNew) {
-                    sl.sendParticles(ParticleTypes.SCULK_SOUL,
-                        target.getX(), target.getY() + target.getBbHeight() * 0.5, target.getZ(),
-                        30, 0.8, 0.8, 0.8, 0.05);
-                }
-            }
-
-            // 影子血量归零 → 饱和式秒杀
-            if (shadowHP <= 0.0F) {
-                shadowData.remove(targetKey);
-                if (shadowData.isEmpty()) {
-                    playerData.remove(NBT_SP_DATA);
-                } else {
-                    playerData.put(NBT_SP_DATA, shadowData);
-                }
-                removeShadowHPBossBar(target);
-
-                event.setCanceled(true);  // 取消原事件伤害，避免与下面 hurt() 叠加
-                target.setLastHurtByMob(attacker);
-                target.setLastHurtByPlayer(attacker);
-                executeShadowKill(target, attacker, event.getSource());
-
-                // 觉醒：影杀 AOE 爆炸
-                if (progress.isFullyUnlocked()) {
-                    shadowKillAoe(attacker, target);
-                }
-            }
-        });
-    }
-
-    /** 饱和式秒杀 — 当 hurt() / die() 全部被拦截时的最终手段 */
-    private static void saturationKill(LivingEntity target, DamageSource source, LivingEntity attacker) {
-        Level level = target.level();
-        if (!(level instanceof ServerLevel serverLevel)) return;
-
-        // ① 直写血量归零 — 写入所有血量条目（原版 + 自定义），直写 DataItem.value 绕一切 setHealth() 覆写
-        HealthUtil.setAllHealthLikeRaw(target, 0.0F);
-
-        // ② 强制掉落全套装备
-        for (EquipmentSlot slot : EquipmentSlot.values()) {
-            ItemStack equipment = target.getItemBySlot(slot);
-            if (!equipment.isEmpty()) {
-                target.spawnAtLocation(equipment.copy());
-                target.setItemSlot(slot, ItemStack.EMPTY);
-            }
-        }
-
-        // ③ 反射调用 dropAllDeathLoot（触发战利品表 / LivingDropsEvent / LootModifier）
-        try {
-            java.lang.reflect.Method dropAll = LivingEntity.class
-                .getDeclaredMethod("m_6668_", DamageSource.class);
-            dropAll.setAccessible(true);
-            dropAll.invoke(target, source);
-        } catch (NoSuchMethodException e) {
-            try {
-                java.lang.reflect.Method dropAll = LivingEntity.class
-                    .getDeclaredMethod("dropAllDeathLoot", DamageSource.class);
-                dropAll.setAccessible(true);
-                dropAll.invoke(target, source);
-            } catch (Exception ex) {
-                ex.printStackTrace();
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
-        // ④ 手动 post LivingDeathEvent（墓碑/任务模组可正常处理）
-        MinecraftForge.EVENT_BUS.post(new LivingDeathEvent(target, source));
-
-        // ⑤ 善后清理
-        target.unRide();
-        target.ejectPassengers();
-
-        // ⑥ 五重移除链 — 逐层递增，确保无 Boss 可拦截
-        target.remove(Entity.RemovalReason.KILLED);                             // 标准路径
-        target.remove(Entity.RemovalReason.DISCARDED);                          // 双保险
-        HealthUtil.removeDirect(target, Entity.RemovalReason.KILLED);           // 反射 remove() — 绕过 Java 覆写
-        HealthUtil.setRemovedFieldDirect(target, Entity.RemovalReason.KILLED);  // 字段直写 — 绕过一切 Mixin
-        // 第5层：CHANGED_DIMENSION 兜底 — 部分 Boss 的 Mixin 仅拦截 KILLED/DISCARDED
-        HealthUtil.setRemovedDirect(target, Entity.RemovalReason.CHANGED_DIMENSION);
-
-        // ⑦ 客户端同步 — 强制通知所有追踪此实体的玩家其已被移除
-        net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket packet =
-            new net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket(target.getId());
-        serverLevel.getChunkSource().broadcast(target, packet);
-
-        // ⑧ 内部结构抹除 — 从 EntityLookup/EntityTickList/EntitySection 中直接删除实体
-        // 借鉴 ManaitaPlus removeOnServer 思路，绕过一切方法覆写和 Mixin 拦截
-        HealthUtil.eradicateFromWorld(target);
-    }
-
-    // ==================== 影杀辅助：BossBar ====================
-
-    private static void updateShadowHPBossBar(LivingEntity target, Player player,
-                                               float shadowHP, float totalHP) {
-        if (!(player instanceof ServerPlayer sp)) return;
-        float progress = totalHP > 0.0F ? Math.max(0.0F, Math.min(1.0F, shadowHP / totalHP)) : 0.0F;
-        String nameShadow = String.format("%.1f", shadowHP);
-        String nameTotal = String.format("%.1f", totalHP);
-
-        // 双层 computeIfAbsent：每个攻击者对每个目标拥有独立 BossBar，多人同打一 Boss 互不覆盖
-        ServerBossEvent bar = SHADOW_HP_BARS
-            .computeIfAbsent(player.getUUID(), k -> new ConcurrentHashMap<>())
-            .computeIfAbsent(target.getUUID(), uuid -> {
-                ServerBossEvent b = new ServerBossEvent(
-                    Component.translatable("ability.adventure_power.shadow_kill.bar", nameShadow, nameTotal),
-                    BossBarColor.PURPLE, BossBarOverlay.PROGRESS);
-                b.setVisible(true);
-                return b;
-            });
-        bar.setName(Component.translatable("ability.adventure_power.shadow_kill.bar", nameShadow, nameTotal));
-        bar.setProgress(progress);
-        bar.addPlayer(sp);
-    }
-
-    private static void removeShadowHPBossBar(LivingEntity target) {
-        // target 死亡/斩杀：遍历所有攻击者，移除他们对该 target 的 BossBar
-        UUID targetUuid = target.getUUID();
-        for (Map<UUID, ServerBossEvent> inner : SHADOW_HP_BARS.values()) {
-            ServerBossEvent bar = inner.remove(targetUuid);
-            if (bar != null) {
-                bar.removeAllPlayers();
-            }
-        }
-    }
-
-    /** 清理 shadowData 中所有已过期的条目及其 BossBar */
-    private static void cleanupExpiredShadowData(CompoundTag shadowData, long gameTime) {
-        java.util.List<String> expired = new java.util.ArrayList<>();
-        for (String uuidKey : shadowData.getAllKeys()) {
-            CompoundTag entry = shadowData.getCompound(uuidKey);
-            if (entry.getLong(NBT_SP_END_TIME) <= gameTime) {
-                expired.add(uuidKey);
-            }
-        }
-        for (String uuidKey : expired) {
-            shadowData.remove(uuidKey);
-            removeShadowHPBossBarByUUID(uuidKey);
-        }
-    }
-
-    private static void removeShadowHPBossBarByUUID(String uuidStr) {
-        try {
-            UUID uuid = UUID.fromString(uuidStr);
-            // 过期清理：遍历所有攻击者，移除他们对该 target 的 BossBar
-            for (Map<UUID, ServerBossEvent> inner : SHADOW_HP_BARS.values()) {
-                ServerBossEvent bar = inner.remove(uuid);
-                if (bar != null) bar.removeAllPlayers();
-            }
-        } catch (IllegalArgumentException ignored) {}
-    }
-
-    /** 觉醒影杀 AOE：对斩杀目标周围实体施加影子血量削减，归零时触发斩杀 */
-    private static void shadowKillAoe(Player attacker, LivingEntity killed) {
-        double radius = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SHADOW_KILL_AOE_RADIUS.get();
-        float ratio = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SHADOW_KILL_AOE_RATIO.get().floatValue();
-        int maxTargets = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SHADOW_KILL_AOE_MAX_TARGETS.get();
-
-        AABB aabb = killed.getBoundingBox().inflate(radius);
-        java.util.List<LivingEntity> nearby = killed.level().getEntitiesOfClass(LivingEntity.class, aabb,
-            e -> e != attacker && e != killed && e.isAlive()
-                && !(e instanceof Player)
-                && e instanceof net.minecraft.world.entity.monster.Monster);
-
-        int count = 0;
-        CompoundTag playerData = attacker.getPersistentData();
-        CompoundTag shadowData = playerData.getCompound(NBT_SP_DATA);
-        long gameTime = attacker.level().getGameTime();
-
-        // 懒清理过期条目（与 handleShadowKill 保持一致）
-        cleanupExpiredShadowData(shadowData, gameTime);
-
-        long expireTicks = com.ayin90723.adventure_power.config.ModConfig.SHADOW_KILL_DATA_EXPIRE_TICKS.get();
-        for (LivingEntity target : nearby) {
-            if (count >= maxTargets) break;
-
-            String targetKey = target.getUUID().toString();
-            float totalHP, existingShadow;
-            if (shadowData.contains(targetKey)) {
-                // 已有条目：保留原始 totalHP 快照，不被目标当前 maxHealth 变化污染
-                CompoundTag oldEntry = shadowData.getCompound(targetKey);
-                totalHP = oldEntry.getFloat(NBT_SP_TOTAL_HP);
-                existingShadow = oldEntry.getFloat(NBT_SP_SHADOW_HP);
-            } else {
-                totalHP = target.getMaxHealth();
-                existingShadow = totalHP;
-            }
-            float aoeReduction = totalHP * ratio;
-            float newShadow = Math.max(0.0F, existingShadow - aoeReduction);
-
-            // 粒子反馈
-            if (killed.level() instanceof ServerLevel sl) {
-                sl.sendParticles(ParticleTypes.SCULK_SOUL,
-                    target.getX(), target.getY() + target.getBbHeight() * 0.5, target.getZ(),
-                    10, 0.5, 0.5, 0.5, 0.02);
-            }
-
-            // 影子血量归零 → 触发斩杀
-            if (newShadow <= 0.0F) {
-                shadowData.remove(targetKey);
-                removeShadowHPBossBar(target);
-                executeShadowKill(target, attacker, attacker.damageSources().playerAttack(attacker));
-                count++;
-                continue;
-            }
-
-            // 正常削减：写回 NBT
-            CompoundTag entry = new CompoundTag();
-            entry.putFloat(NBT_SP_TOTAL_HP, totalHP);
-            entry.putFloat(NBT_SP_SHADOW_HP, newShadow);
-            entry.putLong(NBT_SP_END_TIME, gameTime + expireTicks);
-            shadowData.put(targetKey, entry);
-
-            updateShadowHPBossBar(target, attacker, newShadow, totalHP);
-            count++;
-        }
-        if (!shadowData.isEmpty()) {
-            playerData.put(NBT_SP_DATA, shadowData);
-        } else {
-            playerData.remove(NBT_SP_DATA);
-        }
-    }
-
-    /**
-     * 执行影杀斩杀：清无敌帧 → hurt(Float.MAX_VALUE) → saturationKill 兜底。
-     * NBT 清理和 BossBar 移除由调用方负责。
-     */
-    private static void executeShadowKill(LivingEntity target, Player attacker, DamageSource killSource) {
-        clearHurtTime(target);
-        target.invulnerableTime = 0;
-        KILLING.add(target.getUUID());
-        try {
-            // 用 maxHealth×10 替代 Float.MAX_VALUE：足够秒杀任何 Boss，
-            // 又不会让其他模组做 amount×ratio 时溢出为 Infinity/NaN 导致异常/卡死
-            target.hurt(killSource, target.getMaxHealth() * 10F);
-        } finally {
-            KILLING.remove(target.getUUID());
-        }
-        if (target.isAlive()) {
-            saturationKill(target, killSource, attacker);
-        }
-    }
-
     /** 清零实体 hurtTime（反射方式），防止个别 Boss 将 hurtTime>0 作为额外无敌判据 */
-    private static void clearHurtTime(LivingEntity target) {
+    public static void clearHurtTime(LivingEntity target) {
         if (target instanceof Player) return; // PVP 保留原版 10tick 无敌窗口
         if (HURT_TIME_FIELD == null) return;
         try {
@@ -608,7 +204,7 @@ public class CombatAbilityHandler {
         } catch (IllegalAccessException ignored) {}
     }
 
-    private static final java.lang.reflect.Field HURT_TIME_FIELD;
+    static final java.lang.reflect.Field HURT_TIME_FIELD;
     static {
         java.lang.reflect.Field f = null;
         try {
@@ -638,70 +234,13 @@ public class CombatAbilityHandler {
         } catch (Exception ignored) {}
     }
 
-    /** 内部穿透伤害检测 — 防递归 */
-    private static boolean isInternalSource(DamageSource source) {
-        String msgId = source.getMsgId();
-        return "soul_strike".equals(msgId) || "judgment".equals(msgId);
-    }
-
-    // ==================== 影杀辅助：定时全局清理过期影子血量 ====================
-
-    /**
-     * 每 200 tick（10 秒）遍历所有在线玩家，清理 persistentData 中过期的影子血量条目
-     * 以及对应的 BossBar。防止玩家长时间不攻击导致过期数据/残血条堆积。
-     */
-    @SubscribeEvent
-    public static void onServerTick(ServerTickEvent event) {
-        if (event.phase != Phase.END) return;
-
-        shadowHpCleanupTick++;
-        if (shadowHpCleanupTick < 200) return;
-        shadowHpCleanupTick = 0;
-
-        MinecraftServer server = event.getServer();
-        if (server == null) return;
-
-        for (ServerPlayer sp : server.getPlayerList().getPlayers()) {
-            CompoundTag playerData = sp.getPersistentData();
-            CompoundTag shadowData = playerData.getCompound(NBT_SP_DATA);
-            if (shadowData.isEmpty()) continue;
-
-            long gameTime = sp.level().getGameTime();
-            cleanupExpiredShadowData(shadowData, gameTime);
-
-            if (shadowData.isEmpty()) {
-                playerData.remove(NBT_SP_DATA);
-            } else {
-                playerData.put(NBT_SP_DATA, shadowData);
-            }
-        }
-    }
-
-    /**
-     * 玩家登出时清理该玩家关联的所有影子血量 BossBar，
-     * 防止 BossBar 持有的 ServerPlayer 引用在玩家离线后变为无效，造成内存泄漏。
-     * 影子血量数据本身保留在 persistentData 中，下次登录时继续使用。
-     * <p>多人安全：仅移除该攻击者自己的 bar（attacker UUID 为外层 key），
-     * 不影响其他玩家对同一目标的 bar。</p>
-     */
-    @SubscribeEvent
-    public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
-        Map<UUID, ServerBossEvent> inner = SHADOW_HP_BARS.remove(event.getEntity().getUUID());
-        if (inner != null) {
-            for (ServerBossEvent bar : inner.values()) {
-                bar.removeAllPlayers();
-            }
-        }
-    }
-
     // ==================== 5. 禁疗之触 — 攻击施加禁疗 ====================
 
     private static void handleHealingBlock(LivingHurtEvent event, LivingEntity target, Player attacker) {
         // 跳过内部穿透伤害，防止淬魂等内部 hurt() 刷新禁疗计时器
-        if (isInternalSource(event.getSource())) return;
+        if (DamageUtil.isInternalSource(event.getSource())) return;
 
-        AdventureProgressCapability.getAdventureProgress(attacker).ifPresent(progress -> {
-            if (!progress.isAbilityEnabled("healing_block")) return;
+        AbilityGate.getActiveProgress(attacker, "healing_block").ifPresent(progress -> {
 
             int milestones = progress.getUnlockedMilestoneCount();
             Ability ability = AbilityRegistry.get("healing_block");

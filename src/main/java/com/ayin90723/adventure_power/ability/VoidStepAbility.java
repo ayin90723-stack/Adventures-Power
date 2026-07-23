@@ -9,7 +9,11 @@ import net.minecraft.network.chat.Component;
  * 数值：固定跳跃力度倍率（{@link ModConfig#VOID_STEP_POWER}），无里程碑成长。
  * 觉醒后由 {@link ModConfig#AWAKEN_VOID_STEP_JUMPS} 控制三段跳。
  */
-public class VoidStepAbility implements Ability {
+public class VoidStepAbility extends AbstractAbility {
+
+    public VoidStepAbility() {
+        super(2);
+    }
 
     @Override
     public String id() {

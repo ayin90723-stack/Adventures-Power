@@ -8,7 +8,11 @@ import net.minecraft.network.chat.Component;
  * 解锁条件：8 里程碑
  * 最大层数从配置读取，默认：8→5, 9→8, 10→12
  */
-public class ResilienceAbility implements Ability {
+public class ResilienceAbility extends AbstractAbility {
+
+    public ResilienceAbility() {
+        super(8);
+    }
 
     @Override
     public String id() {
@@ -29,13 +33,6 @@ public class ResilienceAbility implements Ability {
      * 返回最大减伤层数。从配置读取三档值，按 countAtUnlock 偏移计算。
      * 默认 countAtUnlock=8 → 偏移0=8里程碑, 偏移1=9里程碑, 偏移2+=10里程碑。
      */
-
-    private int countAtUnlock = 8;
-
-    @Override
-    public void setCountAtUnlock(int n) {
-        this.countAtUnlock = n;
-    }
 
     @Override
     public float value(int count) {

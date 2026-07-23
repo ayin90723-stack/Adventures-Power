@@ -7,7 +7,11 @@ import net.minecraft.network.chat.Component;
  * 解锁条件：10 里程碑
  * 无成长，解锁即完整。
  */
-public class RejectManipAbility implements Ability {
+public class RejectManipAbility extends AbstractAbility {
+
+    public RejectManipAbility() {
+        super(10);
+    }
 
     @Override
     public String id() {
@@ -22,17 +26,5 @@ public class RejectManipAbility implements Ability {
     @Override
     public Component description() {
         return Component.translatable("ability.adventure_power.reject_manip.desc");
-    }
-
-        private int countAtUnlock = 10;
-
-    @Override
-    public void setCountAtUnlock(int n) {
-        this.countAtUnlock = n;
-    }
-
-    @Override
-    public float value(int count) {
-        return -1;
     }
 }

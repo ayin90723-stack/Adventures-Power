@@ -8,8 +8,10 @@ import com.ayin90723.adventure_power.handler.AdvancementEventHandler;
 import com.ayin90723.adventure_power.item.ModItems;
 import com.ayin90723.adventure_power.milestone.Milestone;
 import com.ayin90723.adventure_power.util.MilestoneRegistry;
+import com.ayin90723.adventure_power.util.PersistentDataKeys;
 import com.ayin90723.adventure_power.network.NetworkHandler;
 import com.ayin90723.adventure_power.util.HealthUtil;
+import com.ayin90723.adventure_power.util.ItemInventoryHelper;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -94,11 +96,11 @@ public class AdventureProgressCapability {
         net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
         if (mc.player != null) {
             if (type == PENDING_BUFF) {
-                mc.setScreen(new com.ayin90723.adventure_power.ui.BuffManagementScreen());
+                mc.setScreen(new com.ayin90723.adventure_power.ui.AdventureMainScreen(com.ayin90723.adventure_power.ui.AdventureMainScreen.Tab.BUFF));
             } else if (type == PENDING_ABILITY) {
-                mc.setScreen(new com.ayin90723.adventure_power.ui.AbilityManagementScreen());
+                mc.setScreen(new com.ayin90723.adventure_power.ui.AdventureMainScreen());
             } else if (type == PENDING_MILESTONE) {
-                mc.setScreen(new com.ayin90723.adventure_power.ui.MilestoneProgressScreen());
+                mc.setScreen(new com.ayin90723.adventure_power.ui.AdventureMainScreen(com.ayin90723.adventure_power.ui.AdventureMainScreen.Tab.MILESTONE));
             }
         }
     }
@@ -151,13 +153,13 @@ public class AdventureProgressCapability {
         new ResourceLocation(AdventurePower.MODID, "adventure_progress");
 
     /** 持久数据根键 */
-    private static final String PERSISTENT_KEY = "MME_AdventureProgress";
+    private static final String PERSISTENT_KEY = PersistentDataKeys.ADVENTURE_PROGRESS;
 
     /** 首次发放标记键 */
-    public static final String GOT_BEGIN_KEY = "MME_GotAdventureBegin";
+    public static final String GOT_BEGIN_KEY = PersistentDataKeys.GOT_BEGIN_KEY;
 
     /** 旧永久解锁标记键（迁移后清除） */
-    private static final String OLD_UNLOCKED_KEY = "MME_AdventureUnlocked";
+    private static final String OLD_UNLOCKED_KEY = PersistentDataKeys.OLD_UNLOCKED_KEY;
 
     /** 计分板目标名 */
     private static final String UNLOCK_OBJECTIVE = "adventure_power_unlock";
@@ -315,18 +317,10 @@ public class AdventureProgressCapability {
     }
 
     private static void cleanOldStageNbt(Player player) {
-        for (ItemStack stack : player.getInventory().items) {
+        ItemInventoryHelper.forEachInventorySlot(player, stack -> {
             if (stack.is(ModItems.ADVENTURE_BEGIN.get()) || stack.is(ModItems.ADVENTURE_END.get()))
                 migrateOldStage(stack);
-        }
-        for (ItemStack stack : player.getInventory().armor) {
-            if (stack.is(ModItems.ADVENTURE_BEGIN.get()) || stack.is(ModItems.ADVENTURE_END.get()))
-                migrateOldStage(stack);
-        }
-        for (ItemStack stack : player.getInventory().offhand) {
-            if (stack.is(ModItems.ADVENTURE_BEGIN.get()) || stack.is(ModItems.ADVENTURE_END.get()))
-                migrateOldStage(stack);
-        }
+        });
     }
 
     private static void giveAdventureBeginIfNeeded(Player player) {
@@ -403,57 +397,22 @@ public class AdventureProgressCapability {
     }
 
     private static boolean playerHasAdventureItem(Player player) {
-        for (ItemStack stack : player.getInventory().items) {
-            if (stack.is(ModItems.ADVENTURE_BEGIN.get()) || stack.is(ModItems.ADVENTURE_END.get())) return true;
-        }
-        for (ItemStack stack : player.getInventory().armor) {
-            if (stack.is(ModItems.ADVENTURE_BEGIN.get()) || stack.is(ModItems.ADVENTURE_END.get())) return true;
-        }
-        for (ItemStack stack : player.getInventory().offhand) {
-            if (stack.is(ModItems.ADVENTURE_BEGIN.get()) || stack.is(ModItems.ADVENTURE_END.get())) return true;
-        }
-        return CuriosApi.getCuriosInventory(player).resolve()
-            .map(inv -> inv.isEquipped(ModItems.ADVENTURE_BEGIN.get())
-                     || inv.isEquipped(ModItems.ADVENTURE_END.get()))
-            .orElse(false);
+        return ItemInventoryHelper.hasAnyAdventureSlot(player,
+            stack -> stack.is(ModItems.ADVENTURE_BEGIN.get()) || stack.is(ModItems.ADVENTURE_END.get()));
     }
 
     /** 检查玩家是否持有冒险的终点（仅终点，不包含开始） */
     private static boolean playerHasAdventureEnd(Player player) {
-        for (ItemStack stack : player.getInventory().items) {
-            if (stack.is(ModItems.ADVENTURE_END.get())) return true;
-        }
-        for (ItemStack stack : player.getInventory().armor) {
-            if (stack.is(ModItems.ADVENTURE_END.get())) return true;
-        }
-        for (ItemStack stack : player.getInventory().offhand) {
-            if (stack.is(ModItems.ADVENTURE_END.get())) return true;
-        }
-        return CuriosApi.getCuriosInventory(player).resolve()
-            .map(inv -> inv.isEquipped(ModItems.ADVENTURE_END.get()))
-            .orElse(false);
+        return ItemInventoryHelper.hasAnyAdventureSlot(player,
+            stack -> stack.is(ModItems.ADVENTURE_END.get()));
     }
 
     // ===== NBT 扫描与同步 =====
 
     private static void scanAllItemsForMilestones(Player player, boolean[] found) {
         java.util.List<Milestone> all = MilestoneRegistry.getAll();
-        for (ItemStack stack : player.getInventory().items) {
-            scanItemForMilestones(stack, all, found);
-        }
-        for (ItemStack stack : player.getInventory().armor) {
-            scanItemForMilestones(stack, all, found);
-        }
-        for (ItemStack stack : player.getInventory().offhand) {
-            scanItemForMilestones(stack, all, found);
-        }
-        CuriosApi.getCuriosInventory(player).resolve().ifPresent(inv ->
-            inv.getCurios().forEach((id, handler) -> {
-                for (int i = 0; i < handler.getStacks().getSlots(); i++) {
-                    scanItemForMilestones(handler.getStacks().getStackInSlot(i), all, found);
-                }
-            })
-        );
+        ItemInventoryHelper.forEachAdventureSlot(player, stack ->
+            scanItemForMilestones(stack, all, found));
     }
 
     private static void scanItemForMilestones(ItemStack stack, java.util.List<Milestone> all, boolean[] found) {
@@ -461,7 +420,7 @@ public class AdventureProgressCapability {
         migrateOldStage(stack);
         CompoundTag tag = stack.getOrCreateTag();
         for (int i = 0; i < all.size(); i++) {
-            if (tag.getBoolean(milestoneNbtKey(all.get(i).id()))) {
+            if (tag.getBoolean(PersistentDataKeys.milestoneNbtKey(all.get(i).id()))) {
                 found[i] = true;
             }
         }
@@ -505,20 +464,13 @@ public class AdventureProgressCapability {
     }
 
     public static void syncAllAdventureItemNbt(Player player, IAdventureProgress progress) {
-        syncStackList(player.getInventory().items, progress);
-        syncStackList(player.getInventory().armor, progress);
-        syncStackList(player.getInventory().offhand, progress);
-        CuriosApi.getCuriosInventory(player).resolve().ifPresent(inv ->
-            inv.getCurios().forEach((id, handler) -> {
-                for (int i = 0; i < handler.getStacks().getSlots(); i++) {
-                    ItemStack stack = handler.getStacks().getStackInSlot(i);
-                    if (!stack.isEmpty() && (stack.is(ModItems.ADVENTURE_BEGIN.get()) || stack.is(ModItems.ADVENTURE_END.get()))) {
-                        writeMilestonesToStack(stack, progress);
-                        handler.getStacks().setStackInSlot(i, stack);
-                    }
-                }
-            })
-        );
+        ItemInventoryHelper.forEachInventoryList(player, list -> syncStackList(list, progress));
+        ItemInventoryHelper.forEachCuriosSlot(player, (handler, i, stack) -> {
+            if (stack.is(ModItems.ADVENTURE_BEGIN.get()) || stack.is(ModItems.ADVENTURE_END.get())) {
+                writeMilestonesToStack(stack, progress);
+                handler.getStacks().setStackInSlot(i, stack);
+            }
+        });
     }
 
     private static void syncStackList(NonNullList<ItemStack> list, IAdventureProgress progress) {
@@ -573,36 +525,27 @@ public class AdventureProgressCapability {
     public static void writeMilestonesToStack(ItemStack stack, IAdventureProgress progress) {
         CompoundTag tag = stack.getOrCreateTag();
         for (Milestone m : MilestoneRegistry.getAll()) {
-            tag.putBoolean(milestoneNbtKey(m.id()), progress.isMilestoneUnlocked(m.id()));
+            tag.putBoolean(PersistentDataKeys.milestoneNbtKey(m.id()), progress.isMilestoneUnlocked(m.id()));
         }
         stack.setTag(tag);
     }
 
     // ===== 旧 NBT 迁移 =====
 
-    private static final String OLD_STAGE_KEY = "AdventureStage";
+    private static final String OLD_STAGE_KEY = PersistentDataKeys.OLD_STAGE_KEY;
 
     public static void migrateOldStage(ItemStack stack) {
         CompoundTag tag = stack.getTag();
         if (tag != null && tag.contains(OLD_STAGE_KEY)) {
             int oldStage = tag.getInt(OLD_STAGE_KEY);
-            if (oldStage >= 1) tag.putBoolean(milestoneNbtKey("nether"), true);
-            if (oldStage >= 2) tag.putBoolean(milestoneNbtKey("wither"), true);
-            if (oldStage >= 3) tag.putBoolean(milestoneNbtKey("warden"), true);
-            if (oldStage >= 4) tag.putBoolean(milestoneNbtKey("dragon"), true);
-            if (oldStage >= 5) tag.putBoolean(milestoneNbtKey("elytra"), true);
+            if (oldStage >= 1) tag.putBoolean(PersistentDataKeys.milestoneNbtKey("nether"), true);
+            if (oldStage >= 2) tag.putBoolean(PersistentDataKeys.milestoneNbtKey("wither"), true);
+            if (oldStage >= 3) tag.putBoolean(PersistentDataKeys.milestoneNbtKey("warden"), true);
+            if (oldStage >= 4) tag.putBoolean(PersistentDataKeys.milestoneNbtKey("dragon"), true);
+            if (oldStage >= 5) tag.putBoolean(PersistentDataKeys.milestoneNbtKey("elytra"), true);
             tag.remove(OLD_STAGE_KEY);
             stack.setTag(tag);
         }
-    }
-
-    /**
-     * 计算里程碑在物品 NBT 中使用的键名（与旧版兼容）。
-     * 旧版 getNbtKey() 返回 "MME_Milestone_Nether" 等 PascalCase 格式，
-     * 新版 Milestone.getId() 返回小写，此处还原为旧格式以保持存档兼容。
-     */
-    private static String milestoneNbtKey(String id) {
-        return "MME_Milestone_" + Character.toUpperCase(id.charAt(0)) + id.substring(1);
     }
 
     // ===== 计分板 =====
@@ -673,27 +616,21 @@ public class AdventureProgressCapability {
 
         // 1. 优先搜索 Curios 槽位（正常佩戴位置）
         boolean[] replaced = {false};
-        CuriosApi.getCuriosInventory(player).resolve().ifPresent(inv -> {
-            for (var entry : inv.getCurios().entrySet()) {
-                if (replaced[0]) break;
-                var handler = entry.getValue();
-                for (int i = 0; i < handler.getStacks().getSlots(); i++) {
-                    ItemStack stack = handler.getStacks().getStackInSlot(i);
-                    if (stack.is(ModItems.ADVENTURE_BEGIN.get())) {
-                        replaceStack(stack, endItem);
-                        handler.getStacks().setStackInSlot(i, endItem);
-                        replaced[0] = true;
-                        break;
-                    }
-                }
+        ItemInventoryHelper.forEachCuriosSlot(player, (handler, i, stack) -> {
+            if (!replaced[0] && stack.is(ModItems.ADVENTURE_BEGIN.get())) {
+                replaceStack(stack, endItem);
+                handler.getStacks().setStackInSlot(i, endItem);
+                replaced[0] = true;
             }
         });
 
         // 2. 兜底搜索背包/盔甲/副手
         if (!replaced[0]) {
-            replaced[0] = replaceInList(player.getInventory().items, endItem)
-                       || replaceInList(player.getInventory().armor, endItem)
-                       || replaceInList(player.getInventory().offhand, endItem);
+            ItemInventoryHelper.forEachInventoryList(player, list -> {
+                if (!replaced[0]) {
+                    replaced[0] = replaceInList(list, endItem);
+                }
+            });
         }
 
         if (replaced[0]) {
@@ -959,7 +896,7 @@ public class AdventureProgressCapability {
 
     // ===== Buff 排除管理 =====
 
-    public static final String BUFF_BLACKLIST_KEY = "MME_BuffBlacklist";
+    public static final String BUFF_BLACKLIST_KEY = PersistentDataKeys.BUFF_BLACKLIST_KEY;
 
     public static void toggleBuffExclusion(Player player, String effectId) {
         CompoundTag root = player.getPersistentData();

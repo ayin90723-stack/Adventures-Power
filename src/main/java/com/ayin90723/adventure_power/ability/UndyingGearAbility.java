@@ -7,7 +7,11 @@ import net.minecraft.network.chat.Component;
  * 解锁条件：5 里程碑
  * 无成长，解锁即完整。
  */
-public class UndyingGearAbility implements Ability {
+public class UndyingGearAbility extends AbstractAbility {
+
+    public UndyingGearAbility() {
+        super(5);
+    }
 
     @Override
     public String id() {
@@ -22,17 +26,5 @@ public class UndyingGearAbility implements Ability {
     @Override
     public Component description() {
         return Component.translatable("ability.adventure_power.undying_gear.desc");
-    }
-
-        private int countAtUnlock = 5;
-
-    @Override
-    public void setCountAtUnlock(int n) {
-        this.countAtUnlock = n;
-    }
-
-    @Override
-    public float value(int count) {
-        return -1;
     }
 }

@@ -7,7 +7,11 @@ import net.minecraft.network.chat.Component;
  * 解锁条件：10 里程碑
  * 无成长，解锁即完整。
  */
-public class TrueHealthAbility implements Ability {
+public class TrueHealthAbility extends AbstractAbility {
+
+    public TrueHealthAbility() {
+        super(10);
+    }
 
     @Override
     public String id() {
@@ -22,17 +26,5 @@ public class TrueHealthAbility implements Ability {
     @Override
     public Component description() {
         return Component.translatable("ability.adventure_power.true_health.desc");
-    }
-
-        private int countAtUnlock = 10;
-
-    @Override
-    public void setCountAtUnlock(int n) {
-        this.countAtUnlock = n;
-    }
-
-    @Override
-    public float value(int count) {
-        return -1;
     }
 }

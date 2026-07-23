@@ -9,7 +9,11 @@ import net.minecraft.network.chat.Component;
  * 成长公式：base + per_milestone × (count - required)
  * 默认范围：1.3x → 1.75x
  */
-public class DiggingPowerAbility implements Ability {
+public class DiggingPowerAbility extends LinearGrowthAbility {
+
+    public DiggingPowerAbility() {
+        super(1);
+    }
 
     @Override
     public String id() {
@@ -26,16 +30,13 @@ public class DiggingPowerAbility implements Ability {
         return Component.translatable("ability.adventure_power.digging_power.desc");
     }
 
-        private int countAtUnlock = 1;
-
     @Override
-    public void setCountAtUnlock(int n) {
-        this.countAtUnlock = n;
+    protected float base() {
+        return ModConfig.DIGGING_POWER_BASE.get().floatValue();
     }
 
     @Override
-    public float value(int count) {
-        return (float) (ModConfig.DIGGING_POWER_BASE.get()
-            + ModConfig.DIGGING_POWER_PER_MILESTONE.get() * (count - countAtUnlock));
+    protected float perMilestone() {
+        return ModConfig.DIGGING_POWER_PER_MILESTONE.get().floatValue();
     }
 }

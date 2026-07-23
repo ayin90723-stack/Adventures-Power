@@ -9,7 +9,11 @@ import net.minecraft.network.chat.Component;
  * 成长公式：base + per_milestone × (count - required)
  * 默认范围：+1.0 → +2.8 格
  */
-public class ExtendedReachAbility implements Ability {
+public class ExtendedReachAbility extends LinearGrowthAbility {
+
+    public ExtendedReachAbility() {
+        super(4);
+    }
 
     @Override
     public String id() {
@@ -26,16 +30,13 @@ public class ExtendedReachAbility implements Ability {
         return Component.translatable("ability.adventure_power.extended_reach.desc");
     }
 
-        private int countAtUnlock = 4;
-
     @Override
-    public void setCountAtUnlock(int n) {
-        this.countAtUnlock = n;
+    protected float base() {
+        return ModConfig.EXTENDED_REACH_BASE.get().floatValue();
     }
 
     @Override
-    public float value(int count) {
-        return (float) (ModConfig.EXTENDED_REACH_BASE.get()
-            + ModConfig.EXTENDED_REACH_PER_MILESTONE.get() * (count - countAtUnlock));
+    protected float perMilestone() {
+        return ModConfig.EXTENDED_REACH_PER_MILESTONE.get().floatValue();
     }
 }

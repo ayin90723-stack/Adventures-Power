@@ -9,7 +9,11 @@ import net.minecraft.network.chat.Component;
  * 成长公式：base + per_milestone × (count - required)
  * 默认范围：5% → 13%
  */
-public class LifestealAbility implements Ability {
+public class LifestealAbility extends LinearGrowthAbility {
+
+    public LifestealAbility() {
+        super(6);
+    }
 
     @Override
     public String id() {
@@ -26,16 +30,13 @@ public class LifestealAbility implements Ability {
         return Component.translatable("ability.adventure_power.lifesteal.desc");
     }
 
-        private int countAtUnlock = 6;
-
     @Override
-    public void setCountAtUnlock(int n) {
-        this.countAtUnlock = n;
+    protected float base() {
+        return ModConfig.LIFESTEAL_BASE.get();
     }
 
     @Override
-    public float value(int count) {
-        return ModConfig.LIFESTEAL_BASE.get()
-            + ModConfig.LIFESTEAL_PER_MILESTONE.get() * (count - countAtUnlock);
+    protected float perMilestone() {
+        return ModConfig.LIFESTEAL_PER_MILESTONE.get();
     }
 }

@@ -20,7 +20,11 @@ import net.minecraft.network.chat.Component;
  * <p>
  * 解锁里程碑：warden（幽匿之惧）
  */
-public class LootAllAbility implements Ability {
+public class LootAllAbility extends AbstractAbility {
+
+    public LootAllAbility() {
+        super(8);
+    }
 
     @Override
     public String id() {
@@ -35,10 +39,5 @@ public class LootAllAbility implements Ability {
     @Override
     public Component description() {
         return Component.translatable("ability.adventure_power.loot_all.desc");
-    }
-
-    @Override
-    public float value(int count) {
-        return -1; // 无成长数值，解锁即完整
     }
 }

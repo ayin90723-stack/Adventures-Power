@@ -1,6 +1,7 @@
 package com.ayin90723.adventure_power.mixin;
 
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import net.minecraft.world.entity.LivingEntity;
@@ -62,6 +63,21 @@ public abstract class TrueHealthMixin {
         return ModConfig.TRUE_HEALTH_DEBUG_LOG.get();
     }
 
+    /**
+     * 能力门禁辅助：返回通过 true_health 门禁的 IAdventureProgress，未通过返回 null。
+     * 统一 5 个注入点重复的"取进度->冒险者/觉醒->能力启用"检查。
+     */
+    private static IAdventureProgress gatedProgress(LivingEntity self) {
+        if (!(self instanceof Player player)) return null;
+        if (player.level().isClientSide()) return null;
+        var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
+        if (progressOpt.isEmpty()) return null;
+        var progress = progressOpt.get();
+        if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return null;
+        if (!progress.isAbilityEnabled("true_health")) return null;
+        return progress;
+    }
+
     /** 重入防护：修复期间 BanHealing / 其他 Mixin 调 getHealth() 时直接返回备份 */
     private static final ThreadLocal<Boolean> IN_ON_GET_HEALTH =
         ThreadLocal.withInitial(() -> false);
@@ -83,17 +99,9 @@ public abstract class TrueHealthMixin {
     @Inject(method = "m_21223_", at = @At("HEAD"), cancellable = true)
     private void onGetHealth(CallbackInfoReturnable<Float> cir) {
         LivingEntity self = (LivingEntity) (Object) this;
-        if (!(self instanceof Player player)) return;
-
-        // 客户端不需要备份机制--客户端没有攻击者，DataItem 是服务端同步的可靠值
-        if (player.level().isClientSide()) return;
-
-        // 单次 Capability 查询合并门禁（原 3 次 -> 1 次，getHealth 高频调用收益最大）
-        var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
-        if (progressOpt.isEmpty()) return;
-        var progress = progressOpt.get();
-        if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
-        if (!progress.isAbilityEnabled("true_health")) return;
+        IAdventureProgress progress = gatedProgress(self);
+        if (progress == null) return;
+        Player player = (Player) self;
 
         // 重入：修复期间 BanHealing / 其他 Mixin 调了 getHealth() ->
         // 直接返回备份值，防止读到未修复完成的旧 DataItem 导致修复被抵消
@@ -194,39 +202,35 @@ public abstract class TrueHealthMixin {
     @Inject(method = "m_21153_", at = @At("RETURN"))
     private void onSetHealthReturn(float newHealth, CallbackInfo ci) {
         LivingEntity self = (LivingEntity) (Object) this;
-        if (!(self instanceof Player player)) return;
-        if (player.level().isClientSide()) return;
+        IAdventureProgress progress = gatedProgress(self);
+        if (progress == null) return;
+        Player player = (Player) self;
 
-        AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
-            if (!progress.isAbilityEnabled("true_health")) return;
+        float actual = HealthUtil.getHealthDirect(player);
+        float oldBackup = progress.getBackupHealth();
 
-            float actual = HealthUtil.getHealthDirect(player);
-            float oldBackup = progress.getBackupHealth();
-
-            // 觉醒防秒杀底线：外部 setHealth 篡改到致死值（非 hurt 路径 + newHealth<=0），
-            // 强制保留 1HP，防止 setHealth(0) 等秒杀。正常 hurt 打死不受影响（HURT_DEPTH>0）。
-            if (progress.isFullyUnlocked() && HealthUtil.HURT_DEPTH.get() == 0 && actual <= 0.0F) {
-                progress.setBackupHealth(1.0F);
-                repairHealth(player, 1.0F);
-                if (debugLog()) {
-                    System.err.println("[MME-TrueHealth] 觉醒防秒杀！" +
-                        " newHealth=" + newHealth + " actual=" + actual + " -> 强制保留 1HP");
-                }
-                return;
+        // 觉醒防秒杀底线：外部 setHealth 篡改到致死值（非 hurt 路径 + newHealth<=0），
+        // 强制保留 1HP，防止 setHealth(0) 等秒杀。正常 hurt 打死不受影响（HURT_DEPTH>0）。
+        if (progress.isFullyUnlocked() && HealthUtil.HURT_DEPTH.get() == 0 && actual <= 0.0F) {
+            progress.setBackupHealth(1.0F);
+            repairHealth(player, 1.0F);
+            if (debugLog()) {
+                System.err.println("[MME-TrueHealth] 觉醒防秒杀！" +
+                    " newHealth=" + newHealth + " actual=" + actual + " -> 强制保留 1HP");
             }
+            return;
+        }
 
-            if (HealthUtil.HURT_DEPTH.get() > 0 || actual >= oldBackup - EPSILON) {
-                progress.setBackupHealth(actual);
-            } else {
-                // HURT_DEPTH == 0 && actual < oldBackup -> 外部篡改，拒绝同步
-                if (debugLog()) {
-                    System.err.println("[MME-TrueHealth] 拒绝外部降血同步！" +
-                        " actual=" + actual + " oldBackup=" + oldBackup +
-                        " HURT_DEPTH=" + HealthUtil.HURT_DEPTH.get());
-                }
+        if (HealthUtil.HURT_DEPTH.get() > 0 || actual >= oldBackup - EPSILON) {
+            progress.setBackupHealth(actual);
+        } else {
+            // HURT_DEPTH == 0 && actual < oldBackup -> 外部篡改，拒绝同步
+            if (debugLog()) {
+                System.err.println("[MME-TrueHealth] 拒绝外部降血同步！" +
+                    " actual=" + actual + " oldBackup=" + oldBackup +
+                    " HURT_DEPTH=" + HealthUtil.HURT_DEPTH.get());
             }
-        });
+        }
     }
 
     // ===== 防直接死亡：isDeadOrDying() HEAD =====
@@ -242,14 +246,8 @@ public abstract class TrueHealthMixin {
     @Inject(method = "m_21224_", at = @At("HEAD"), cancellable = true)
     private void onIsDeadOrDying(CallbackInfoReturnable<Boolean> cir) {
         LivingEntity self = (LivingEntity) (Object) this;
-        if (!(self instanceof Player player)) return;
-        if (player.level().isClientSide()) return;
-
-        var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
-        if (progressOpt.isEmpty()) return;
-        var progress = progressOpt.get();
-        if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
-        if (!progress.isAbilityEnabled("true_health")) return;
+        IAdventureProgress progress = gatedProgress(self);
+        if (progress == null) return;
         float backup = progress.getBackupHealth();
         if (backup > 0.0F) {
             // 备份表明玩家应存活，无视一切外部 isDead 标记
@@ -272,14 +270,8 @@ public abstract class TrueHealthMixin {
     @Inject(method = "m_6668_", at = @At("HEAD"), cancellable = true)
     private void onDie(CallbackInfo ci) {
         LivingEntity self = (LivingEntity) (Object) this;
-        if (!(self instanceof Player player)) return;
-        if (player.level().isClientSide()) return;
-
-        var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
-        if (progressOpt.isEmpty()) return;
-        var progress = progressOpt.get();
-        if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
-        if (!progress.isAbilityEnabled("true_health")) return;
+        IAdventureProgress progress = gatedProgress(self);
+        if (progress == null) return;
         float backup = progress.getBackupHealth();
         if (backup > 0.0F) {
             if (debugLog()) {
@@ -326,14 +318,9 @@ public abstract class TrueHealthMixin {
     @Inject(method = "m_8119_", at = @At("HEAD"))
     private void onTickLivenessCheck(CallbackInfo ci) {
         LivingEntity self = (LivingEntity) (Object) this;
-        if (!(self instanceof Player player)) return;
-        if (player.level().isClientSide()) return;
-
-        var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
-        if (progressOpt.isEmpty()) return;
-        var progress = progressOpt.get();
-        if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
-        if (!progress.isAbilityEnabled("true_health")) return;
+        IAdventureProgress progress = gatedProgress(self);
+        if (progress == null) return;
+        Player player = (Player) self;
         float backup = progress.getBackupHealth();
         if (backup <= 0.0F) return;  // 备份无效，玩家确实应死
 

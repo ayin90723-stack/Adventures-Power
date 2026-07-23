@@ -3,7 +3,7 @@ package com.ayin90723.adventure_power.handler;
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
-import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.FortuneContext;
 import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.event.entity.living.LootingLevelEvent;
@@ -32,10 +32,7 @@ public class FortuneFavorHandler {
         if (!(event.getDamageSource().getEntity() instanceof Player player)) return;
         if (player.level().isClientSide()) return;
 
-        AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (!progress.isAbilityEnabled("fortune_favor")) return;
-            if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
-
+        AbilityGate.getActiveProgress(player, "fortune_favor").ifPresent(progress -> {
             Ability ability = AbilityRegistry.get("fortune_favor");
             if (ability == null) return;
 
@@ -59,10 +56,7 @@ public class FortuneFavorHandler {
         // 清理旧上下文，防止无能力的玩家继承上一位有能力的玩家的时运加成
         FortuneContext.clear();
 
-        AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (!progress.isAbilityEnabled("fortune_favor")) return;
-            if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
-
+        AbilityGate.getActiveProgress(player, "fortune_favor").ifPresent(progress -> {
             FortuneContext.setBreaker(player);
             if (progress.isFullyUnlocked()) {
                 FortuneContext.setAwakened(true);

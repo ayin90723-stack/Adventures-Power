@@ -8,7 +8,11 @@ import net.minecraft.network.chat.Component;
  * 解锁条件：9 里程碑
  * 无敌/冷却时间从配置读取。
  */
-public class DeathDefyAbility implements Ability {
+public class DeathDefyAbility extends AbstractAbility {
+
+    public DeathDefyAbility() {
+        super(9);
+    }
 
     @Override
     public String id() {
@@ -28,14 +32,6 @@ public class DeathDefyAbility implements Ability {
     /**
      * value 返回无敌 tick 数，从配置读取。
      */
-
-    private int countAtUnlock = 9;
-
-    @Override
-    public void setCountAtUnlock(int n) {
-        this.countAtUnlock = n;
-    }
-
     @Override
     public float value(int count) {
         return ModConfig.DEATH_DEFY_INVUL_DURATION.get();

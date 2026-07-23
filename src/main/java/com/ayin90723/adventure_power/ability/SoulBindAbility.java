@@ -7,7 +7,11 @@ import net.minecraft.network.chat.Component;
  * 解锁条件：3 里程碑
  * 无成长，解锁即完整。
  */
-public class SoulBindAbility implements Ability {
+public class SoulBindAbility extends AbstractAbility {
+
+    public SoulBindAbility() {
+        super(3);
+    }
 
     @Override
     public String id() {
@@ -22,17 +26,5 @@ public class SoulBindAbility implements Ability {
     @Override
     public Component description() {
         return Component.translatable("ability.adventure_power.soul_bind.desc");
-    }
-
-        private int countAtUnlock = 3;
-
-    @Override
-    public void setCountAtUnlock(int n) {
-        this.countAtUnlock = n;
-    }
-
-    @Override
-    public float value(int count) {
-        return -1;
     }
 }

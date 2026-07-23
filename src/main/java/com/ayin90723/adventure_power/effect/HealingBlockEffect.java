@@ -2,6 +2,7 @@ package com.ayin90723.adventure_power.effect;
 
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.util.HealthUtil;
+import com.ayin90723.adventure_power.util.PersistentDataKeys;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.effect.MobEffect;
@@ -34,9 +35,9 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class HealingBlockEffect extends MobEffect {
    /** NBT 中存储禁疗之触效果到期时间的 key */
-   public static final String NBT_KEY = "MME_UndyingSlashEndTime";
+   public static final String NBT_KEY = PersistentDataKeys.HEALING_BLOCK_END_TIME;
    /** NBT 中存储强制击杀标记的 key（跨优先级传递） */
-   public static final String FORCE_KILL_KEY = "MME_UndyingSlash_ForceKill";
+   public static final String FORCE_KILL_KEY = PersistentDataKeys.HEALING_BLOCK_FORCE_KILL;
    /** 记录实体在禁疗之触期间的最近已知血量，用于拦截 setHealth() 直接回血 */
    private static final Map<UUID, Float> TRACKED_HEALTH = new ConcurrentHashMap<>();
    /** 跨维度传送宽限期：记录实体连续未在维度中找到的 tick 数，防止传送时误清理 */

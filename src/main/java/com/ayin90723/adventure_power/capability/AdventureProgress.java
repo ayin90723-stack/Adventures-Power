@@ -35,6 +35,20 @@ public class AdventureProgress implements IAdventureProgress {
     private boolean fullyUnlocked;
     private final Set<String> unlockedMilestones = new HashSet<>();
     private final Set<String> disabledAbilities = new HashSet<>();
+
+    /**
+     * 缓存当前已解锁里程碑对应的所有可用能力 ID。
+     * 由 rebuildAbilityCache() 维护，isAbilityEnabled() 直接 O(1) 查询。
+     * 仅限主线程访问（Forge Capability 生命周期约束）。
+     */
+    private final Set<String> enabledAbilityCache = new HashSet<>();
+
+    /**
+     * MilestoneRegistry.getAll() 返回列表的 identityHashCode 快照。
+     * 用于在 isAbilityEnabled() 中检测 /reload 热更新导致的注册表变更，
+     * 若不一致则触发惰性重建，保证缓存不因数据包重载而变脏。
+     */
+    private int cachedRegistryHash;
     private long deathDefyInvulEnd;
     private long deathDefyCooldownEnd;
     private int resilienceStacks;
@@ -68,6 +82,7 @@ public class AdventureProgress implements IAdventureProgress {
     public void activateFullyUnlocked() {
         this.fullyUnlocked = true;
         this.adventurer = true;  // 全解锁蕴含冒险者，防止 fullyUnlocked=true / adventurer=false 不一致
+        rebuildAbilityCache();
     }
 
     // ===== 里程碑 =====
@@ -80,7 +95,9 @@ public class AdventureProgress implements IAdventureProgress {
 
     @Override
     public boolean unlockMilestone(String id) {
-        return unlockedMilestones.add(id);
+        boolean added = unlockedMilestones.add(id);
+        if (added) rebuildAbilityCache();
+        return added;
     }
 
     @Override
@@ -101,18 +118,48 @@ public class AdventureProgress implements IAdventureProgress {
         return Collections.unmodifiableSet(new HashSet<>(disabledAbilities));
     }
 
+    // ===== 能力可用性缓存 =====
+
+    /**
+     * 重建能力可用性缓存，从当前已解锁里程碑中收集所有可用能力 ID。
+     * fullyUnlocked 时取所有里程碑的 abilities，否则只取已解锁的。
+     * 同时记录 MilestoneRegistry 列表的 identityHashCode，用于 /reload 检测。
+     * <p>
+     * 幂等 —— 调用时机：unlockMilestone / activateFullyUnlocked / deserializeNBT 末尾，
+     * 以及 isAbilityEnabled 检测到注册表版本变更时的惰性重建。
+     */
+    private void rebuildAbilityCache() {
+        enabledAbilityCache.clear();
+        cachedRegistryHash = System.identityHashCode(MilestoneRegistry.getAll());
+        if (fullyUnlocked) {
+            for (Milestone m : MilestoneRegistry.getAll()) {
+                enabledAbilityCache.addAll(m.abilities());
+            }
+        } else {
+            for (String milestoneId : unlockedMilestones) {
+                Milestone m = MilestoneRegistry.getById(milestoneId);
+                if (m != null) {
+                    enabledAbilityCache.addAll(m.abilities());
+                }
+            }
+        }
+    }
+
     /**
      * 能力是否启用 — 双重门禁：玩家未手动关闭 + 已达成所需里程碑数。
      * 覆盖接口默认实现（仅检查 disabledAbilities），加入里程碑硬门禁。
+     * <p>
+     * 使用 enabledAbilityCache O(1) 查询替代旧版线性遍历所有里程碑。
+     * 当 MilestoneRegistry 列表对象变更（/reload 热更新）时惰性重建缓存。
      */
     @Override
     public boolean isAbilityEnabled(String id) {
         if (disabledAbilities.contains(id)) return false;
         if (AbilityRegistry.get(id) == null) return false;
-        for (Milestone m : MilestoneRegistry.getAll()) {
-            if (isMilestoneUnlocked(m.id()) && m.abilities().contains(id)) return true;
+        if (cachedRegistryHash != System.identityHashCode(MilestoneRegistry.getAll())) {
+            rebuildAbilityCache();
         }
-        return false;
+        return enabledAbilityCache.contains(id);
     }
 
     @Override
@@ -289,5 +336,6 @@ public class AdventureProgress implements IAdventureProgress {
         this.activeSkillIndex = nbt.getInt(TAG_ACTIVE_SKILL_INDEX);
         this.soarGrantedFlight = nbt.getBoolean(TAG_SOAR_GRANTED_FLIGHT);
         this.backupHealth = nbt.getFloat(TAG_BACKUP_HEALTH);
+        rebuildAbilityCache();
     }
 }

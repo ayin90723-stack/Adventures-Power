@@ -96,12 +96,14 @@
   "milestone.adventure_power.elytra": "Proof of the Sky",
 
   "key.categories.adventure_power": "Adventure's Power",
-  "key.adventure_power.ability_screen": "Adventure Abilities",
-  "key.adventure_power.buff_screen": "Buff Management",
+  "key.adventure_power.ability_screen": "Adventure Panel",
   "key.adventure_power.skill_switch": "Switch Active Skill",
   "key.adventure_power.skill_activate": "Activate Skill",
-  "key.adventure_power.milestone_progress": "View Adventure Progress",
 
+  "screen.adventure_power.main": "Adventure Panel",
+  "screen.adventure_power.tab.buff": "Buff Persist",
+  "screen.adventure_power.tab.ability": "Abilities",
+  "screen.adventure_power.tab.milestone": "Progress",
   "screen.adventure_power.ability": "Adventure Abilities",
   "screen.adventure_power.buff": "Buff Management",
   "screen.adventure_power.milestone_progress": "Adventure Progress",

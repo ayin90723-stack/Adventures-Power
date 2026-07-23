@@ -1,8 +1,8 @@
 package com.ayin90723.adventure_power.handler;
 
 import com.ayin90723.adventure_power.AdventurePower;
-import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.config.ModConfig;
+import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.FriendlyFireProtection;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -60,11 +60,8 @@ public class LootAllHandler {
         if (!(event.getSource().getEntity() instanceof ServerPlayer player)) return;
 
         // 服务端门禁
-        var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
-        if (progressOpt.isEmpty()) return;
-        var progress = progressOpt.get();
-        if (!progress.isAbilityEnabled("loot_all")) return;
-        if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
+        var progress = AbilityGate.getActiveProgress(player, "loot_all").orElse(null);
+        if (progress == null) return;
 
         // 友伤保护：不对玩家自己驯服的生物生效
         if (FriendlyFireProtection.isOwnerTarget(player, entity)) return;

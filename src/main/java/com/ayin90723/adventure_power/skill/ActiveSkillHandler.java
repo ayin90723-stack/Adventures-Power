@@ -3,12 +3,10 @@ package com.ayin90723.adventure_power.skill;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
+import com.ayin90723.adventure_power.util.DamageUtil;
 import com.ayin90723.adventure_power.util.FriendlyFireProtection;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import net.minecraft.core.particles.ParticleTypes;
-import net.minecraft.core.registries.Registries;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
@@ -112,16 +110,12 @@ public class ActiveSkillHandler {
         if (targets.isEmpty()) return 0;
 
         ServerLevel level = (ServerLevel) player.level();
-        var key = ResourceKey.create(Registries.DAMAGE_TYPE, new ResourceLocation("adventure_power", "judgment"));
-        var registry = level.registryAccess().registryOrThrow(Registries.DAMAGE_TYPE);
-        var holder = registry.getHolderOrThrow(key);
-
         for (LivingEntity target : targets) {
             float maxHpPart = target.getMaxHealth() * hpRatio;
             float currentHpPart = target.getHealth() * hpRatio;
             float totalDamage = baseDamage + maxHpPart + currentHpPart;
 
-            var source = new DamageSource(holder, null, player);
+            var source = DamageUtil.createJudgment(level, player);
             float healthBefore = target.getHealth();
             target.hurt(source, totalDamage);
             float actualDealt = healthBefore - target.getHealth();

@@ -9,7 +9,11 @@ import net.minecraft.network.chat.Component;
  * 成长公式：base + per_milestone × (count - required)
  * 默认范围：+4 → +12（+2心 → +6心）
  */
-public class VitalityAbility implements Ability {
+public class VitalityAbility extends LinearGrowthAbility {
+
+    public VitalityAbility() {
+        super(7);
+    }
 
     @Override
     public String id() {
@@ -26,16 +30,13 @@ public class VitalityAbility implements Ability {
         return Component.translatable("ability.adventure_power.vitality.desc");
     }
 
-        private int countAtUnlock = 7;
-
     @Override
-    public void setCountAtUnlock(int n) {
-        this.countAtUnlock = n;
+    protected float base() {
+        return ModConfig.VITALITY_BASE.get().floatValue();
     }
 
     @Override
-    public float value(int count) {
-        return (float) (ModConfig.VITALITY_BASE.get()
-            + ModConfig.VITALITY_PER_MILESTONE.get() * (count - countAtUnlock));
+    protected float perMilestone() {
+        return ModConfig.VITALITY_PER_MILESTONE.get().floatValue();
     }
 }

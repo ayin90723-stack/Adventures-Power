@@ -3,8 +3,7 @@ package com.ayin90723.adventure_power.network;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.input.DoubleJumpHandler;
 import com.ayin90723.adventure_power.skill.ActiveSkillHandler;
-import com.ayin90723.adventure_power.ui.AbilityManagementScreen;
-import com.ayin90723.adventure_power.ui.BuffManagementScreen;
+import com.ayin90723.adventure_power.ui.AdventureMainScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
@@ -17,6 +16,7 @@ import net.minecraftforge.network.simple.SimpleChannel;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
@@ -97,6 +97,19 @@ public class NetworkHandler {
         INSTANCE.sendToServer(new ActiveSkillPacket(skillIndex));
     }
 
+    // ===== 辅助方法 =====
+
+    /** 在服务端主线程执行，自动取发送者 ServerPlayer，为空则跳过 */
+    private static void runOnServer(Supplier<NetworkEvent.Context> ctx, Consumer<ServerPlayer> action) {
+        ctx.get().enqueueWork(() -> {
+            ServerPlayer player = ctx.get().getSender();
+            if (player != null) {
+                action.accept(player);
+            }
+        });
+        ctx.get().setPacketHandled(true);
+    }
+
     // ===== 包定义 =====
 
     /** 客户端→服务端：二段跳请求 */
@@ -111,13 +124,7 @@ public class NetworkHandler {
         public static DoubleJumpPacket decode(FriendlyByteBuf buf) { return new DoubleJumpPacket(buf); }
 
         public static void handle(DoubleJumpPacket msg, Supplier<NetworkEvent.Context> ctx) {
-            ctx.get().enqueueWork(() -> {
-                ServerPlayer player = ctx.get().getSender();
-                if (player != null) {
-                    DoubleJumpHandler.handleDoubleJump(player, msg.airPhaseId);
-                }
-            });
-            ctx.get().setPacketHandled(true);
+            runOnServer(ctx, player -> DoubleJumpHandler.handleDoubleJump(player, msg.airPhaseId));
         }
     }
 
@@ -138,17 +145,15 @@ public class NetworkHandler {
         }
 
         public static void handle(BuffTogglePacket msg, Supplier<NetworkEvent.Context> ctx) {
-            ctx.get().enqueueWork(() -> {
-                ServerPlayer player = ctx.get().getSender();
-                if (player != null && (AdventureProgressCapability.isAdventurer(player)
-                    || AdventureProgressCapability.isFullyUnlocked(player))) {
+            runOnServer(ctx, player -> {
+                if (AdventureProgressCapability.isAdventurer(player)
+                    || AdventureProgressCapability.isFullyUnlocked(player)) {
                     AdventureProgressCapability.toggleBuffExclusion(player, msg.effectId);
                     Set<String> updated = AdventureProgressCapability.getBuffExclusionSet(player);
                     INSTANCE.send(PacketDistributor.PLAYER.with(() -> player),
                         new BuffBlacklistSyncPacket(updated));
                 }
             });
-            ctx.get().setPacketHandled(true);
         }
     }
 
@@ -188,24 +193,23 @@ public class NetworkHandler {
         }
 
         public static void handle(BuffBlacklistSyncPacket msg, Supplier<NetworkEvent.Context> ctx) {
-            ctx.get().enqueueWork(() -> {
-                if (msg.request) {
-                    // 客户端→服务端：请求同步
-                    ServerPlayer player = ctx.get().getSender();
-                    if (player != null) {
-                        Set<String> blacklist = AdventureProgressCapability.getBuffExclusionSet(player);
-                        INSTANCE.send(PacketDistributor.PLAYER.with(() -> player),
-                            new BuffBlacklistSyncPacket(blacklist));
-                    }
-                } else {
-                    // 服务端→客户端：接收完整排除列表
+            if (msg.request) {
+                // 客户端→服务端：请求同步
+                runOnServer(ctx, player -> {
+                    Set<String> blacklist = AdventureProgressCapability.getBuffExclusionSet(player);
+                    INSTANCE.send(PacketDistributor.PLAYER.with(() -> player),
+                        new BuffBlacklistSyncPacket(blacklist));
+                });
+            } else {
+                // 服务端→客户端：接收完整排除列表
+                ctx.get().enqueueWork(() -> {
                     Minecraft mc = Minecraft.getInstance();
-                    if (mc.screen instanceof BuffManagementScreen screen) {
+                    if (mc.screen instanceof AdventureMainScreen screen) {
                         screen.onSyncReceived(msg.blacklist);
                     }
-                }
-            });
-            ctx.get().setPacketHandled(true);
+                });
+                ctx.get().setPacketHandled(true);
+            }
         }
     }
 
@@ -296,10 +300,9 @@ public class NetworkHandler {
         }
 
         public static void handle(AbilityTogglePacket msg, Supplier<NetworkEvent.Context> ctx) {
-            ctx.get().enqueueWork(() -> {
-                ServerPlayer player = ctx.get().getSender();
-                if (player != null && (AdventureProgressCapability.isAdventurer(player)
-                    || AdventureProgressCapability.isFullyUnlocked(player))) {
+            runOnServer(ctx, player -> {
+                if (AdventureProgressCapability.isAdventurer(player)
+                    || AdventureProgressCapability.isFullyUnlocked(player)) {
                     AdventureProgressCapability.toggleAbility(player, msg.id);
                     AdventureProgressCapability.syncToClient(player);
 
@@ -324,7 +327,6 @@ public class NetworkHandler {
                     }
                 }
             });
-            ctx.get().setPacketHandled(true);
         }
     }
 
@@ -341,13 +343,7 @@ public class NetworkHandler {
         }
 
         public static void handle(AdventureSyncRequestPacket msg, Supplier<NetworkEvent.Context> ctx) {
-            ctx.get().enqueueWork(() -> {
-                ServerPlayer player = ctx.get().getSender();
-                if (player != null) {
-                    AdventureProgressCapability.syncToClient(player);
-                }
-            });
-            ctx.get().setPacketHandled(true);
+            runOnServer(ctx, player -> AdventureProgressCapability.syncToClient(player));
         }
     }
 
@@ -368,13 +364,7 @@ public class NetworkHandler {
         }
 
         public static void handle(ActiveSkillPacket msg, Supplier<NetworkEvent.Context> ctx) {
-            ctx.get().enqueueWork(() -> {
-                ServerPlayer player = ctx.get().getSender();
-                if (player != null) {
-                    ActiveSkillHandler.handleSkillRelease(player, msg.skillIndex);
-                }
-            });
-            ctx.get().setPacketHandled(true);
+            runOnServer(ctx, player -> ActiveSkillHandler.handleSkillRelease(player, msg.skillIndex));
         }
     }
 }

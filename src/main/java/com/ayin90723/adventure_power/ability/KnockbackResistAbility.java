@@ -9,7 +9,11 @@ import net.minecraft.network.chat.Component;
  * 成长公式：base + per_milestone × (count - required)
  * 默认范围：30% → 79%
  */
-public class KnockbackResistAbility implements Ability {
+public class KnockbackResistAbility extends LinearGrowthAbility {
+
+    public KnockbackResistAbility() {
+        super(3);
+    }
 
     @Override
     public String id() {
@@ -26,16 +30,13 @@ public class KnockbackResistAbility implements Ability {
         return Component.translatable("ability.adventure_power.knockback_resist.desc");
     }
 
-        private int countAtUnlock = 3;
-
     @Override
-    public void setCountAtUnlock(int n) {
-        this.countAtUnlock = n;
+    protected float base() {
+        return ModConfig.KNOCKBACK_RESIST_BASE.get();
     }
 
     @Override
-    public float value(int count) {
-        return ModConfig.KNOCKBACK_RESIST_BASE.get()
-            + ModConfig.KNOCKBACK_RESIST_PER_MILESTONE.get() * (count - countAtUnlock);
+    protected float perMilestone() {
+        return ModConfig.KNOCKBACK_RESIST_PER_MILESTONE.get();
     }
 }

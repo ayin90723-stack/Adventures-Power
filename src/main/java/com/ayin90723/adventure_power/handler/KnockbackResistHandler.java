@@ -4,6 +4,8 @@ import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.config.ModConfig;
+import com.ayin90723.adventure_power.util.AbilityGate;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.event.TickEvent;
@@ -49,10 +51,7 @@ public class KnockbackResistHandler {
         if (shouldHave && !hasKBResist) {
             Ability ability = AbilityRegistry.get("knockback_resist");
             if (ability != null) {
-                float percent = ability.value(progress.getUnlockedMilestoneCount());
-                if (progress.isFullyUnlocked()) {
-                    percent = Math.min(percent * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get().floatValue(), com.ayin90723.adventure_power.config.ModConfig.KNOCKBACK_RESIST_HARD_CAP.get().floatValue());
-                }
+                float percent = AbilityGate.awakenedPercent(ability, progress.getUnlockedMilestoneCount(), progress.isFullyUnlocked(), ModConfig.KNOCKBACK_RESIST_HARD_CAP.get().floatValue());
                 attr.setBaseValue(percent / 100.0);
             }
         } else if (!shouldHave && hasKBResist) {
@@ -61,10 +60,7 @@ public class KnockbackResistHandler {
             // 能力启用中，检查里程碑是否变化 → 更新值
             Ability ability = AbilityRegistry.get("knockback_resist");
             if (ability != null) {
-                float percent = ability.value(progress.getUnlockedMilestoneCount());
-                if (progress.isFullyUnlocked()) {
-                    percent = Math.min(percent * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get().floatValue(), com.ayin90723.adventure_power.config.ModConfig.KNOCKBACK_RESIST_HARD_CAP.get().floatValue());
-                }
+                float percent = AbilityGate.awakenedPercent(ability, progress.getUnlockedMilestoneCount(), progress.isFullyUnlocked(), ModConfig.KNOCKBACK_RESIST_HARD_CAP.get().floatValue());
                 float expected = percent / 100.0f;
                 if (Math.abs(currentVal - expected) > 0.001) {
                     attr.setBaseValue(expected);
@@ -81,20 +77,14 @@ public class KnockbackResistHandler {
         Player player = event.getEntity();
         if (player.level().isClientSide()) return;
 
-        AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
-            if (!progress.isAbilityEnabled("knockback_resist")) return;
-
+        AbilityGate.getActiveProgress(player, "knockback_resist").ifPresent(progress -> {
             Ability ability = AbilityRegistry.get("knockback_resist");
             if (ability == null) return;
 
             var attr = player.getAttribute(Attributes.KNOCKBACK_RESISTANCE);
             if (attr == null) return;
 
-            float percent = ability.value(progress.getUnlockedMilestoneCount());
-            if (progress.isFullyUnlocked()) {
-                percent = Math.min(percent * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get().floatValue(), com.ayin90723.adventure_power.config.ModConfig.KNOCKBACK_RESIST_HARD_CAP.get().floatValue());
-            }
+            float percent = AbilityGate.awakenedPercent(ability, progress.getUnlockedMilestoneCount(), progress.isFullyUnlocked(), ModConfig.KNOCKBACK_RESIST_HARD_CAP.get().floatValue());
             attr.setBaseValue(percent / 100.0);
         });
     }

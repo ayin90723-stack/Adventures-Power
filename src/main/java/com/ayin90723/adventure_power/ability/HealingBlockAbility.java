@@ -9,7 +9,11 @@ import net.minecraft.network.chat.Component;
  * 成长公式：base + per_milestone × (count - required)（秒）
  * 默认范围：3s → 6s
  */
-public class HealingBlockAbility implements Ability {
+public class HealingBlockAbility extends LinearGrowthAbility {
+
+    public HealingBlockAbility() {
+        super(7);
+    }
 
     @Override
     public String id() {
@@ -26,19 +30,13 @@ public class HealingBlockAbility implements Ability {
         return Component.translatable("ability.adventure_power.healing_block.desc");
     }
 
-    /**
-     * 返回禁疗持续时间（秒）。从配置读取 base + per_milestone × (count - required)。
-     */
-
-    private int countAtUnlock = 7;
-
     @Override
-    public void setCountAtUnlock(int n) {
-        this.countAtUnlock = n;
+    protected float base() {
+        return ModConfig.HEALING_BLOCK_BASE.get();
     }
 
     @Override
-    public float value(int count) {
-        return ModConfig.HEALING_BLOCK_BASE.get() + ModConfig.HEALING_BLOCK_PER_MILESTONE.get() * (count - countAtUnlock);
+    protected float perMilestone() {
+        return ModConfig.HEALING_BLOCK_PER_MILESTONE.get();
     }
 }

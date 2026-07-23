@@ -8,7 +8,11 @@ import net.minecraft.network.chat.Component;
  * 解锁条件：9 里程碑
  * 固定伤害和百分比从配置读取，默认：9→2+1%, 10→4+2%
  */
-public class SoulQuenchAbility implements Ability {
+public class SoulQuenchAbility extends AbstractAbility {
+
+    public SoulQuenchAbility() {
+        super(9);
+    }
 
     @Override
     public String id() {
@@ -23,19 +27,6 @@ public class SoulQuenchAbility implements Ability {
     @Override
     public Component description() {
         return Component.translatable("ability.adventure_power.soul_quench.desc");
-    }
-
-    /** value 无意义，实际数值由 flatDamage/hpRatio 提供 */
-    private int countAtUnlock = 9;
-
-    @Override
-    public void setCountAtUnlock(int n) {
-        this.countAtUnlock = n;
-    }
-
-    @Override
-    public float value(int count) {
-        return -1;
     }
 
     /** 固定伤害，从配置读取。countAtUnlock+1 起为第二档。 */

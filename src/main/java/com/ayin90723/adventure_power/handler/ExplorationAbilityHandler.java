@@ -4,6 +4,7 @@ import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.util.AbilityGate;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Player;
@@ -37,10 +38,7 @@ public class ExplorationAbilityHandler {
         Player player = event.getEntity();
         if (player.level().isClientSide()) return;
 
-        AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (!progress.isAbilityEnabled("digging_power")) return;
-            if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
-
+        AbilityGate.getActiveProgress(player, "digging_power").ifPresent(progress -> {
             Ability ability = AbilityRegistry.get("digging_power");
             if (ability == null) return;
 

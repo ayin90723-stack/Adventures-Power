@@ -8,7 +8,11 @@ import net.minecraft.network.chat.Component;
  * 解锁条件：10 里程碑
  * 数值从配置读取，默认：固伤 4，HP 比例 4%
  */
-public class ShadowKillAbility implements Ability {
+public class ShadowKillAbility extends AbstractAbility {
+
+    public ShadowKillAbility() {
+        super(10);
+    }
 
     @Override
     public String id() {
@@ -29,13 +33,6 @@ public class ShadowKillAbility implements Ability {
      * 影杀是双参数能力（固伤 + 比例），handler 直接调用 {@link #flatDamage()} 和
      * {@link #hpRatio()} 获取两个配置值。{@code value()} 仅满足接口契约，实际不被调用。
      */
-
-    private int countAtUnlock = 10;
-
-    @Override
-    public void setCountAtUnlock(int n) {
-        this.countAtUnlock = n;
-    }
 
     @Override
     public float value(int count) {

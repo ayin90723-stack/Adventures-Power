@@ -9,7 +9,11 @@ import net.minecraft.network.chat.Component;
  * 成长公式：base + step × ((count - required) / 2)（每 2 里程碑一跳）
  * 默认范围：400 tick (20s) → 1200 tick (60s)
  */
-public class PerpetualBlessingAbility implements Ability {
+public class PerpetualBlessingAbility extends StepGrowthAbility {
+
+    public PerpetualBlessingAbility() {
+        super(1);
+    }
 
     @Override
     public String id() {
@@ -26,19 +30,13 @@ public class PerpetualBlessingAbility implements Ability {
         return Component.translatable("ability.adventure_power.perpetual_blessing.desc");
     }
 
-    /**
-     * 返回延长的 tick 数。从配置读取 base + step × ((count - required) / 2)。
-     */
-
-    private int countAtUnlock = 1;
-
     @Override
-    public void setCountAtUnlock(int n) {
-        this.countAtUnlock = n;
+    protected float base() {
+        return ModConfig.PERPETUAL_BLESSING_BASE.get();
     }
 
     @Override
-    public float value(int count) {
-        return ModConfig.PERPETUAL_BLESSING_BASE.get() + ModConfig.PERPETUAL_BLESSING_STEP.get() * ((count - countAtUnlock) / 2);
+    protected float step() {
+        return ModConfig.PERPETUAL_BLESSING_STEP.get();
     }
 }

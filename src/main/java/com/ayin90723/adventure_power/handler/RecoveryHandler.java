@@ -5,6 +5,8 @@ import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.config.ModConfig;
+import com.ayin90723.adventure_power.util.AbilityGate;
+import com.ayin90723.adventure_power.util.DamageUtil;
 import com.ayin90723.adventure_power.util.FriendlyFireProtection;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import net.minecraft.world.entity.LivingEntity;
@@ -142,15 +144,11 @@ public class RecoveryHandler {
         if (target instanceof Player) return; // PVP 无效
 
         // 跳过内部穿透伤害，防递归
-        String msgId = event.getSource().getMsgId();
-        if ("soul_strike".equals(msgId) || "judgment".equals(msgId)) return;
+        if (DamageUtil.isInternalSource(event.getSource())) return;
 
         if (FriendlyFireProtection.isOwnerTarget(attacker, target)) return;
 
-        AdventureProgressCapability.getAdventureProgress(attacker).ifPresent(progress -> {
-            if (!progress.isAbilityEnabled("lifesteal")) return;
-            if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
-
+        AbilityGate.getActiveProgress(attacker, "lifesteal").ifPresent(progress -> {
             Ability ability = AbilityRegistry.get("lifesteal");
             if (ability == null) return;
 

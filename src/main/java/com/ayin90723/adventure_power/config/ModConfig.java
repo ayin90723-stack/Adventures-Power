@@ -7,26 +7,6 @@ public class ModConfig {
     public static final Builder BUILDER = new Builder();
     public static final ForgeConfigSpec SPEC;
 
-    // === 死亡抗拒 ===
-    public static final IntValue DEATH_DEFY_INVUL_DURATION;
-    public static final IntValue DEATH_DEFY_COOLDOWN_DURATION;
-
-    // === 受击坚韧 ===
-    public static final IntValue RESILIENCE_RESET_TICKS;
-
-    // === 恩赐永驻 ===
-    public static final IntValue BUFF_MIN_DURATION;
-    public static final IntValue BUFF_EXTEND_AMOUNT;
-
-    // === 主动技能 ===
-    public static final DoubleValue ACTIVE_SKILL_JUDGMENT_BASE_DAMAGE;
-    public static final DoubleValue ACTIVE_SKILL_JUDGMENT_HP_RATIO;
-    public static final DoubleValue ACTIVE_SKILL_JUDGMENT_RADIUS;
-    public static final IntValue ACTIVE_SKILL_JUDGMENT_COOLDOWN;
-    public static final IntValue ACTIVE_SKILL_SANCTUARY_DURATION;
-    public static final IntValue ACTIVE_SKILL_SANCTUARY_COOLDOWN;
-    public static final IntValue ACTIVE_SKILL_GCD;
-
     // === 调试 ===
     public static final BooleanValue TRUE_HEALTH_DEBUG_LOG;
 
@@ -47,11 +27,14 @@ public class ModConfig {
     // --- 虚空踏步 ---
     public static final DoubleValue VOID_STEP_POWER;
 
-    // --- 恩赐永驻 ---
+    // --- 恩赐永驻 ---（保底阈值 + 延长量 + 成长值）
+    public static final IntValue BUFF_MIN_DURATION;
+    public static final IntValue BUFF_EXTEND_AMOUNT;
     public static final IntValue PERPETUAL_BLESSING_BASE;
     public static final IntValue PERPETUAL_BLESSING_STEP;
 
-    // --- 受击坚韧 ---
+    // --- 受击坚韧 ---（重置 + 层数 + 减伤）
+    public static final IntValue RESILIENCE_RESET_TICKS;
     public static final IntValue RESILIENCE_STACKS_8;
     public static final IntValue RESILIENCE_STACKS_9;
     public static final IntValue RESILIENCE_STACKS_10;
@@ -68,6 +51,7 @@ public class ModConfig {
     public static final IntValue SHADOW_KILL_FLAT_DAMAGE;
     public static final DoubleValue SHADOW_KILL_HP_RATIO;
     public static final IntValue SHADOW_KILL_DATA_EXPIRE_TICKS;
+    public static final IntValue SHADOW_KILL_CLEANUP_INTERVAL;
 
     // --- 休养生息 ---
     public static final IntValue RAPID_RECOVERY_AMPLIFIER_BASE;
@@ -105,53 +89,40 @@ public class ModConfig {
     public static final IntValue LOOT_ALL_COPIES;
     public static final IntValue LOOT_ALL_MAX_ITEMS;
 
-    // === 觉醒全局 ===
+    // --- 死亡抗拒 ---
+    public static final IntValue DEATH_DEFY_INVUL_DURATION;
+    public static final IntValue DEATH_DEFY_COOLDOWN_DURATION;
+
+    // --- 主动技能 ---
+    public static final DoubleValue ACTIVE_SKILL_JUDGMENT_BASE_DAMAGE;
+    public static final DoubleValue ACTIVE_SKILL_JUDGMENT_HP_RATIO;
+    public static final DoubleValue ACTIVE_SKILL_JUDGMENT_RADIUS;
+    public static final IntValue ACTIVE_SKILL_JUDGMENT_COOLDOWN;
+    public static final IntValue ACTIVE_SKILL_SANCTUARY_DURATION;
+    public static final IntValue ACTIVE_SKILL_SANCTUARY_COOLDOWN;
+    public static final IntValue ACTIVE_SKILL_GCD;
+
+    // ==================== 觉醒强化 ====================
     public static final DoubleValue AWAKEN_MULTIPLIER;
-
-    // === 觉醒 — 虚空踏步 ===
     public static final IntValue AWAKEN_VOID_STEP_JUMPS;
-
-    // === 觉醒 — 翱翔 ===
     public static final DoubleValue AWAKEN_SOAR_SPEED;
-
-    // === 觉醒 — 淬魂之力 ===
     public static final DoubleValue AWAKEN_SOUL_QUENCH_EXECUTE_THRESHOLD;
-
-    // === 觉醒 — 影杀 ===
     public static final DoubleValue AWAKEN_SHADOW_KILL_AOE_RADIUS;
     public static final DoubleValue AWAKEN_SHADOW_KILL_AOE_RATIO;
     public static final IntValue AWAKEN_SHADOW_KILL_AOE_MAX_TARGETS;
-
-    // === 觉醒 — 嗜血 ===
     public static final DoubleValue AWAKEN_LIFESTEAL_SHIELD_CAP;
-
-    // === 觉醒 — 净魂 ===
     public static final IntValue AWAKEN_PURIFIED_SOUL_RADIUS;
-
-    // === 觉醒 — 旅者之力 ===
+    public static final IntValue AWAKEN_PURIFIED_SOUL_AURA_INTERVAL;
     public static final DoubleValue AWAKEN_JUDGMENT_RANGE_MULT;
     public static final DoubleValue AWAKEN_SANCTUARY_SPEED;
-
-    // === 觉醒 — 不朽装备 ===
     public static final DoubleValue AWAKEN_UNDYING_ARMOR_BONUS;
     public static final DoubleValue AWAKEN_UNDYING_WEAPON_BONUS;
-
-    // === 觉醒 — 拒绝篡改 ===
     public static final DoubleValue AWAKEN_REJECT_MANIP_REFLECT_RATIO;
-
-    // === 觉醒 — 鸿运当头 ===
     public static final IntValue AWAKEN_FORTUNE_FAVOR_BONUS;
-
-    // === 觉醒 — 受击坚韧 ===
     public static final IntValue AWAKEN_RESILIENCE_BONUS_STACKS;
-
-    // === 觉醒 - 禁疗之触 ===
     public static final DoubleValue AWAKEN_HEALING_BLOCK_VULN;
-
-    // === 觉醒 — 休养生息 ===
+    public static final IntValue AWAKEN_PIERCING_GAZE_NO_IFRAME_TICKS;
     public static final IntValue AWAKEN_RAPID_RECOVERY_BONUS;
-
-    // === 觉醒 - 满载而归 ===
     public static final BooleanValue LOOT_ALL_AWAKENED_MAX_COUNT;
     public static final IntValue LOOT_ALL_AWAKENED_COPIES;
 
@@ -161,42 +132,6 @@ public class ModConfig {
         BUILDER.push("调试");
         TRUE_HEALTH_DEBUG_LOG = BUILDER.comment("真实血量调试日志")
             .define("true_health_debug_log", false);
-        BUILDER.pop();
-
-        BUILDER.push("死亡抗拒");
-        DEATH_DEFY_INVUL_DURATION = BUILDER.comment("无敌持续时间（tick）")
-            .defineInRange("death_defy_invul_duration", 1200, 20, 72000);
-        DEATH_DEFY_COOLDOWN_DURATION = BUILDER.comment("冷却时间（tick）")
-            .defineInRange("death_defy_cooldown_duration", 6000, 100, 720000);
-        BUILDER.pop();
-
-        BUILDER.push("受击坚韧");
-        RESILIENCE_RESET_TICKS = BUILDER.comment("无受伤重置时间（tick）")
-            .defineInRange("resilience_reset_ticks", 100, 20, 600);
-        BUILDER.pop();
-
-        BUILDER.push("恩赐永驻");
-        BUFF_MIN_DURATION = BUILDER.comment("正面效果最低保底持续时间（tick）")
-            .defineInRange("buff_min_duration", 400, 0, 1200);
-        BUFF_EXTEND_AMOUNT = BUILDER.comment("低于保底值时额外延长的量（tick）")
-            .defineInRange("buff_extend_amount", 0, 0, 600);
-        BUILDER.pop();
-
-        BUILDER.push("主动技能配置");
-        ACTIVE_SKILL_JUDGMENT_BASE_DAMAGE = BUILDER.comment("旅者审判基础固定伤害")
-            .defineInRange("active_skill_judgment_base_damage", 10.0, 0.0, 1000.0);
-        ACTIVE_SKILL_JUDGMENT_HP_RATIO = BUILDER.comment("旅者审判每里程碑生命值百分比（1里程碑=3%，5里程碑=15%）")
-            .defineInRange("active_skill_judgment_hp_ratio", 0.03, 0.0, 0.5);
-        ACTIVE_SKILL_JUDGMENT_RADIUS = BUILDER.comment("旅者审判AOE范围（格）")
-            .defineInRange("active_skill_judgment_radius", 6.0, 1.0, 32.0);
-        ACTIVE_SKILL_JUDGMENT_COOLDOWN = BUILDER.comment("旅者审判冷却时间（单位：tick，默认600=30秒）")
-            .defineInRange("active_skill_judgment_cooldown", 600, 20, 72000);
-        ACTIVE_SKILL_SANCTUARY_DURATION = BUILDER.comment("旅者庇护无敌持续时间（单位：tick，默认100=5秒）")
-            .defineInRange("active_skill_sanctuary_duration", 100, 20, 72000);
-        ACTIVE_SKILL_SANCTUARY_COOLDOWN = BUILDER.comment("旅者庇护冷却时间（单位：tick，默认1800=90秒）")
-            .defineInRange("active_skill_sanctuary_cooldown", 1800, 20, 720000);
-        ACTIVE_SKILL_GCD = BUILDER.comment("主动技能全局冷却（单位：tick，默认10=0.5秒）")
-            .defineInRange("active_skill_gcd", 10, 0, 100);
         BUILDER.pop();
 
         // ==================== 能力数值 ====================
@@ -229,6 +164,10 @@ public class ModConfig {
         BUILDER.pop();
 
         BUILDER.push("恩赐永驻");
+        BUFF_MIN_DURATION = BUILDER.comment("正面效果最低保底持续时间（tick）")
+            .defineInRange("buff_min_duration", 400, 0, 1200);
+        BUFF_EXTEND_AMOUNT = BUILDER.comment("低于保底值时额外延长的量（tick）")
+            .defineInRange("buff_extend_amount", 0, 0, 600);
         PERPETUAL_BLESSING_BASE = BUILDER.comment("Buff延长基础值（tick），里程碑1时的值")
             .defineInRange("perpetual_blessing_base", 400, 0, 3600);
         PERPETUAL_BLESSING_STEP = BUILDER.comment("每2个里程碑增加的延长量（tick）")
@@ -236,6 +175,8 @@ public class ModConfig {
         BUILDER.pop();
 
         BUILDER.push("受击坚韧");
+        RESILIENCE_RESET_TICKS = BUILDER.comment("无受伤重置时间（tick）")
+            .defineInRange("resilience_reset_ticks", 100, 20, 600);
         RESILIENCE_STACKS_8 = BUILDER.comment("里程碑8时的最大减伤层数")
             .defineInRange("resilience_stacks_8", 5, 0, 50);
         RESILIENCE_STACKS_9 = BUILDER.comment("里程碑9时的最大减伤层数")
@@ -266,6 +207,8 @@ public class ModConfig {
             .defineInRange("shadow_kill_hp_ratio", 0.04, 0.0, 1.0);
         SHADOW_KILL_DATA_EXPIRE_TICKS = BUILDER.comment("影子血量数据无操作过期时间（tick，默认6000=5分钟）")
             .defineInRange("shadow_kill_data_expire_ticks", 6000, 200, 72000);
+        SHADOW_KILL_CLEANUP_INTERVAL = BUILDER.comment("全局清理过期影子血量的周期（tick，默认200=10秒）")
+            .defineInRange("shadow_kill_cleanup_interval", 200, 20, 1200);
         BUILDER.pop();
 
         BUILDER.push("休养生息");
@@ -332,43 +275,70 @@ public class ModConfig {
             .defineInRange("loot_all_max_items", 100, 1, 1000);
         BUILDER.pop();
 
+        BUILDER.push("死亡抗拒");
+        DEATH_DEFY_INVUL_DURATION = BUILDER.comment("无敌持续时间（tick）")
+            .defineInRange("death_defy_invul_duration", 1200, 20, 72000);
+        DEATH_DEFY_COOLDOWN_DURATION = BUILDER.comment("冷却时间（tick）")
+            .defineInRange("death_defy_cooldown_duration", 6000, 100, 720000);
+        BUILDER.pop();
+
+        BUILDER.push("主动技能");
+        ACTIVE_SKILL_JUDGMENT_BASE_DAMAGE = BUILDER.comment("旅者审判基础固定伤害")
+            .defineInRange("active_skill_judgment_base_damage", 10.0, 0.0, 1000.0);
+        ACTIVE_SKILL_JUDGMENT_HP_RATIO = BUILDER.comment("旅者审判每里程碑生命值百分比（1里程碑=3%，5里程碑=15%）")
+            .defineInRange("active_skill_judgment_hp_ratio", 0.03, 0.0, 0.5);
+        ACTIVE_SKILL_JUDGMENT_RADIUS = BUILDER.comment("旅者审判AOE范围（格）")
+            .defineInRange("active_skill_judgment_radius", 6.0, 1.0, 32.0);
+        ACTIVE_SKILL_JUDGMENT_COOLDOWN = BUILDER.comment("旅者审判冷却时间（单位：tick，默认600=30秒）")
+            .defineInRange("active_skill_judgment_cooldown", 600, 20, 72000);
+        ACTIVE_SKILL_SANCTUARY_DURATION = BUILDER.comment("旅者庇护无敌持续时间（单位：tick，默认100=5秒）")
+            .defineInRange("active_skill_sanctuary_duration", 100, 20, 72000);
+        ACTIVE_SKILL_SANCTUARY_COOLDOWN = BUILDER.comment("旅者庇护冷却时间（单位：tick，默认1800=90秒）")
+            .defineInRange("active_skill_sanctuary_cooldown", 1800, 20, 720000);
+        ACTIVE_SKILL_GCD = BUILDER.comment("主动技能全局冷却（单位：tick，默认10=0.5秒）")
+            .defineInRange("active_skill_gcd", 10, 0, 100);
+        BUILDER.pop();
+
         BUILDER.push("觉醒强化");
         AWAKEN_MULTIPLIER = BUILDER.comment("觉醒数值强化倍率")
             .defineInRange("awaken_multiplier", 1.5, 0.5, 10.0);
-
-        AWAKEN_VOID_STEP_JUMPS = BUILDER.comment("觉醒虚空踏步 — 总跳跃次数")
+        AWAKEN_VOID_STEP_JUMPS = BUILDER.comment("觉醒虚空踏步 - 总跳跃次数")
             .defineInRange("awaken_void_step_jumps", 3, 2, 10);
-        AWAKEN_SOAR_SPEED = BUILDER.comment("觉醒翱翔 — 飞行速度倍率")
+        AWAKEN_SOAR_SPEED = BUILDER.comment("觉醒翱翔 - 飞行速度倍率")
             .defineInRange("awaken_soar_speed", 1.5, 1.0, 5.0);
-        AWAKEN_SOUL_QUENCH_EXECUTE_THRESHOLD = BUILDER.comment("觉醒淬魂之力 — 斩杀线阈值（生命比例）")
+        AWAKEN_SOUL_QUENCH_EXECUTE_THRESHOLD = BUILDER.comment("觉醒淬魂之力 - 斩杀线阈值（生命比例）")
             .defineInRange("awaken_soul_quench_execute_threshold", 0.2, 0.0, 1.0);
-        AWAKEN_SHADOW_KILL_AOE_RADIUS = BUILDER.comment("觉醒影杀 — AOE 半径（格）")
+        AWAKEN_SHADOW_KILL_AOE_RADIUS = BUILDER.comment("觉醒影杀 - AOE 半径（格）")
             .defineInRange("awaken_shadow_kill_aoe_radius", 8.0, 1.0, 64.0);
-        AWAKEN_SHADOW_KILL_AOE_RATIO = BUILDER.comment("觉醒影杀 — AOE 影子血量削减比例")
+        AWAKEN_SHADOW_KILL_AOE_RATIO = BUILDER.comment("觉醒影杀 - AOE 影子血量削减比例")
             .defineInRange("awaken_shadow_kill_aoe_ratio", 0.15, 0.0, 1.0);
-        AWAKEN_SHADOW_KILL_AOE_MAX_TARGETS = BUILDER.comment("觉醒影杀 — AOE 最大目标数")
+        AWAKEN_SHADOW_KILL_AOE_MAX_TARGETS = BUILDER.comment("觉醒影杀 - AOE 最大目标数")
             .defineInRange("awaken_shadow_kill_aoe_max_targets", 16, 1, 200);
-        AWAKEN_LIFESTEAL_SHIELD_CAP = BUILDER.comment("觉醒嗜血 — 吸收护盾上限（生命比例）")
+        AWAKEN_LIFESTEAL_SHIELD_CAP = BUILDER.comment("觉醒嗜血 - 吸收护盾上限（生命比例）")
             .defineInRange("awaken_lifesteal_shield_cap", 0.2, 0.0, 1.0);
-        AWAKEN_PURIFIED_SOUL_RADIUS = BUILDER.comment("觉醒净魂 — 虚弱光环半径（格）")
+        AWAKEN_PURIFIED_SOUL_RADIUS = BUILDER.comment("觉醒净魂 - 虚弱光环半径（格）")
             .defineInRange("awaken_purified_soul_radius", 16, 1, 128);
-        AWAKEN_JUDGMENT_RANGE_MULT = BUILDER.comment("觉醒旅者审判 — 范围倍率")
+        AWAKEN_PURIFIED_SOUL_AURA_INTERVAL = BUILDER.comment("觉醒净魂 - 虚弱光环施加间隔（tick，默认40=2秒）")
+            .defineInRange("awaken_purified_soul_aura_interval", 40, 1, 200);
+        AWAKEN_JUDGMENT_RANGE_MULT = BUILDER.comment("觉醒旅者审判 - 范围倍率")
             .defineInRange("awaken_judgment_range_mult", 1.5, 1.0, 10.0);
-        AWAKEN_SANCTUARY_SPEED = BUILDER.comment("觉醒旅者庇护 — 可移动速度倍率")
+        AWAKEN_SANCTUARY_SPEED = BUILDER.comment("觉醒旅者庇护 - 可移动速度倍率")
             .defineInRange("awaken_sanctuary_speed", 0.3, 0.0, 1.0);
-        AWAKEN_UNDYING_ARMOR_BONUS = BUILDER.comment("觉醒不朽装备 — 每件护甲额外护甲值")
+        AWAKEN_UNDYING_ARMOR_BONUS = BUILDER.comment("觉醒不朽装备 - 每件护甲额外护甲值")
             .defineInRange("awaken_undying_armor_bonus", 2.0, 0.0, 10.0);
-        AWAKEN_UNDYING_WEAPON_BONUS = BUILDER.comment("觉醒不朽装备 — 主手武器伤害倍率")
+        AWAKEN_UNDYING_WEAPON_BONUS = BUILDER.comment("觉醒不朽装备 - 主手武器伤害倍率")
             .defineInRange("awaken_undying_weapon_bonus", 0.25, 0.0, 2.0);
-        AWAKEN_REJECT_MANIP_REFLECT_RATIO = BUILDER.comment("觉醒拒绝篡改 — 反弹被拒绝伤害的比例")
+        AWAKEN_REJECT_MANIP_REFLECT_RATIO = BUILDER.comment("觉醒拒绝篡改 - 反弹被拒绝伤害的比例")
             .defineInRange("awaken_reject_manip_reflect_ratio", 0.30, 0.0, 1.0);
-        AWAKEN_FORTUNE_FAVOR_BONUS = BUILDER.comment("觉醒鸿运当头 — 额外时运/抢夺等级")
+        AWAKEN_FORTUNE_FAVOR_BONUS = BUILDER.comment("觉醒鸿运当头 - 额外时运/抢夺等级")
             .defineInRange("awaken_fortune_favor_bonus", 2, 0, 10);
-        AWAKEN_RESILIENCE_BONUS_STACKS = BUILDER.comment("觉醒受击坚韧 — 额外最大层数")
+        AWAKEN_RESILIENCE_BONUS_STACKS = BUILDER.comment("觉醒受击坚韧 - 额外最大层数")
             .defineInRange("awaken_resilience_bonus_stacks", 6, 0, 50);
         AWAKEN_HEALING_BLOCK_VULN = BUILDER.comment("觉醒禁疗之触 - 易伤倍率")
             .defineInRange("awaken_healing_block_vuln", 1.2, 1.0, 5.0);
-        AWAKEN_RAPID_RECOVERY_BONUS = BUILDER.comment("觉醒休养生息 — 每周期额外回血量（HP）")
+        AWAKEN_PIERCING_GAZE_NO_IFRAME_TICKS = BUILDER.comment("觉醒破敌之眼 - 禁无敌帧时长（tick，默认60=3秒）")
+            .defineInRange("awaken_piercing_gaze_no_iframe_ticks", 60, 1, 200);
+        AWAKEN_RAPID_RECOVERY_BONUS = BUILDER.comment("觉醒休养生息 - 每周期额外回血量（HP）")
             .defineInRange("awaken_rapid_recovery_bonus", 5, 0, 20);
         LOOT_ALL_AWAKENED_MAX_COUNT = BUILDER.comment("觉醒满载而归 - 每样取掉落表最大数量")
             .define("loot_all_awakened_max_count", true);

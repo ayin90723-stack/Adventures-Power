@@ -9,7 +9,11 @@ import net.minecraft.network.chat.Component;
  * 成长公式：base + per_milestone × (count - required)
  * 默认范围：10% → 40%
  */
-public class DamageResistAbility implements Ability {
+public class DamageResistAbility extends AbstractAbility {
+
+    public DamageResistAbility() {
+        super(4);
+    }
 
     @Override
     public String id() {
@@ -27,16 +31,9 @@ public class DamageResistAbility implements Ability {
     }
 
     /**
-     * 返回伤害减免百分比。从配置读取 base + per_milestone × (count - required)。
+     * 返回伤害减免百分比。从配置读取 base + per_milestone × (count - required)，
+     * 最低为 0（防止负值）。
      */
-
-    private int countAtUnlock = 4;
-
-    @Override
-    public void setCountAtUnlock(int n) {
-        this.countAtUnlock = n;
-    }
-
     @Override
     public float value(int count) {
         return Math.max(0, ModConfig.DAMAGE_RESIST_BASE.get() + ModConfig.DAMAGE_RESIST_PER_MILESTONE.get() * (count - countAtUnlock));

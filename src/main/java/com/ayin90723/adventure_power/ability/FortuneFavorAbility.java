@@ -9,7 +9,11 @@ import net.minecraft.network.chat.Component;
  * 成长公式：bonus = base + step × ((count - required) / 2)
  * 默认：里程碑5=+1, 7=+2, 9=+3
  */
-public class FortuneFavorAbility implements Ability {
+public class FortuneFavorAbility extends StepGrowthAbility {
+
+    public FortuneFavorAbility() {
+        super(5);
+    }
 
     @Override
     public String id() {
@@ -26,17 +30,13 @@ public class FortuneFavorAbility implements Ability {
         return Component.translatable("ability.adventure_power.fortune_favor.desc");
     }
 
-        private int countAtUnlock = 5;
-
     @Override
-    public void setCountAtUnlock(int n) {
-        this.countAtUnlock = n;
+    protected float base() {
+        return ModConfig.FORTUNE_FAVOR_BONUS_BASE.get();
     }
 
     @Override
-    public float value(int count) {
-        int steps = (count - countAtUnlock) / 2;
-        return ModConfig.FORTUNE_FAVOR_BONUS_BASE.get()
-            + ModConfig.FORTUNE_FAVOR_BONUS_STEP.get() * steps;
+    protected float step() {
+        return ModConfig.FORTUNE_FAVOR_BONUS_STEP.get();
     }
 }

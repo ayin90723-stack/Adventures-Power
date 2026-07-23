@@ -6,6 +6,7 @@ import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.milestone.Milestone;
 import com.ayin90723.adventure_power.util.MilestoneRegistry;
+import com.ayin90723.adventure_power.util.PersistentDataKeys;
 import net.minecraft.core.NonNullList;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
@@ -75,14 +76,9 @@ public class AdventureEndRecipe extends ShapelessRecipe {
         List<Milestone> all = MilestoneRegistry.getAll();
         if (all.isEmpty()) return false;
         for (Milestone m : all) {
-            if (!tag.getBoolean(milestoneNbtKey(m.id()))) return false;
+            if (!tag.getBoolean(PersistentDataKeys.milestoneNbtKey(m.id()))) return false;
         }
         return true;
-    }
-
-    /** 里程碑 NBT 键（与 AdventureProgressCapability.milestoneNbtKey 一致） */
-    private static String milestoneNbtKey(String id) {
-        return "MME_Milestone_" + Character.toUpperCase(id.charAt(0)) + id.substring(1);
     }
 
     @Override

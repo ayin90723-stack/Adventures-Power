@@ -96,12 +96,14 @@
   "milestone.adventure_power.elytra": "苍穹之证",
 
   "key.categories.adventure_power": "冒险的力量",
-  "key.adventure_power.ability_screen": "冒险之力",
-  "key.adventure_power.buff_screen": "Buff 管理",
+  "key.adventure_power.ability_screen": "冒险面板",
   "key.adventure_power.skill_switch": "切换主动技能",
   "key.adventure_power.skill_activate": "释放主动技能",
-  "key.adventure_power.milestone_progress": "查看冒险进度",
 
+  "screen.adventure_power.main": "冒险面板",
+  "screen.adventure_power.tab.buff": "Buff永驻",
+  "screen.adventure_power.tab.ability": "能力配置",
+  "screen.adventure_power.tab.milestone": "冒险进度",
   "screen.adventure_power.ability": "冒险之力",
   "screen.adventure_power.buff": "Buff 管理",
   "screen.adventure_power.milestone_progress": "冒险进度",

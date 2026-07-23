@@ -1,20 +1,15 @@
 package com.ayin90723.adventure_power.mixin;
 
-import com.ayin90723.adventure_power.AdventurePower;
-import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.util.DamageUtil;
 import com.ayin90723.adventure_power.util.FriendlyFireProtection;
-import com.ayin90723.adventure_power.util.HealthUtil;
-import com.ayin90723.adventure_power.util.InvulClearUtil;
+import com.ayin90723.adventure_power.util.PiercingGazeUtil;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraftforge.common.ForgeHooks;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
@@ -41,6 +36,10 @@ import java.util.Deque;
  *        {@code hurt()} 的 RETURN 点，若伤害被阻止则通过 {@code actuallyHurt()}
  *        穿透自定义无敌逻辑。</li>
  * </ul>
+ *
+ * <h3>穿透结算段</h3>
+ * 实际的伤害直写 / 血量兜底 / 清无敌字段统一由 {@link PiercingGazeUtil} 提供，
+ * 与 {@link PiercingGazePlayerAttackMixin}(Layer 0) 共用同一套逻辑，保证一致。
  *
  * <h3>防 LivingHurtEvent 重复 post（核心）</h3>
  * 两个注入点都可能 post LivingHurtEvent，必须避免同一次 hurt() 调用内重复 post
@@ -71,7 +70,7 @@ import java.util.Deque;
 public abstract class PiercingGazeLivingEntityMixin {
 
     // ===== actuallyHurt Invoker 已迁移至 PiercingGazeLivingEntityAccessor =====
-    // 通过 ((PiercingGazeLivingEntityAccessor)this).invokeActuallyHurt(...) 调用
+    // 通过 PiercingGazeUtil.invokeActuallyHurt(...) 间接调用
 
     // ===== ThreadLocal：本层破敌之眼穿透状态（栈式隔离递归调用） =====
 
@@ -138,25 +137,17 @@ public abstract class PiercingGazeLivingEntityMixin {
                 return;
             }
 
-            // 追溯攻击者：直接实体 -> 间接实体 -> 弹射物发射者
-            Entity attacker = source.getEntity();
-            if (attacker == null) {
-                attacker = source.getDirectEntity();
-            }
-            if (attacker instanceof Projectile projectile) {
-                attacker = projectile.getOwner();
-            }
-
             // 反重入：MME 内部穿透伤害（soul_strike / vengeance）走原版管线，
             // 外层破敌之眼的 hurt() 已处理过穿透+清除自定义无敌计时器，内层无需重复。
             // 使用精确 msgId 匹配而非 BYPASSES_INVULNERABILITY 标签检查，
             // 避免将 RevelationFix fe_power 误判为 MME 内部调用。
-            if (isMmeInternalSource(source)) {
+            if (DamageUtil.isInternalSource(source)) {
                 return;
             }
 
             // 攻击者持有破敌之眼 -> 穿透该实体的一切无敌手段
-            if (attacker instanceof LivingEntity living && hasPiercingGaze(living)) {
+            Entity attacker = PiercingGazeUtil.resolveAttacker(source);
+            if (attacker instanceof LivingEntity living && PiercingGazeUtil.hasPiercingGaze(living)) {
                 // 友好火力保护：不穿透自己驯服生物的无敌
                 if (FriendlyFireProtection.isOwnerTarget(living, self)) {
                     return;
@@ -164,45 +155,30 @@ public abstract class PiercingGazeLivingEntityMixin {
 
                 boolean wasBlocked = !cir.getReturnValue();
                 boolean posted = PIERCING_EVENT_POSTED.get();
-                float effectiveAmount;
                 // 在 actuallyHurt 执行前捕捉血量，用于检测 Boss 是否通过注入
                 // setHealth() 在伤害后恢复了血量（如亚波伦 RevelationFix 的 redirectSetHealth）
                 float healthBefore = self.getHealth();
 
                 if (wasBlocked) {
+                    // 情况 A/C：actuallyHurt 未由原版执行（Boss 拦截 hurt 不调 super），需主动直写
+                    float effectiveAmount;
                     if (posted) {
-                        // 情况 C：redirect 已 post 过 LivingHurtEvent，用其取 max 后的有效伤害量补 actuallyHurt
+                        // 情况 C：redirect 已 post 过 LivingHurtEvent，用其取 max 后的有效伤害量
                         effectiveAmount = PIERCING_EFFECTIVE_AMOUNT.get();
                     } else {
                         // 情况 A：Boss 完全拦截 hurt()（未走到 ForgeHooks.onLivingHurt），redirect 未触发
-                        // -> 补 post LivingHurtEvent 让淬魂等附魔正常处理
-                        LivingHurtEvent hurtEvent = new LivingHurtEvent(self, source, amount);
-                        MinecraftForge.EVENT_BUS.post(hurtEvent);
-                        effectiveAmount = hurtEvent.getAmount();
+                        // -> 补 post LivingHurtEvent（取 max 防限伤）让淬魂等附魔正常处理
+                        effectiveAmount = PiercingGazeUtil.postHurtEvent(self, source, amount);
                     }
-                    // 不检查事件是否被取消 - 破敌之眼作为万能钥匙，不受其他 mod 取消事件的影响
-                    ((PiercingGazeLivingEntityAccessor)this).invokeActuallyHurt(source, effectiveAmount);
+                    // actuallyHurt 直写 + 血量兜底 + 清无敌字段
+                    PiercingGazeUtil.invokeActuallyHurt(self, source, effectiveAmount);
                     cir.setReturnValue(true);
+                    PiercingGazeUtil.afterPierceFallback(self, effectiveAmount, healthBefore);
                 } else {
-                    // 情况 B：正常流程，actuallyHurt 已由原版管线执行
-                    // effectiveAmount 取 redirect 后的有效值（含淬魂追加），用于血量检测基准
-                    effectiveAmount = posted ? PIERCING_EFFECTIVE_AMOUNT.get() : amount;
+                    // 情况 B：正常流程，actuallyHurt 已由原版管线执行，只做兜底（不重复 actuallyHurt）
+                    float effectiveAmount = posted ? PIERCING_EFFECTIVE_AMOUNT.get() : amount;
+                    PiercingGazeUtil.afterPierceFallback(self, effectiveAmount, healthBefore);
                 }
-
-                // 无论 hurt() 返回 true 还是 false，部分 Boss（如亚波伦 RevelationFix）
-                // 通过注入 setHealth() 在 actuallyHurt() 后将血量恢复至损伤前水平。
-                // 若检测到血量未被实际扣除，强制直写 DataItem.value 字段
-                // 绕过 SynchedEntityData.set() 及一切 setHealth() 覆写拦截。
-                if (effectiveAmount > 0.0F && self.getHealth() >= healthBefore && self.isAlive()) {
-                    HealthUtil.setAllHealthLikeRaw(self, Math.max(0.0F, healthBefore - effectiveAmount));
-                }
-
-                // 无论伤害是否被阻止，只要攻击者持有破敌之眼就清除目标的自定义无敌计时器。
-                // 部分 Boss（如 Goety Apostle）在 actuallyHurt() 中设置 moddedInvul 等字段，
-                // 若不清除，下一次 hurt() 检测到 >0 会直接 return false 且不调用
-                // super.hurt()，导致 LivingEntity.hurt() 不被调用、本 Mixin 不再触发、
-                // 影杀 的 NBT 影子血量也无法更新。
-                InvulClearUtil.clearCustomInvulTimers(self);
             }
         } finally {
             // 弹栈恢复外层状态（递归 hurt 不污染外层）
@@ -255,12 +231,12 @@ public abstract class PiercingGazeLivingEntityMixin {
         // 反重入：MME 内部穿透伤害（soul_strike / vengeance）走原版管线。
         // 使用精确 msgId 匹配而非 BYPASSES_INVULNERABILITY 标签检查，
         // 避免将 RevelationFix fe_power 误判为 MME 内部调用。
-        if (isMmeInternalSource(source)) {
+        if (DamageUtil.isInternalSource(source)) {
             return ForgeHooks.onLivingHurt(entity, source, amount);
         }
 
         // 非破敌之眼攻击 -> 走原版管线
-        if (!isPiercingGazeAttack(source, entity)) {
+        if (!PiercingGazeUtil.isPiercingGazeAttack(source, entity)) {
             return ForgeHooks.onLivingHurt(entity, source, amount);
         }
 
@@ -285,60 +261,5 @@ public abstract class PiercingGazeLivingEntityMixin {
         PIERCING_EVENT_POSTED.set(true);
         PIERCING_EFFECTIVE_AMOUNT.set(effective);
         return effective;
-    }
-
-    /**
-     * 检查攻击源是否来自破敌之眼持有者，且非自身/友好火力/重入调用。
-     */
-    @Unique
-    private static boolean isPiercingGazeAttack(DamageSource source, LivingEntity target) {
-        // 追溯到真正的攻击者
-        Entity attacker = source.getEntity();
-        if (attacker == null) {
-            attacker = source.getDirectEntity();
-        }
-        if (attacker instanceof Projectile projectile) {
-            attacker = projectile.getOwner();
-        }
-        if (!(attacker instanceof LivingEntity living)) {
-            return false;
-        }
-        if (!hasPiercingGaze(living)) {
-            return false;
-        }
-        // 友好火力保护：不穿透自己驯服生物
-        if (FriendlyFireProtection.isOwnerTarget(living, target)) {
-            return false;
-        }
-        return true;
-    }
-
-    /**
-     * 检查 LivingEntity 主手或副手物品是否拥有破敌之眼附魔，
-     * 且（对于玩家）是否佩戴了冒险的终点饰品。
-     */
-    @Unique
-    private static boolean hasPiercingGaze(LivingEntity entity) {
-        return AdventurePower.hasPiercingGaze(entity)
-            && (!(entity instanceof Player player)
-                || AdventureProgressCapability.isAbilityAvailable(player, "piercing_gaze"));
-    }
-
-    /**
-     * 检查伤害源是否为 MME 内部穿透伤害类型，用于反重入保护。
-     * <p>
-     * MME 的淬魂/复仇等附魔在处理器内部构造 DamageSource 并调用
-     * {@code target.hurt()}，这会再次触发本 Mixin。外层破敌之眼已处理过
-     * 穿透与清除自定义无敌计时器，内层无需重复。
-     * <p>
-     * 使用精确的 DamageType message_id 匹配（{@code mme.soul_strike} /
-     * {@code mme.vengeance}）而非 {@code BYPASSES_INVULNERABILITY} 标签，
-     * 避免将其他模组加入该标签的伤害类型
-     * （如 RevelationFix 的 {@code fe_power}）误判为 MME 内部调用。
-     */
-    @Unique
-    private static boolean isMmeInternalSource(DamageSource source) {
-        String msgId = source.getMsgId();
-        return "soul_strike".equals(msgId) || "judgment".equals(msgId);
     }
 }
