@@ -1,15 +1,13 @@
 package com.ayin90723.adventure_power.ability;
 
-import com.ayin90723.adventure_power.config.ModConfig;
 import net.minecraft.network.chat.Component;
 
 /**
- * 恩赐永驻 — 药水效果持续时间延长。
+ * 恩赐永驻 - 正面药水效果低于保底阈值时自动续期，Buff 永不自然耗尽。
  * 解锁条件：1 里程碑
- * 成长公式：base + step × ((count - required) / 2)（每 2 里程碑一跳）
- * 默认范围：400 tick (20s) → 1200 tick (60s)
+ * 无成长（解锁即完整），续期阈值与写入时长由 buff_min_duration / buff_extend_amount 配置。
  */
-public class PerpetualBlessingAbility extends StepGrowthAbility {
+public class PerpetualBlessingAbility extends AbstractAbility {
 
     public PerpetualBlessingAbility() {
         super(1);
@@ -28,15 +26,5 @@ public class PerpetualBlessingAbility extends StepGrowthAbility {
     @Override
     public Component description() {
         return Component.translatable("ability.adventure_power.perpetual_blessing.desc");
-    }
-
-    @Override
-    protected float base() {
-        return ModConfig.PERPETUAL_BLESSING_BASE.get();
-    }
-
-    @Override
-    protected float step() {
-        return ModConfig.PERPETUAL_BLESSING_STEP.get();
     }
 }

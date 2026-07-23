@@ -27,11 +27,9 @@ public class ModConfig {
     // --- 虚空踏步 ---
     public static final DoubleValue VOID_STEP_POWER;
 
-    // --- 恩赐永驻 ---（保底阈值 + 延长量 + 成长值）
+    // --- 恩赐永驻 ---（保底阈值 + 延长量）
     public static final IntValue BUFF_MIN_DURATION;
     public static final IntValue BUFF_EXTEND_AMOUNT;
-    public static final IntValue PERPETUAL_BLESSING_BASE;
-    public static final IntValue PERPETUAL_BLESSING_STEP;
 
     // --- 受击坚韧 ---（重置 + 层数 + 减伤）
     public static final IntValue RESILIENCE_RESET_TICKS;
@@ -168,10 +166,6 @@ public class ModConfig {
             .defineInRange("buff_min_duration", 400, 0, 1200);
         BUFF_EXTEND_AMOUNT = BUILDER.comment("低于保底值时额外延长的量（tick）")
             .defineInRange("buff_extend_amount", 0, 0, 600);
-        PERPETUAL_BLESSING_BASE = BUILDER.comment("Buff延长基础值（tick），里程碑1时的值")
-            .defineInRange("perpetual_blessing_base", 400, 0, 3600);
-        PERPETUAL_BLESSING_STEP = BUILDER.comment("每2个里程碑增加的延长量（tick）")
-            .defineInRange("perpetual_blessing_step", 200, 0, 1200);
         BUILDER.pop();
 
         BUILDER.push("受击坚韧");
