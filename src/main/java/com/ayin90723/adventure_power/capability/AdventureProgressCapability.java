@@ -30,6 +30,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectCategory;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.Entity;
@@ -51,6 +52,7 @@ import net.minecraftforge.event.AttachCapabilitiesEvent;
 import net.minecraftforge.event.TickEvent.Phase;
 import net.minecraftforge.event.TickEvent.PlayerTickEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
+import net.minecraftforge.event.entity.living.MobEffectEvent;
 import net.minecraftforge.event.entity.player.ItemTooltipEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent.PlayerChangedDimensionEvent;
@@ -152,7 +154,7 @@ public class AdventureProgressCapability {
     private static final String PERSISTENT_KEY = "MME_AdventureProgress";
 
     /** 首次发放标记键 */
-    private static final String GOT_BEGIN_KEY = "MME_GotAdventureBegin";
+    public static final String GOT_BEGIN_KEY = "MME_GotAdventureBegin";
 
     /** 旧永久解锁标记键（迁移后清除） */
     private static final String OLD_UNLOCKED_KEY = "MME_AdventureUnlocked";
@@ -915,10 +917,6 @@ public class AdventureProgressCapability {
         Set<String> excluded = getBuffExclusionSet(player);
         int minDuration = ModConfig.BUFF_MIN_DURATION.get();
         int extendAmount = ModConfig.BUFF_EXTEND_AMOUNT.get();
-        // 觉醒：Buff延长量 ×1.3
-        if (getAdventureProgress(player).map(p -> p.isFullyUnlocked()).orElse(false)) {
-            extendAmount = (int) (extendAmount * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get());
-        }
         int threshold = minDuration + extendAmount;
         for (MobEffectInstance effect : new ArrayList<>(player.getActiveEffects())) {
             if (effect.getEffect().getCategory() == MobEffectCategory.BENEFICIAL) {
@@ -937,9 +935,31 @@ public class AdventureProgressCapability {
         }
     }
 
+    // ===== 恩赐永驻觉醒：正面效果无法被驱散 =====
+
+    /**
+     * 觉醒后正面效果无法被驱散。监听 MobEffectEvent.Remove，覆盖 removeEffect / removeAllEffects /
+     * cureEffects(牛奶桶) 三条主动移除路径；自然过期走独立的 MobEffectEvent.Expired，不受影响。
+     * 仅对 BENEFICIAL（正面）效果取消移除，负面/中性照常可清。
+     */
+    @SubscribeEvent
+    public static void onBeneficialEffectRemove(MobEffectEvent.Remove event) {
+        LivingEntity entity = event.getEntity();
+        if (entity.level().isClientSide()) return;
+        if (!(entity instanceof Player player)) return;
+        getAdventureProgress(player).ifPresent(progress -> {
+            if (!progress.isFullyUnlocked()) return;
+            if (!progress.isAbilityEnabled("perpetual_blessing")) return;
+            MobEffect effect = event.getEffect();
+            if (effect != null && effect.getCategory() == MobEffectCategory.BENEFICIAL) {
+                event.setCanceled(true);
+            }
+        });
+    }
+
     // ===== Buff 排除管理 =====
 
-    private static final String BUFF_BLACKLIST_KEY = "MME_BuffBlacklist";
+    public static final String BUFF_BLACKLIST_KEY = "MME_BuffBlacklist";
 
     public static void toggleBuffExclusion(Player player, String effectId) {
         CompoundTag root = player.getPersistentData();

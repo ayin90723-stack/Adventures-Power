@@ -4,8 +4,10 @@ import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraftforge.common.ForgeMod;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
@@ -43,10 +45,23 @@ public class ExplorationAbilityHandler {
             if (ability == null) return;
 
             float multiplier = ability.value(progress.getUnlockedMilestoneCount());
-            if (progress.isFullyUnlocked()) {
+            boolean awakened = progress.isFullyUnlocked();
+            if (awakened) {
                 multiplier *= com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get().floatValue();
             }
-            event.setNewSpeed(event.getOriginalSpeed() * multiplier);
+
+            float speed = event.getOriginalSpeed();
+            // 觉醒：取消水中/空中挖掘惩罚（反向补偿原版 getDestroySpeed 的 /5）
+            // 原版条件：眼在水中且无水下速掘附魔 -> /5；未着地 -> /5（飞行也受此惩罚）
+            if (awakened) {
+                if (player.isEyeInFluid(FluidTags.WATER) && !EnchantmentHelper.hasAquaAffinity(player)) {
+                    speed *= 5.0F;
+                }
+                if (!player.onGround()) {
+                    speed *= 5.0F;
+                }
+            }
+            event.setNewSpeed(speed * multiplier);
         });
     }
 
