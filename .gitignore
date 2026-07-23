@@ -41,3 +41,6 @@ libs/
 *~
 发布介绍.md
 CLAUDE.md
+
+# Forge 源码补丁副本（ForgeGradle 生成）
+patches/
