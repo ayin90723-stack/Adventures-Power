@@ -331,7 +331,7 @@ public class PlayerStateHandler {
      * </ul>
      * <p>
      * 受击坚韧的 tick 逻辑（超时归零）已在
-     * {@link AdventureProgressCapability#onPlayerTick} 中处理，此处不重复。
+     * {@link PlayerTickHandler#onPlayerTick} 中处理，此处不重复。
      */
     @SubscribeEvent
     public static void onPlayerTick(TickEvent.PlayerTickEvent event) {
@@ -471,7 +471,7 @@ public class PlayerStateHandler {
                 progress.setResilienceStacks(stacks + 1);
             }
 
-            // 更新时间戳（供 AdventureProgressCapability.onPlayerTick 超时归零使用）
+            // 更新时间戳（供 PlayerTickHandler.onPlayerTick 超时归零使用）
             progress.setLastHurtTime(currentTime);
         });
     }

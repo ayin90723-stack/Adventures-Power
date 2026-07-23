@@ -7,7 +7,7 @@ import net.minecraft.network.chat.Component;
  * 无形之手 — 增加方块交互距离。
  * 解锁条件：4 里程碑
  * 成长公式：base + per_milestone × (count - required)
- * 默认范围：+1.0 → +2.8 格
+ * 默认范围：+1.0 → +2.2 格
  */
 public class ExtendedReachAbility extends LinearGrowthAbility {
 
