@@ -2,6 +2,8 @@ package com.ayin90723.adventure_power.handler;
 
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.util.AdventureItemNbtUtil;
+import com.ayin90723.adventure_power.util.SyncUtil;
 import com.ayin90723.adventure_power.milestone.Milestone;
 import com.ayin90723.adventure_power.util.MilestoneRegistry;
 import net.minecraft.advancements.Advancement;
@@ -81,9 +83,9 @@ public class AdvancementEventHandler {
         }
 
         if (anyChanged) {
-            AdventureProgressCapability.syncCapabilityToPersistent(player, progress);
-            AdventureProgressCapability.syncAllAdventureItemNbt(player, progress);
-            AdventureProgressCapability.syncToClient(player);
+            SyncUtil.syncCapabilityToPersistent(player, progress);
+            AdventureItemNbtUtil.syncAllAdventureItemNbt(player, progress);
+            SyncUtil.syncToClient(player);
         }
     }
 

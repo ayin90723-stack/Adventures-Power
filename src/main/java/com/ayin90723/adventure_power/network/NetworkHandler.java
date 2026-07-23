@@ -1,6 +1,8 @@
 package com.ayin90723.adventure_power.network;
 
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.util.BuffExclusionManager;
+import com.ayin90723.adventure_power.util.SyncUtil;
 import com.ayin90723.adventure_power.input.DoubleJumpHandler;
 import com.ayin90723.adventure_power.skill.ActiveSkillHandler;
 import com.ayin90723.adventure_power.ui.AdventureMainScreen;
@@ -148,8 +150,8 @@ public class NetworkHandler {
             runOnServer(ctx, player -> {
                 if (AdventureProgressCapability.isAdventurer(player)
                     || AdventureProgressCapability.isFullyUnlocked(player)) {
-                    AdventureProgressCapability.toggleBuffExclusion(player, msg.effectId);
-                    Set<String> updated = AdventureProgressCapability.getBuffExclusionSet(player);
+                    BuffExclusionManager.toggleBuffExclusion(player, msg.effectId);
+                    Set<String> updated = BuffExclusionManager.getBuffExclusionSet(player);
                     INSTANCE.send(PacketDistributor.PLAYER.with(() -> player),
                         new BuffBlacklistSyncPacket(updated));
                 }
@@ -196,7 +198,7 @@ public class NetworkHandler {
             if (msg.request) {
                 // 客户端→服务端：请求同步
                 runOnServer(ctx, player -> {
-                    Set<String> blacklist = AdventureProgressCapability.getBuffExclusionSet(player);
+                    Set<String> blacklist = BuffExclusionManager.getBuffExclusionSet(player);
                     INSTANCE.send(PacketDistributor.PLAYER.with(() -> player),
                         new BuffBlacklistSyncPacket(blacklist));
                 });
@@ -304,7 +306,7 @@ public class NetworkHandler {
                 if (AdventureProgressCapability.isAdventurer(player)
                     || AdventureProgressCapability.isFullyUnlocked(player)) {
                     AdventureProgressCapability.toggleAbility(player, msg.id);
-                    AdventureProgressCapability.syncToClient(player);
+                    SyncUtil.syncToClient(player);
 
                     // 翱翔 toggle 后立即同步 mayfly，不等下一 tick handler
                     if ("soar".equals(msg.id)) {
@@ -343,7 +345,7 @@ public class NetworkHandler {
         }
 
         public static void handle(AdventureSyncRequestPacket msg, Supplier<NetworkEvent.Context> ctx) {
-            runOnServer(ctx, player -> AdventureProgressCapability.syncToClient(player));
+            runOnServer(ctx, player -> SyncUtil.syncToClient(player));
         }
     }
 

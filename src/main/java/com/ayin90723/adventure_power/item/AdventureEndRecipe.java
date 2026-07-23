@@ -3,6 +3,7 @@ package com.ayin90723.adventure_power.item;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.util.AdventureItemNbtUtil;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.milestone.Milestone;
 import com.ayin90723.adventure_power.util.MilestoneRegistry;
@@ -53,7 +54,7 @@ public class AdventureEndRecipe extends ShapelessRecipe {
         if (beginStack == null) return false;
 
         // 路径 A：检查物品 NBT（缓存）
-        AdventureProgressCapability.migrateOldStage(beginStack);
+        AdventureItemNbtUtil.migrateOldStage(beginStack);
         if (hasAllMilestones(beginStack)) return true;
 
         // 路径 B：物品 NBT 不满足，回退到玩家 Capability

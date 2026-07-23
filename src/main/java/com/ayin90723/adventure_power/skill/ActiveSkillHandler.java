@@ -1,6 +1,7 @@
 package com.ayin90723.adventure_power.skill;
 
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.util.SyncUtil;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.DamageUtil;
@@ -67,8 +68,8 @@ public class ActiveSkillHandler {
         int gcd = ModConfig.ACTIVE_SKILL_GCD.get();
         progress.setJudgmentCooldownEnd(currentTime + cooldown);
         progress.setActiveSkillGcdEnd(currentTime + gcd);
-        AdventureProgressCapability.syncCapabilityToPersistent(player, progress);
-        AdventureProgressCapability.syncToClient(player);
+        SyncUtil.syncCapabilityToPersistent(player, progress);
+        SyncUtil.syncToClient(player);
 
         executeJudgment(player);
     }
@@ -178,8 +179,8 @@ public class ActiveSkillHandler {
         progress.setSanctuaryInvulEnd(currentTime + duration);
         progress.setSanctuaryCooldownEnd(currentTime + cooldown);
         progress.setActiveSkillGcdEnd(currentTime + gcd);
-        AdventureProgressCapability.syncCapabilityToPersistent(player, progress);
-        AdventureProgressCapability.syncToClient(player);
+        SyncUtil.syncCapabilityToPersistent(player, progress);
+        SyncUtil.syncToClient(player);
 
         // 清除玩家身上负面效果（与死亡抗拒一致）
         player.getActiveEffects().stream()
