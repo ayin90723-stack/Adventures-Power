@@ -204,6 +204,18 @@ public abstract class TrueHealthMixin {
             float actual = HealthUtil.getHealthDirect(player);
             float oldBackup = progress.getBackupHealth();
 
+            // 觉醒防秒杀底线：外部 setHealth 篡改到致死值（非 hurt 路径 + newHealth<=0），
+            // 强制保留 1HP，防止 setHealth(0) 等秒杀。正常 hurt 打死不受影响（HURT_DEPTH>0）。
+            if (progress.isFullyUnlocked() && HealthUtil.HURT_DEPTH.get() == 0 && actual <= 0.0F) {
+                progress.setBackupHealth(1.0F);
+                repairHealth(player, 1.0F);
+                if (debugLog()) {
+                    System.err.println("[MME-TrueHealth] 觉醒防秒杀！" +
+                        " newHealth=" + newHealth + " actual=" + actual + " -> 强制保留 1HP");
+                }
+                return;
+            }
+
             if (HealthUtil.HURT_DEPTH.get() > 0 || actual >= oldBackup - EPSILON) {
                 progress.setBackupHealth(actual);
             } else {

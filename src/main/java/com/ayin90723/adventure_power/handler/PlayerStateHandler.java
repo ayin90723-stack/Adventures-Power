@@ -96,18 +96,20 @@ public class PlayerStateHandler {
             buffsTag.put("effects", effectList);
             player.getPersistentData().put(SOUL_BIND_BUFFS_KEY, buffsTag);
 
-            // 保存经验三字段（level/progress/total），重生时精确恢复而非累加重算
-            CompoundTag expTag = new CompoundTag();
-            expTag.putInt("level", player.experienceLevel);
-            expTag.putFloat("progress", player.experienceProgress);
-            expTag.putInt("total", player.totalExperience);
-            player.getPersistentData().put(SOUL_BIND_EXP_KEY, expTag);
+            // 觉醒：额外保留经验（非觉醒掉经验，原版行为）
+            if (progress.isFullyUnlocked()) {
+                CompoundTag expTag = new CompoundTag();
+                expTag.putInt("level", player.experienceLevel);
+                expTag.putFloat("progress", player.experienceProgress);
+                expTag.putInt("total", player.totalExperience);
+                player.getPersistentData().put(SOUL_BIND_EXP_KEY, expTag);
 
-            // 清零经验等级防止死亡掉落经验球（否则重生恢复 + 捡经验球 = 双倍）。
-            // 经验已在上方保存，清零不丢数据；对所有情况生效（旧版仅觉醒清零，非觉醒会双倍）。
-            player.experienceLevel = 0;
-            player.experienceProgress = 0.0F;
-            player.totalExperience = 0;
+                // 清零经验等级防止死亡掉落经验球（否则重生恢复 + 捡经验球 = 双倍）。
+                // 仅觉醒清零：非觉醒不保存经验，复活无经验恢复，掉经验球捡回=原版正常。
+                player.experienceLevel = 0;
+                player.experienceProgress = 0.0F;
+                player.totalExperience = 0;
+            }
         });
     }
 
@@ -159,6 +161,18 @@ public class PlayerStateHandler {
             // 非死亡 clone（维度切换）：无需转移 soul_bind 数据。
             // SOUL_BIND_*_KEY 仅在死亡时写入并由死亡分支消费 + remove，维度切换时 original 不持有这些 key；
             // 经验由原版 restoreFrom 复制，buff 由原版保留，灵魂绑定不干预维度切换。
+        }
+
+        // 转移 Buff 黑名单 + 首次发放标记：Forge Clone 仅自动复制 "PlayerPersisted" 子 key，
+        // 根级自定义 key 死亡/维度切换都会丢失，需手动转移
+        CompoundTag origPersistData = original.getPersistentData();
+        if (origPersistData.contains(AdventureProgressCapability.BUFF_BLACKLIST_KEY)) {
+            player.getPersistentData().put(AdventureProgressCapability.BUFF_BLACKLIST_KEY,
+                origPersistData.getCompound(AdventureProgressCapability.BUFF_BLACKLIST_KEY).copy());
+        }
+        if (origPersistData.contains(AdventureProgressCapability.GOT_BEGIN_KEY)) {
+            player.getPersistentData().putBoolean(AdventureProgressCapability.GOT_BEGIN_KEY,
+                origPersistData.getBoolean(AdventureProgressCapability.GOT_BEGIN_KEY));
         }
 
         // 维度切换后恢复翱翔飞行能力（mayfly 被重置）
