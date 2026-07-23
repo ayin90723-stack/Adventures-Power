@@ -13,6 +13,7 @@ import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.level.Level;
 
 import javax.annotation.Nullable;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -21,10 +22,18 @@ import java.util.List;
  * 两件物品共享同一套里程碑能力描述，通过 {@code isEnd} 区分引导语。
  * 配色以金色（{@code §6}）为主调。
  * 里程碑列表由客户端 MilestoneRegistry 动态提供。
+ * <p>
+ * 里程碑行缓存：使用 {@link MilestoneRegistry#getVersion()} 作为失效标记，
+ * 数据包重载或里程碑变更时 version 递增，tooltip 自动重建。
  */
 public class AdventureCurioItem extends Item {
 
     private final boolean isEnd;
+
+    /** 缓存的里程碑行列表。 */
+    private static List<Component> cachedMilestoneLines = null;
+    /** 缓存对应的版本号。 */
+    private static int cachedVersion = -1;
 
     public AdventureCurioItem(boolean isEnd) {
         super(new Item.Properties().stacksTo(1));
@@ -84,15 +93,31 @@ public class AdventureCurioItem extends Item {
     }
 
     // ========================
-    //  公共：里程碑行（动态）
+    //  公共：里程碑行（缓存）
     // ========================
 
+    /**
+     * 添加里程碑行到 tooltip。
+     * 使用 MilestoneRegistry.version 作为缓存失效标记，
+     * 版本未变更时直接使用缓存，避免重复遍历构建。
+     */
     private void addMilestoneLines(List<Component> tooltip) {
         if (!MilestoneRegistry.isInitialized()) {
             tooltip.add(Component.translatable("item.adventure_power.lore.loading")
                     .withStyle(ChatFormatting.GRAY));
             return;
         }
+        int currentVersion = MilestoneRegistry.getVersion();
+        if (cachedMilestoneLines == null || cachedVersion != currentVersion) {
+            cachedMilestoneLines = buildMilestoneLines();
+            cachedVersion = currentVersion;
+        }
+        tooltip.addAll(cachedMilestoneLines);
+    }
+
+    /** 构建里程碑行列表（从 MilestoneRegistry 遍历生成）。 */
+    private static List<Component> buildMilestoneLines() {
+        List<Component> lines = new ArrayList<>();
         for (Milestone m : MilestoneRegistry.getAll()) {
             MutableComponent line = Component.literal(m.name()).withStyle(ChatFormatting.GOLD);
             line.append(Component.literal("  §8»  "));
@@ -104,7 +129,8 @@ public class AdventureCurioItem extends Item {
                     line.append(a.name().copy().withStyle(ChatFormatting.GRAY));
                 }
             }
-            tooltip.add(line);
+            lines.add(line);
         }
+        return lines;
     }
 }

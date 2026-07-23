@@ -357,7 +357,7 @@ public class PlayerStateHandler {
 
             // 觉醒：周期性给周围敌对生物施加虚弱II
             if (progress.isFullyUnlocked()
-                && player.level().getGameTime() % com.ayin90723.adventure_power.config.ModConfig.AWAKEN_PURIFIED_SOUL_AURA_INTERVAL.get() == 0) {
+                && (player.level().getGameTime() + player.getId()) % com.ayin90723.adventure_power.config.ModConfig.AWAKEN_PURIFIED_SOUL_AURA_INTERVAL.get() == 0) {
                 int radius = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_PURIFIED_SOUL_RADIUS.get();
                 AABB aabb = player.getBoundingBox().inflate(radius);
                 List<net.minecraft.world.entity.LivingEntity> targets = player.level()

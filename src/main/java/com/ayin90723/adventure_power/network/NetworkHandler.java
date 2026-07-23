@@ -136,7 +136,7 @@ public class NetworkHandler {
 
         public BuffTogglePacket(String effectId) { this.effectId = effectId; }
 
-        public BuffTogglePacket(FriendlyByteBuf buf) { this.effectId = buf.readUtf(); }
+        public BuffTogglePacket(FriendlyByteBuf buf) { this.effectId = buf.readUtf(64); }
 
         public static void encode(BuffTogglePacket msg, FriendlyByteBuf buf) {
             buf.writeUtf(msg.effectId);
@@ -180,7 +180,7 @@ public class NetworkHandler {
             this.request = buf.readBoolean();
             int size = buf.readVarInt();
             Set<String> set = new HashSet<>();
-            for (int i = 0; i < size; i++) set.add(buf.readUtf());
+            for (int i = 0; i < size; i++) set.add(buf.readUtf(64));
             this.blacklist = set;
         }
 
@@ -291,7 +291,7 @@ public class NetworkHandler {
 
         public AbilityTogglePacket(String id) { this.id = id; }
 
-        public AbilityTogglePacket(FriendlyByteBuf buf) { this.id = buf.readUtf(); }
+        public AbilityTogglePacket(FriendlyByteBuf buf) { this.id = buf.readUtf(64); }
 
         public static void encode(AbilityTogglePacket msg, FriendlyByteBuf buf) {
             buf.writeUtf(msg.id);

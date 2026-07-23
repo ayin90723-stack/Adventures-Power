@@ -81,6 +81,9 @@ public class CombatAbilityHandler {
 
         DamageSource source = event.getSource();
 
+        // 内部伤害源（淬魂/审判）不触发模组能力，防止递归时觉醒标记/易伤/减伤/影杀被重复应用
+        if (DamageUtil.isInternalSource(source)) return;
+
         // 兼容拔刀剑/投射物等 causingEntity 缺失的伤害：通过 resolveAttacker 追溯真正的攻击者
         Entity rawAttacker = PiercingGazeUtil.resolveAttacker(source);
 

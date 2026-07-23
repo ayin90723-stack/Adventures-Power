@@ -35,6 +35,14 @@ public class MilestoneRegistry {
     private static Map<String, Milestone> byId = Map.of();
     private static boolean initialized = false;
 
+    /** 版本计数器，里程碑列表每次变更时递增。
+     *  用于 AdventureCurioItem 的 tooltip 缓存失效判断。
+     *  volatile 确保客户端渲染线程能读到最新值。 */
+    private static volatile int version = 0;
+
+    /** 返回当前版本号。 */
+    public static int getVersion() { return version; }
+
     // ===== 查询方法 =====
 
     public static List<Milestone> getAll() { return milestones; }
@@ -145,6 +153,7 @@ public class MilestoneRegistry {
             }
         }
         initialized = true;
+        version++;
 
         LOGGER.info("[MilestoneRegistry] 加载完成: {} 个里程碑", milestones.size());
     }
@@ -168,6 +177,7 @@ public class MilestoneRegistry {
         byId = Map.of();
         initialized = false;
         AbilityRegistry.clearCountAtUnlockOverrides();
+        version++;
     }
 
     // ===== 事件监听 =====

@@ -52,6 +52,7 @@ public class RecoveryHandler {
 
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
             if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
+            if (!progress.isAbilityEnabled("rapid_recovery")) return;
             lastHurtTimestamps.put(player.getUUID(), player.level().getGameTime());
         });
     }

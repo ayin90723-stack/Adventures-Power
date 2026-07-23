@@ -2,9 +2,7 @@ package com.ayin90723.adventure_power.item;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.util.AdventureItemNbtUtil;
-import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.milestone.Milestone;
 import com.ayin90723.adventure_power.util.MilestoneRegistry;
 import com.ayin90723.adventure_power.util.PersistentDataKeys;
@@ -53,21 +51,10 @@ public class AdventureEndRecipe extends ShapelessRecipe {
         }
         if (beginStack == null) return false;
 
-        // 路径 A：检查物品 NBT（缓存）
+        // 仅检查物品 NBT：冒险的开始在里程碑解锁时会更新自身 NBT 标记，
+        // 无需回退到遍历 level.players() 检查 Capability（多人服可能匹配错玩家）。
         AdventureItemNbtUtil.migrateOldStage(beginStack);
-        if (hasAllMilestones(beginStack)) return true;
-
-        // 路径 B：物品 NBT 不满足，回退到玩家 Capability
-        for (var player : level.players()) {
-            if (player.containerMenu instanceof net.minecraft.world.inventory.CraftingMenu craftingMenu
-                && craftingMenu.getSlot(0).container == inv) {
-                return AdventureProgressCapability.getAdventureProgress(player)
-                    .map(IAdventureProgress::areAllMilestonesUnlocked)
-                    .orElse(false);
-            }
-        }
-
-        return false;
+        return hasAllMilestones(beginStack);
     }
 
     /** 检查物品 NBT 是否包含全部里程碑标记 */
