@@ -62,6 +62,12 @@ public class ShadowKillHelper {
     /** 防重入：正在斩杀中的目标 */
     private static final Set<UUID> KILLING = ConcurrentHashMap.newKeySet();
 
+    /** 同 tick 去重：防止原版 post + Layer 0 postHurtEvent 导致影杀调两次（双倍削减） */
+    private static final Set<UUID> SHADOW_KILL_TICKED = ConcurrentHashMap.newKeySet();
+
+    /** target 有效性检测宽限：跨维度传送时短暂不在任何维度，避免误清 */
+    private static final Map<UUID, Integer> MISSING_TARGET_TICKS = new ConcurrentHashMap<>();
+
     /**
      * 每攻击者对每目标的影子血量 BossBar：attacker UUID -> target UUID -> bar。
      * <p>多人独立：A、B 同打一 Boss 各有独立 bar 显示各自影子血量，互不干扰；
@@ -88,6 +94,8 @@ public class ShadowKillHelper {
         // 跳过内部穿透伤害，防重入
         if (DamageUtil.isInternalSource(event.getSource())) return;
         if (KILLING.contains(target.getUUID())) return;
+        // 同 tick 去重：原版 LivingHurtEvent + Layer 0 postHurtEvent 可能同 tick 触发两次
+        if (!SHADOW_KILL_TICKED.add(target.getUUID())) return;
 
         int milestones = progress.getUnlockedMilestoneCount();
         Ability raw = AbilityRegistry.get("shadow_kill");
@@ -426,6 +434,9 @@ public class ShadowKillHelper {
     public static void onServerTick(ServerTickEvent event) {
         if (event.phase != Phase.END) return;
 
+        // 每 tick 清去重标记（防影杀同 tick 双倍削减）
+        SHADOW_KILL_TICKED.clear();
+
         int interval = com.ayin90723.adventure_power.config.ModConfig.SHADOW_KILL_CLEANUP_INTERVAL.get();
         shadowHpCleanupTick++;
         if (shadowHpCleanupTick < interval) return;
@@ -441,12 +452,50 @@ public class ShadowKillHelper {
 
             long gameTime = sp.level().getGameTime();
             cleanupExpiredShadowData(shadowData, gameTime);
+            cleanupInvalidTargets(shadowData, server);
 
             if (shadowData.isEmpty()) {
                 playerData.remove(NBT_SP_DATA);
             } else {
                 playerData.put(NBT_SP_DATA, shadowData);
             }
+        }
+    }
+
+    /**
+     * 检测 shadowData 中的 target 是否存在，无效（死亡/卸载/换实体）则清理。
+     * 2 tick 宽限防跨维度传送时 target 短暂不在任何维度被误清。
+     */
+    private static void cleanupInvalidTargets(CompoundTag shadowData, MinecraftServer server) {
+        Set<UUID> found = new HashSet<>();
+        for (ServerLevel level : server.getAllLevels()) {
+            for (String uuidKey : shadowData.getAllKeys()) {
+                try {
+                    UUID uuid = UUID.fromString(uuidKey);
+                    if (found.contains(uuid)) continue;
+                    Entity entity = level.getEntity(uuid);
+                    if (entity instanceof LivingEntity living && living.isAlive()) {
+                        found.add(uuid);
+                    }
+                } catch (IllegalArgumentException ignored) {}
+            }
+        }
+        for (String uuidKey : new ArrayList<>(shadowData.getAllKeys())) {
+            try {
+                UUID uuid = UUID.fromString(uuidKey);
+                if (!found.contains(uuid)) {
+                    int missing = MISSING_TARGET_TICKS.getOrDefault(uuid, 0) + 1;
+                    if (missing >= 2) {
+                        shadowData.remove(uuidKey);
+                        MISSING_TARGET_TICKS.remove(uuid);
+                        removeShadowHPBossBarByUUID(uuidKey);
+                    } else {
+                        MISSING_TARGET_TICKS.put(uuid, missing);
+                    }
+                } else {
+                    MISSING_TARGET_TICKS.remove(uuid);
+                }
+            } catch (IllegalArgumentException ignored) {}
         }
     }
 

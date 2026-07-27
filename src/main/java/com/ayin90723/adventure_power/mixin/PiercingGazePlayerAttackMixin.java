@@ -82,7 +82,12 @@ public class PiercingGazePlayerAttackMixin {
         // 实际扣血就放行（不管 hurtResult 真假）。用 getHealthDirect 直读 DataItem，
         // 防 Boss 用 ASM/Mixin 改写 getHealth() 返回假值（Fantasy Ending delta 式）。
         // 覆盖：① 普攻原版怪 ② fdbosses 调 super 扣血但 return false ③ Boss 假成功/拦截
-        if (HealthUtil.getHealthDirect(living) < healthBefore) return true;
+        if (HealthUtil.getHealthDirect(living) < healthBefore) {
+            // 扣血了，放行。但也 postHurtEvent，让影杀等监听器触发
+            // (fantasy_ending 等 ASM 改 hurt 的模组会跳过原版 ForgeHooks.onLivingHurt，导致 LivingHurtEvent 不 post)
+            PiercingGazeUtil.postHurtEvent(living, source, amount);
+            return true;
+        }
 
         // 否则（返回 false / return true 假成功未扣血）-> 攻击者持破敌之眼时走穿透
         if (!PiercingGazeUtil.hasPiercingGaze(self)) return hurtResult;
