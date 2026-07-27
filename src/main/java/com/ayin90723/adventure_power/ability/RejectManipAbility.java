@@ -1,6 +1,5 @@
 package com.ayin90723.adventure_power.ability;
 
-import net.minecraft.network.chat.Component;
 
 /**
  * 拒绝篡改 — 免疫外部强制修改生命值上限的恶意操作。
@@ -18,13 +17,4 @@ public class RejectManipAbility extends AbstractAbility {
         return "reject_manip";
     }
 
-    @Override
-    public Component name() {
-        return Component.translatable("ability.adventure_power.reject_manip");
-    }
-
-    @Override
-    public Component description() {
-        return Component.translatable("ability.adventure_power.reject_manip.desc");
-    }
 }

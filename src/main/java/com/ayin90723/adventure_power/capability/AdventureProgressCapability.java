@@ -92,47 +92,19 @@ public class AdventureProgressCapability {
         }
     }
 
-    /** 能力注册表（有序，面板按此顺序显示） */
+    /** 能力注册表（有序，面板按此顺序显示）。从 AbilityRegistry 注册顺序生成，避免重复维护。 */
     public static final Map<String, Component> KNOWN_ABILITIES = new LinkedHashMap<>();
     static {
-        KNOWN_ABILITIES.put("agility", Component.translatable("ability.adventure_power.agility"));
-        KNOWN_ABILITIES.put("digging_power", Component.translatable("ability.adventure_power.digging_power"));
-        KNOWN_ABILITIES.put("perpetual_blessing", Component.translatable("ability.adventure_power.perpetual_blessing"));
-        KNOWN_ABILITIES.put("void_step", Component.translatable("ability.adventure_power.void_step"));
-        KNOWN_ABILITIES.put("rapid_recovery", Component.translatable("ability.adventure_power.rapid_recovery"));
-        KNOWN_ABILITIES.put("soul_bind", Component.translatable("ability.adventure_power.soul_bind"));
-        KNOWN_ABILITIES.put("knockback_resist", Component.translatable("ability.adventure_power.knockback_resist"));
-        KNOWN_ABILITIES.put("damage_resist", Component.translatable("ability.adventure_power.damage_resist"));
-        KNOWN_ABILITIES.put("extended_reach", Component.translatable("ability.adventure_power.extended_reach"));
-        KNOWN_ABILITIES.put("undying_gear", Component.translatable("ability.adventure_power.undying_gear"));
-        KNOWN_ABILITIES.put("fortune_favor", Component.translatable("ability.adventure_power.fortune_favor"));
-        KNOWN_ABILITIES.put("env_immunity", Component.translatable("ability.adventure_power.env_immunity"));
-        KNOWN_ABILITIES.put("lifesteal", Component.translatable("ability.adventure_power.lifesteal"));
-        KNOWN_ABILITIES.put("healing_block", Component.translatable("ability.adventure_power.healing_block"));
-        KNOWN_ABILITIES.put("vitality", Component.translatable("ability.adventure_power.vitality"));
-        KNOWN_ABILITIES.put("resilience", Component.translatable("ability.adventure_power.resilience"));
-        KNOWN_ABILITIES.put("purified_soul", Component.translatable("ability.adventure_power.purified_soul"));
-        KNOWN_ABILITIES.put("loot_all", Component.translatable("ability.adventure_power.loot_all"));
-        KNOWN_ABILITIES.put("soar", Component.translatable("ability.adventure_power.soar"));
-        KNOWN_ABILITIES.put("soul_quench", Component.translatable("ability.adventure_power.soul_quench"));
-        KNOWN_ABILITIES.put("piercing_gaze", Component.translatable("ability.adventure_power.piercing_gaze"));
-        KNOWN_ABILITIES.put("death_defy", Component.translatable("ability.adventure_power.death_defy"));
-        KNOWN_ABILITIES.put("shadow_kill", Component.translatable("ability.adventure_power.shadow_kill"));
-        KNOWN_ABILITIES.put("true_health", Component.translatable("ability.adventure_power.true_health"));
-        KNOWN_ABILITIES.put("reject_manip", Component.translatable("ability.adventure_power.reject_manip"));
-        KNOWN_ABILITIES.put("active_skill", Component.translatable("ability.adventure_power.active_skill"));
+        for (var ability : com.ayin90723.adventure_power.ability.AbilityRegistry.ALL.values()) {
+            KNOWN_ABILITIES.put(ability.id(), ability.name());
+        }
     }
 
     /** 检查指定能力在当前玩家进度下是否可用（基于里程碑数） */
     public static boolean isAbilityAvailable(Player player, String id) {
         if (!KNOWN_ABILITIES.containsKey(id)) return false;
         if (AbilityRegistry.get(id) == null) return false;
-        return getAdventureProgress(player).map(p -> {
-            for (Milestone m : MilestoneRegistry.getAll()) {
-                if (p.isMilestoneUnlocked(m.id()) && m.abilities().contains(id)) return true;
-            }
-            return false;
-        }).orElse(false);
+        return getAdventureProgress(player).map(p -> p.isAbilityUnlocked(id)).orElse(false);
     }
 
     /** Capability 附加资源 ID */

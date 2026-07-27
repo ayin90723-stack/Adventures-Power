@@ -51,7 +51,7 @@ public class LegacyHurtAndBreakMixin {
         if (entity instanceof Player player && AdventurePower.hasUndyingGear(player)) {
             ItemStack self = (ItemStack) (Object) this;
             ci.cancel();
-            self.setDamageValue(0);
+            if (self.getDamageValue() > 0) self.setDamageValue(0);
         }
     }
 
@@ -73,7 +73,7 @@ public class LegacyHurtAndBreakMixin {
                               CallbackInfoReturnable<Boolean> cir) {
         if (player != null && AdventurePower.hasUndyingGear(player)) {
             ItemStack self = (ItemStack) (Object) this;
-            self.setDamageValue(0);
+            if (self.getDamageValue() > 0) self.setDamageValue(0);
             cir.setReturnValue(false);
         }
     }

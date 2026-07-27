@@ -49,6 +49,8 @@ public class AdventureProgress implements IAdventureProgress {
      * 若不一致则触发惰性重建，保证缓存不因数据包重载而变脏。
      */
     private int cachedRegistryHash;
+    /** getDisabledAbilities 的不可变缓存视图，toggle/deserialize 时失效 */
+    private Set<String> cachedDisabledView;
     private long deathDefyInvulEnd;
     private long deathDefyCooldownEnd;
     private int resilienceStacks;
@@ -115,7 +117,10 @@ public class AdventureProgress implements IAdventureProgress {
 
     @Override
     public Set<String> getDisabledAbilities() {
-        return Collections.unmodifiableSet(new HashSet<>(disabledAbilities));
+        if (cachedDisabledView == null) {
+            cachedDisabledView = Collections.unmodifiableSet(new HashSet<>(disabledAbilities));
+        }
+        return cachedDisabledView;
     }
 
     // ===== 能力可用性缓存 =====
@@ -162,15 +167,27 @@ public class AdventureProgress implements IAdventureProgress {
         return enabledAbilityCache.contains(id);
     }
 
+    /** 该能力是否属于某已解锁里程碑（仅里程碑归属，不检查手动开关）。复用 enabledAbilityCache O(1) 查询。 */
+    @Override
+    public boolean isAbilityUnlocked(String id) {
+        if (cachedRegistryHash != System.identityHashCode(MilestoneRegistry.getAll())) {
+            rebuildAbilityCache();
+        }
+        return enabledAbilityCache.contains(id);
+    }
+
     @Override
     public boolean toggleAbility(String id) {
+        boolean enabled;
         if (disabledAbilities.contains(id)) {
             disabledAbilities.remove(id);
-            return true;
+            enabled = true;
         } else {
             disabledAbilities.add(id);
-            return false;
+            enabled = false;
         }
+        cachedDisabledView = null;
+        return enabled;
     }
 
     // ===== 死亡抗拒 =====
@@ -336,6 +353,7 @@ public class AdventureProgress implements IAdventureProgress {
         this.activeSkillIndex = nbt.getInt(TAG_ACTIVE_SKILL_INDEX);
         this.soarGrantedFlight = nbt.getBoolean(TAG_SOAR_GRANTED_FLIGHT);
         this.backupHealth = nbt.getFloat(TAG_BACKUP_HEALTH);
+        cachedDisabledView = null;
         rebuildAbilityCache();
     }
 }

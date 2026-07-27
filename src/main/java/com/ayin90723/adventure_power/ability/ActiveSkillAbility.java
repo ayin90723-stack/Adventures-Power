@@ -1,6 +1,5 @@
 package com.ayin90723.adventure_power.ability;
 
-import net.minecraft.network.chat.Component;
 
 /**
  * 旅者之力 — 主动技能，提供强大的爆发性增益。
@@ -18,13 +17,4 @@ public class ActiveSkillAbility extends AbstractAbility {
         return "active_skill";
     }
 
-    @Override
-    public Component name() {
-        return Component.translatable("ability.adventure_power.active_skill");
-    }
-
-    @Override
-    public Component description() {
-        return Component.translatable("ability.adventure_power.active_skill.desc");
-    }
 }

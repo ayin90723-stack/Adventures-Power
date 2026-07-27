@@ -174,14 +174,7 @@ public final class AdventureItemNbtUtil {
                 Component.translatable("msg.adventure_power.curio_evolved"),
                 false);
         }
-
-        // 激活完全解锁
-        AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            progress.activateFullyUnlocked();
-            ScoreboardUtil.updateScoreboard(player, true);
-            SyncUtil.syncCapabilityToPersistent(player, progress);
-            SyncUtil.syncToClient(player);
-        });
+        // 注：完全解锁激活 + 计分板 + 数据同步由调用方 grantMilestone 统一处理，此处仅做物品替换
     }
 
     /** 在物品列表中查找冒险的开始并替换 */

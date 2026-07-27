@@ -53,7 +53,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * @see RejectHealthManipMixin setHealth 方法级拦截（外部直调）
  * @see DeathDefyMixin 死亡抗拒
  */
-@Mixin(value = LivingEntity.class, priority = Integer.MAX_VALUE)
+@Mixin(value = LivingEntity.class, priority = 10000)
 public abstract class TrueHealthMixin {
 
     private static final float EPSILON = 0.001F;

@@ -1,7 +1,6 @@
 package com.ayin90723.adventure_power.ability;
 
 import com.ayin90723.adventure_power.config.ModConfig;
-import net.minecraft.network.chat.Component;
 
 /**
  * 受击坚韧 — 受击叠层获得减伤。
@@ -17,16 +16,6 @@ public class ResilienceAbility extends AbstractAbility {
     @Override
     public String id() {
         return "resilience";
-    }
-
-    @Override
-    public Component name() {
-        return Component.translatable("ability.adventure_power.resilience");
-    }
-
-    @Override
-    public Component description() {
-        return Component.translatable("ability.adventure_power.resilience.desc");
     }
 
     /**

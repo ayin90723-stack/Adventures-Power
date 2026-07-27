@@ -34,7 +34,7 @@ public abstract class LootPoolMixin {
 
     @Inject(method = "m_79053_", at = @At("HEAD"), cancellable = true)
     private void adventure_power$lootAllAddItems(Consumer<ItemStack> consumer, LootContext context, CallbackInfo ci) {
-        if (LootAllHandler.BYPASS.get()) {
+        if (LootAllHandler.BYPASS.get() > 0) {
             LootPoolEntryContainer[] entries = ((LootPoolAccessor) (Object) this).adventure_power$getEntries();
             if (entries != null) {
                 for (LootPoolEntryContainer entryContainer : entries) {

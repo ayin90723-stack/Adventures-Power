@@ -1,7 +1,6 @@
 package com.ayin90723.adventure_power.ability;
 
 import com.ayin90723.adventure_power.config.ModConfig;
-import net.minecraft.network.chat.Component;
 
 /**
  * 嗜血 — 攻击造成伤害时回复自身生命值。
@@ -18,16 +17,6 @@ public class LifestealAbility extends LinearGrowthAbility {
     @Override
     public String id() {
         return "lifesteal";
-    }
-
-    @Override
-    public Component name() {
-        return Component.translatable("ability.adventure_power.lifesteal");
-    }
-
-    @Override
-    public Component description() {
-        return Component.translatable("ability.adventure_power.lifesteal.desc");
     }
 
     @Override

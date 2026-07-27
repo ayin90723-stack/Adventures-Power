@@ -2,12 +2,13 @@ package com.ayin90723.adventure_power.handler;
 
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
-import com.ayin90723.adventure_power.handler.CapabilityLifecycleHandler;
 import com.ayin90723.adventure_power.milestone.Milestone;
 import com.ayin90723.adventure_power.util.AdventureItemNbtUtil;
 import com.ayin90723.adventure_power.util.BuffExclusionManager;
 import com.ayin90723.adventure_power.util.MilestoneRegistry;
+import com.ayin90723.adventure_power.util.PersistentDataKeys;
 import com.ayin90723.adventure_power.util.ScoreboardUtil;
 import com.ayin90723.adventure_power.util.SyncUtil;
 import net.minecraft.core.particles.ParticleTypes;
@@ -15,8 +16,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.effect.MobEffectCategory;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.player.Player;
-import net.minecraftforge.event.TickEvent.Phase;
-import net.minecraftforge.event.TickEvent.PlayerTickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent.PlayerLoggedOutEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
@@ -30,12 +29,11 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 玩家 Tick 处理 - 每 tick 周期性能力逻辑 + 开局安全网。
+ * 玩家 Tick 处理 - 开局安全网 + 周期性能力逻辑。
  * <p>
- * 从 AdventureProgressCapability 拆出。处理：
+ * 从 PlayerTickDispatcher 分发调用（不再独立订阅 PlayerTickEvent）。处理：
  * <ul>
- *   <li>开局安全网：补发冒险饰品 + 自动激活冒险者（每玩家仅一次）</li>
- *   <li>测试入口：持有冒险的终点 -> 自动全解锁</li>
+ *   <li>开局安全网（门禁前）：补发冒险饰品 + 自动激活冒险者 + 测试入口全解锁</li>
  *   <li>Buff 延长（恩赐永驻，每 60 tick）</li>
  *   <li>环境免疫（每 tick 清火）</li>
  *   <li>受击坚韧（超时层数归零）</li>
@@ -47,56 +45,53 @@ public class PlayerTickHandler {
 
     private static final int BUFF_CHECK_INTERVAL = 60;
     private static final Map<UUID, Long> lastBuffCheck = new HashMap<>();
-    private static final Set<UUID> verifiedBeginItem = new java.util.HashSet<>();
 
-    @SubscribeEvent
-    public static void onPlayerTick(PlayerTickEvent event) {
-        if (event.phase != Phase.END) return;
-        Player player = event.player;
-        if (player.level().isClientSide()) return;
-
-        // 开局安全网：补发冒险饰品（若丢失）+ 自动激活冒险者
-        if (!verifiedBeginItem.contains(player.getUUID())) {
-            verifiedBeginItem.add(player.getUUID());
+    /**
+     * 开局安全网（门禁前，由 PlayerTickDispatcher 调用）。
+     * 补发冒险饰品 + 自动激活冒险者（每玩家仅一次）+ 测试入口全解锁。
+     * 需对非冒险者执行，故在分发器门禁前调用。
+     */
+    public static void tickSafetyNet(Player player, IAdventureProgress progress) {
+        // 补发冒险饰品 + 自动激活冒险者（每玩家仅一次，persistentData 标记）
+        if (!player.getPersistentData().getBoolean(PersistentDataKeys.VERIFIED_BEGIN_ITEM_KEY)) {
+            player.getPersistentData().putBoolean(PersistentDataKeys.VERIFIED_BEGIN_ITEM_KEY, true);
             CapabilityLifecycleHandler.giveAdventureBeginIfNeeded(player);
             CapabilityLifecycleHandler.checkAndActivateAdventurer(player);
         }
 
-        var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
-        if (progressOpt.isEmpty()) return;
-        var progress = progressOpt.get();
-
+        // 测试便捷入口：持有冒险的终点 -> 自动全解锁（每 20 tick 检查一次，降低物品栏遍历开销）
+        if (progress == null || progress.isFullyUnlocked()) return;
         long currentTime = player.level().getGameTime();
+        if (currentTime % 20 != 0) return;
+        if (!AdventureItemNbtUtil.playerHasAdventureEnd(player)) return;
 
-        // 测试便捷入口：持有冒险的终点 -> 自动全解锁（每 tick 检查，已解锁则跳过）
-        if (!progress.isFullyUnlocked() && AdventureItemNbtUtil.playerHasAdventureEnd(player)) {
-            if (!progress.isAdventurer()) {
-                progress.activateAdventurer();
-            }
-            for (Milestone m : MilestoneRegistry.getAll()) {
-                progress.unlockMilestone(m.id());
-            }
-            progress.activateFullyUnlocked();
-            ScoreboardUtil.updateScoreboard(player, true);
-            SyncUtil.syncCapabilityToPersistent(player, progress);
-            AdventureItemNbtUtil.syncAllAdventureItemNbt(player, progress);
-            SyncUtil.syncToClient(player);
-
-            // 翱翔飞行立即同步：fullyUnlocked 不等 PlayerStateHandler 下一 tick，
-            // 避免两处 TickEvent.Phase.END handler 执行顺序不确定导致的竞态--
-            // 若 PlayerStateHandler 先执行，soar 的 else 分支会剥离 mayfly 并发送
-            // mayfly=false 到客户端，之后此处再发送 mayfly=true 覆盖（TCP 保序）。
-            if (progress.isAbilityEnabled("soar") && !player.getAbilities().mayfly
-                && !player.getAbilities().instabuild && !player.isSpectator()) {
-                player.getAbilities().mayfly = true;
-                player.onUpdateAbilities();
-            }
-
-            // 所有里程碑已在上面解锁，无需再授予成就
+        if (!progress.isAdventurer()) {
+            progress.activateAdventurer();
         }
+        for (Milestone m : MilestoneRegistry.getAll()) {
+            progress.unlockMilestone(m.id());
+        }
+        progress.activateFullyUnlocked();
+        ScoreboardUtil.updateScoreboard(player, true);
+        SyncUtil.syncCapabilityToPersistent(player, progress);
+        AdventureItemNbtUtil.syncAllAdventureItemNbt(player, progress);
+        SyncUtil.syncToClient(player);
 
-        // 门禁：非冒险者跳过后续的每 tick 能力处理（Buff 延长/环境免疫/受击坚韧/庇护过期）
-        if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
+        // 翱翔飞行立即同步：fullyUnlocked 不等下一 tick handler，
+        // 避免两处 TickEvent.Phase.END handler 执行顺序不确定导致的竞态
+        if (progress.isAbilityEnabled("soar") && !player.getAbilities().mayfly
+            && !player.getAbilities().instabuild && !player.isSpectator()) {
+            player.getAbilities().mayfly = true;
+            player.onUpdateAbilities();
+        }
+    }
+
+    /**
+     * 门禁后业务（由 PlayerTickDispatcher 调用）：
+     * Buff 延长 / 环境免疫 / 受击坚韧超时 / 庇护无敌过期。
+     */
+    public static void onTick(Player player, IAdventureProgress progress) {
+        long currentTime = player.level().getGameTime();
 
         // Buff 延长（每 3 秒）
         if (progress.isAbilityEnabled("perpetual_blessing")) {
@@ -111,8 +106,8 @@ public class PlayerTickHandler {
             lastBuffCheck.remove(player.getUUID());
         }
 
-        // 环境免疫：每 tick 清除火焰
-        if (progress.isAbilityEnabled("env_immunity")) {
+        // 环境免疫：每 tick 清除火焰（先检查是否着火，避免无火时的不必要同步）
+        if (progress.isAbilityEnabled("env_immunity") && player.getRemainingFireTicks() > 0) {
             player.clearFire();
         }
 
@@ -158,7 +153,8 @@ public class PlayerTickHandler {
 
     @SubscribeEvent
     public static void onPlayerLogout(PlayerLoggedOutEvent event) {
-        lastBuffCheck.remove(event.getEntity().getUUID());
-        verifiedBeginItem.remove(event.getEntity().getUUID());
+        UUID uuid = event.getEntity().getUUID();
+        lastBuffCheck.remove(uuid);
+        BuffExclusionManager.clearCache(uuid);
     }
 }

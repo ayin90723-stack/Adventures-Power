@@ -23,6 +23,7 @@ public class ModConfig {
     // --- 禁疗之触 ---
     public static final IntValue HEALING_BLOCK_BASE;
     public static final IntValue HEALING_BLOCK_PER_MILESTONE;
+    public static final BooleanValue HEALING_BLOCK_ALLOW_BOSS_PHASE_TWO;
 
     // --- 虚空踏步 ---
     public static final DoubleValue VOID_STEP_POWER;
@@ -154,6 +155,8 @@ public class ModConfig {
             .defineInRange("healing_block_base", 3, 1, 60);
         HEALING_BLOCK_PER_MILESTONE = BUILDER.comment("每额外里程碑增加的禁疗时间（秒）")
             .defineInRange("healing_block_per_milestone", 1, 0, 30);
+        HEALING_BLOCK_ALLOW_BOSS_PHASE_TWO = BUILDER.comment("是否允许 Boss（凋零/末影龙）在禁疗下进入二阶段（true=允许二阶段，false=禁疗下直接击杀）")
+            .define("healing_block_allow_boss_phase_two", true);
         BUILDER.pop();
 
         BUILDER.push("虚空踏步");

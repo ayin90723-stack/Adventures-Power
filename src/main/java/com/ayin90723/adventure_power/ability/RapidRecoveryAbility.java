@@ -1,7 +1,6 @@
 package com.ayin90723.adventure_power.ability;
 
 import com.ayin90723.adventure_power.config.ModConfig;
-import net.minecraft.network.chat.Component;
 
 /**
  * 休养生息 — 脱战后直写 SynchedEntityData 回血 + 恢复饱食度。
@@ -20,16 +19,6 @@ public class RapidRecoveryAbility extends StepGrowthAbility {
     @Override
     public String id() {
         return "rapid_recovery";
-    }
-
-    @Override
-    public Component name() {
-        return Component.translatable("ability.adventure_power.rapid_recovery");
-    }
-
-    @Override
-    public Component description() {
-        return Component.translatable("ability.adventure_power.rapid_recovery.desc");
     }
 
     @Override

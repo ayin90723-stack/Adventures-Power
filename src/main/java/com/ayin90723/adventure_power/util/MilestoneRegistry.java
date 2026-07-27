@@ -8,6 +8,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.mojang.logging.LogUtils;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.server.packs.resources.ResourceManager;
@@ -33,6 +34,7 @@ public class MilestoneRegistry {
     private static List<Milestone> milestones = List.of();
     private static Map<ResourceLocation, Milestone> byAdvancement = Map.of();
     private static Map<String, Milestone> byId = Map.of();
+    private static Map<String, List<Milestone>> byTriggerType = Map.of();
     private static boolean initialized = false;
 
     /** 版本计数器，里程碑列表每次变更时递增。
@@ -57,6 +59,15 @@ public class MilestoneRegistry {
     @Nullable
     public static Milestone getById(String id) {
         return byId.get(id);
+    }
+
+    /**
+     * 返回指定 trigger type 的所有里程碑（预索引，避免触发器每 tick 全遍历）。
+     * type 为 null 或无匹配时返回空列表。
+     */
+    public static List<Milestone> getByTriggerType(String type) {
+        if (type == null) return List.of();
+        return byTriggerType.getOrDefault(type, List.of());
     }
 
     public static boolean contains(String id) {
@@ -137,37 +148,76 @@ public class MilestoneRegistry {
 
             Milestone m = new Milestone(id, name, List.copyOf(abilities), advancement, trigger);
             loaded.add(m);
-
-            for (String abilityId : abilities) {
-                AbilityRegistry.setCountAtUnlock(abilityId, i + 1);
-            }
         }
 
+        applyMilestones(loaded);
+        LOGGER.info("[MilestoneRegistry] 加载完成: {} 个里程碑", milestones.size());
+    }
+
+    /**
+     * 应用里程碑列表：构建所有索引 + 设置 countAtUnlock。
+     * loadFromJson 和 clientInitFromNbt 共用，避免逻辑重复。
+     */
+    private static void applyMilestones(List<Milestone> loaded) {
         milestones = List.copyOf(loaded);
         byId = new HashMap<>();
         byAdvancement = new HashMap<>();
-        for (Milestone m : loaded) {
+        byTriggerType = new HashMap<>();
+        for (int i = 0; i < loaded.size(); i++) {
+            Milestone m = loaded.get(i);
             byId.put(m.id(), m);
             if (m.advancement() != null) {
                 byAdvancement.put(m.advancement(), m);
             }
+            if (m.trigger() != null && m.trigger().type() != null) {
+                byTriggerType.computeIfAbsent(m.trigger().type(), k -> new ArrayList<>()).add(m);
+            }
+            for (String abilityId : m.abilities()) {
+                AbilityRegistry.setCountAtUnlock(abilityId, i + 1);
+            }
+        }
+        // 冻结各 type 列表为不可变
+        for (Map.Entry<String, List<Milestone>> entry : byTriggerType.entrySet()) {
+            entry.setValue(List.copyOf(entry.getValue()));
         }
         initialized = true;
         version++;
-
-        LOGGER.info("[MilestoneRegistry] 加载完成: {} 个里程碑", milestones.size());
     }
 
-    /** 客户端从网络包接收里程碑数据 */
-    public static void clientInit(List<String> serializedMilestones) {
-        StringBuilder json = new StringBuilder("{\"milestones\":[");
-        for (int i = 0; i < serializedMilestones.size(); i++) {
-            if (i > 0) json.append(",");
-            json.append(serializedMilestones.get(i));
+    /**
+     * 客户端从网络包的 NBT 元数据直接构建里程碑注册表（不经 JSON 中转）。
+     * 与 SyncUtil.syncToClient 的 _milestone_registry NBT 结构对应。
+     */
+    public static void clientInitFromNbt(CompoundTag registryMeta) {
+        int count = registryMeta.getInt("count");
+        List<Milestone> loaded = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            CompoundTag mTag = registryMeta.getCompound("m_" + i);
+            String id = mTag.getString("id");
+            String name = mTag.getString("name");
+            List<String> abilities = new ArrayList<>();
+            if (mTag.contains("abilities")) {
+                CompoundTag abTag = mTag.getCompound("abilities");
+                int abCount = abTag.getInt("count");
+                for (int j = 0; j < abCount; j++) {
+                    abilities.add(abTag.getString("a_" + j));
+                }
+            }
+            ResourceLocation advancement = mTag.contains("advancement")
+                ? new ResourceLocation(mTag.getString("advancement")) : null;
+            TriggerDef trigger = null;
+            if (mTag.contains("trigger")) {
+                CompoundTag trigTag = mTag.getCompound("trigger");
+                String type = trigTag.getString("type");
+                Integer y = trigTag.contains("y") ? trigTag.getInt("y") : null;
+                ResourceLocation entity = trigTag.contains("entity")
+                    ? new ResourceLocation(trigTag.getString("entity")) : null;
+                trigger = new TriggerDef(type, y, entity);
+            }
+            loaded.add(new Milestone(id, name, List.copyOf(abilities), advancement, trigger));
         }
-        json.append("]}");
-        JsonObject root = GSON.fromJson(json.toString(), JsonObject.class);
-        loadFromJson(AdventurePower.MODID, root);
+        applyMilestones(loaded);
+        LOGGER.info("[MilestoneRegistry] 客户端从 NBT 加载完成: {} 个里程碑", milestones.size());
     }
 
     /** 数据包重载前清除现有数据 */
@@ -175,6 +225,7 @@ public class MilestoneRegistry {
         milestones = List.of();
         byAdvancement = Map.of();
         byId = Map.of();
+        byTriggerType = Map.of();
         initialized = false;
         AbilityRegistry.clearCountAtUnlockOverrides();
         version++;
@@ -218,19 +269,18 @@ public class MilestoneRegistry {
 
     /** 当数据包中无 milestones.json 时使用模组内置默认 */
     private static void loadBuiltinDefaults() {
-        String json = "{ \"milestones\": ["
-            + "{\"id\":\"first_night\",\"name\":\"初次夜冕\",\"abilities\":[\"agility\",\"digging_power\",\"perpetual_blessing\"],\"trigger\":{\"type\":\"survive_night\"}},"
-            + "{\"id\":\"first_death\",\"name\":\"初尝败绩\",\"abilities\":[\"void_step\",\"rapid_recovery\"],\"trigger\":{\"type\":\"first_death\"}},"
-            + "{\"id\":\"first_trade\",\"name\":\"初次交易\",\"abilities\":[\"soul_bind\",\"knockback_resist\"],\"trigger\":{\"type\":\"first_trade\"}},"
-            + "{\"id\":\"first_deep\",\"name\":\"初探地底\",\"abilities\":[\"damage_resist\",\"extended_reach\"],\"trigger\":{\"type\":\"y_below\",\"y\":0}},"
-            + "{\"id\":\"first_enchant\",\"name\":\"初次附魔\",\"abilities\":[\"undying_gear\",\"fortune_favor\"],\"advancement\":\"minecraft:story/enchant_item\"},"
-            + "{\"id\":\"nether\",\"name\":\"炽热之门\",\"abilities\":[\"env_immunity\",\"lifesteal\"],\"advancement\":\"minecraft:story/enter_the_nether\"},"
-            + "{\"id\":\"wither\",\"name\":\"凋零之陨\",\"abilities\":[\"healing_block\",\"vitality\"],\"trigger\":{\"type\":\"first_kill\",\"entity\":\"minecraft:wither\"}},"
-            + "{\"id\":\"warden\",\"name\":\"幽匿之惧\",\"abilities\":[\"resilience\",\"purified_soul\",\"loot_all\"],\"trigger\":{\"type\":\"first_kill\",\"entity\":\"minecraft:warden\"}},"
-            + "{\"id\":\"dragon\",\"name\":\"终末之翼\",\"abilities\":[\"soar\",\"soul_quench\",\"piercing_gaze\",\"death_defy\"],\"advancement\":\"minecraft:end/kill_dragon\"},"
-            + "{\"id\":\"elytra\",\"name\":\"苍穹之证\",\"abilities\":[\"shadow_kill\",\"true_health\",\"reject_manip\",\"active_skill\"],\"advancement\":\"minecraft:end/elytra\"}"
-            + "]}";
-        JsonObject root = GSON.fromJson(json, JsonObject.class);
-        loadFromJson(AdventurePower.MODID, root);
+        // 从 classpath 加载内置 milestones.json（与资源文件保持单一来源，避免重复维护）
+        java.io.InputStream is = MilestoneRegistry.class.getResourceAsStream(
+            "/data/adventure_power/adventure_power/milestones.json");
+        if (is == null) {
+            LOGGER.error("[MilestoneRegistry] 内置 milestones.json 未找到");
+            return;
+        }
+        try (java.io.Reader reader = new java.io.InputStreamReader(is, java.nio.charset.StandardCharsets.UTF_8)) {
+            JsonObject root = GSON.fromJson(reader, JsonObject.class);
+            loadFromJson(AdventurePower.MODID, root);
+        } catch (Exception e) {
+            LOGGER.error("[MilestoneRegistry] 加载内置 milestones.json 失败", e);
+        }
     }
 }

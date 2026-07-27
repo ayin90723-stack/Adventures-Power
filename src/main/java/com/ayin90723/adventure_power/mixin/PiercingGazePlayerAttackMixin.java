@@ -1,7 +1,9 @@
 package com.ayin90723.adventure_power.mixin;
 
 import com.ayin90723.adventure_power.util.FriendlyFireProtection;
+import com.ayin90723.adventure_power.util.HealthUtil;
 import com.ayin90723.adventure_power.util.PiercingGazeUtil;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.damagesource.DamageSource;
@@ -30,11 +32,16 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  * 已通过 {@code cir.setReturnValue(true)} 将返回值改为 true，本 Mixin 看到 true
  * 时直接放行，不会重复处理。
  *
- * <h3>已知局限</h3>
- * 本层注入 {@code Player.attack}，属"攻击发起侧"。整合包中的战斗优化模组
- * （BetterCombat / Epic Fight 等）会接管攻击流程、绕开 {@code Player.attack}，
- * 导致本层注入点不触发。此场景下对"重写 hurt 不调 super"的 Boss 暂无纯 Mixin 通用解，
- * 需 ASM CoreMod 或针对性 Mixin 兜底（见 docs/piercing-gaze-asm-proposal.md）。
+ * <h3>与战斗优化模组的兼容性</h3>
+ * 本层注入 {@code Player.attack}，属"攻击发起侧"。BetterCombat / Epic Fight 等
+ * 战斗优化模组虽在客户端接管攻击流程（各自动画系统，cancel 原版 doAttack），
+ * 但服务端最终仍调用原版 {@code Player.attack}（BetterCombat 经 ServerNetwork 收包后调用，
+ * Epic Fight 经 PlayerPatch.attack 调用），故本层 {@code @Redirect} 正常触发。
+ * 两个模组均未 {@code @Redirect target.hurt}，无 Mixin 冲突，默认 priority 无需调整。
+ * <p>
+ * 穿透判定（血量比对）：真成功 = target.hurt 返回 true 且实际扣血（healthAfter < healthBefore）。
+ * 覆盖两类 Boss：① 重写 hurt return false 不调 super；② 重写 hurt return true 假成功未扣血。
+ * 两种都走穿透三连（postHurtEvent + actuallyHurt + 血量直写兜底）。
  *
  * @see PiercingGazeMixin
  * @see PiercingGazeLivingEntityMixin
@@ -53,37 +60,41 @@ public class PiercingGazePlayerAttackMixin {
         method = "m_5706_",
         at = @At(
             value = "INVOKE",
-            target = "Lnet/minecraft/world/entity/LivingEntity;m_6469_(Lnet/minecraft/world/damagesource/DamageSource;F)Z"
+            target = "Lnet/minecraft/world/entity/Entity;m_6469_(Lnet/minecraft/world/damagesource/DamageSource;F)Z"
         ),
         require = 0
     )
-    private boolean redirectAttackHurt(LivingEntity target, DamageSource source, float amount) {
+    private boolean redirectAttackHurt(Entity target, DamageSource source, float amount) {
         Player self = (Player)(Object)this;
         // 仅在服务端处理，客户端侧走原版管线
         if (self.level().isClientSide()) {
             return target.hurt(source, amount);
         }
 
+        // 穿透逻辑仅对 LivingEntity 有意义；非 LivingEntity 直接走原版
+        if (!(target instanceof LivingEntity living)) {
+            return target.hurt(source, amount);
+        }
+
+        float healthBefore = HealthUtil.getHealthDirect(living);
         boolean hurtResult = target.hurt(source, amount);
 
-        // 伤害已成功 -> 无需穿透
-        if (hurtResult) return true;
+        // 实际扣血就放行（不管 hurtResult 真假）。用 getHealthDirect 直读 DataItem，
+        // 防 Boss 用 ASM/Mixin 改写 getHealth() 返回假值（Fantasy Ending delta 式）。
+        // 覆盖：① 普攻原版怪 ② fdbosses 调 super 扣血但 return false ③ Boss 假成功/拦截
+        if (HealthUtil.getHealthDirect(living) < healthBefore) return true;
 
-        // hurt 返回 false：Boss 重写 hurt() 且不调 super（如巫妖护盾、钢铁守护者 vulnerable=false）
-        // -> 攻击者持破敌之眼时走自有伤害链穿透
-        if (!PiercingGazeUtil.hasPiercingGaze(self)) return false;
-
-        // 友好火力保护
-        if (FriendlyFireProtection.isOwnerTarget(self, target)) return false;
+        // 否则（返回 false / return true 假成功未扣血）-> 攻击者持破敌之眼时走穿透
+        if (!PiercingGazeUtil.hasPiercingGaze(self)) return hurtResult;
+        if (FriendlyFireProtection.isOwnerTarget(self, living)) return hurtResult;
 
         // 穿透结算三连（与 Layer 2 情况 A 完全一致）：
         // 1. post LivingHurtEvent（取 max 防限伤，让淬魂/影杀 正常追加伤害）
         // 2. actuallyHurt 直写（绕过 hurt 内护甲/无敌判定）
         // 3. 血量直写兜底 + 清自定义无敌字段（防 Boss 注入 setHealth 恢复 / 锁死影杀 NBT）
-        float healthBefore = target.getHealth();
-        float effective = PiercingGazeUtil.postHurtEvent(target, source, amount);
-        PiercingGazeUtil.invokeActuallyHurt(target, source, effective);
-        PiercingGazeUtil.afterPierceFallback(target, effective, healthBefore);
+        float effective = PiercingGazeUtil.postHurtEvent(living, source, amount);
+        PiercingGazeUtil.invokeActuallyHurt(living, source, effective);
+        PiercingGazeUtil.afterPierceFallback(living, effective, healthBefore);
 
         return true; // 返回 true 让击退/火焰附加等附魔正常执行
     }

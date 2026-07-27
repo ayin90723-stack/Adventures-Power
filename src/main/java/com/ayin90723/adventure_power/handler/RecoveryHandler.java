@@ -4,6 +4,7 @@ import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.DamageUtil;
@@ -17,9 +18,9 @@ import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 恢复类能力效果处理器。
@@ -33,11 +34,11 @@ import java.util.concurrent.ConcurrentHashMap;
 @Mod.EventBusSubscriber(modid = AdventurePower.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class RecoveryHandler {
 
-    /** 上次再生检查时间缓存 */
-    private static final Map<UUID, Long> lastRecoveryCheck = new ConcurrentHashMap<>();
+    /** 上次再生检查时间缓存（服务端主线程单线程，无需并发） */
+    private static final Map<UUID, Long> lastRecoveryCheck = new HashMap<>();
 
     /** 玩家最后受伤时间 */
-    private static final Map<UUID, Long> lastHurtTimestamps = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> lastHurtTimestamps = new HashMap<>();
 
     // ==================== 休养生息 — 脱战再生 ====================
 
@@ -62,17 +63,8 @@ public class RecoveryHandler {
      * 休养生息 — 脱战超过延迟阈值后，直写 SynchedEntityData 回血并恢复饱食度。
      * 不使用药水效果（addEffect），避免被 MobEffectEvent / removeAllEffects 拦截。
      */
-    @SubscribeEvent
-    public static void onPlayerTick(TickEvent.PlayerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END) return;
-        Player player = event.player;
-        if (player.level().isClientSide()) return;
-
-        var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
-        if (progressOpt.isEmpty()) return;
-        var progress = progressOpt.get();
-
-        if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
+    /** 门禁后业务（由 PlayerTickDispatcher 调用）：休养生息脱战再生 */
+    public static void onTick(Player player, IAdventureProgress progress) {
 
         // ---- 休养生息 ----
         if (progress.isAbilityEnabled("rapid_recovery")) {
@@ -163,11 +155,11 @@ public class RecoveryHandler {
                 float healthBeforeHeal = HealthUtil.getHealthDirect(attacker);
                 float newHealth = Math.min(attacker.getMaxHealth(), healthBeforeHeal + healAmount);
                 HealthUtil.setAllHealthLikeRaw(attacker, newHealth);
-                // 觉醒：过量治疗转为吸收护盾
+                // 觉醒：过量治疗转为吸收护盾（满血时全部吸血量转护盾）
                 if (progress.isFullyUnlocked()) {
                     float toFull = attacker.getMaxHealth() - healthBeforeHeal;
-                    if (healAmount > toFull && toFull > 0) {
-                        float excess = healAmount - toFull;
+                    float excess = toFull > 0 ? Math.max(0, healAmount - toFull) : healAmount;
+                    if (excess > 0) {
                         float shieldCap = attacker.getMaxHealth()
                             * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_LIFESTEAL_SHIELD_CAP.get().floatValue();
                         excess = Math.min(excess, shieldCap);

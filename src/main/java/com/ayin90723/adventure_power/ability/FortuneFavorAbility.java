@@ -1,7 +1,6 @@
 package com.ayin90723.adventure_power.ability;
 
 import com.ayin90723.adventure_power.config.ModConfig;
-import net.minecraft.network.chat.Component;
 
 /**
  * 鸿运当头 — 提升时运和抢夺等级。
@@ -18,16 +17,6 @@ public class FortuneFavorAbility extends StepGrowthAbility {
     @Override
     public String id() {
         return "fortune_favor";
-    }
-
-    @Override
-    public Component name() {
-        return Component.translatable("ability.adventure_power.fortune_favor");
-    }
-
-    @Override
-    public Component description() {
-        return Component.translatable("ability.adventure_power.fortune_favor.desc");
     }
 
     @Override

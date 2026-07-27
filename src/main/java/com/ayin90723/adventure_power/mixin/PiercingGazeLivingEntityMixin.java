@@ -81,15 +81,18 @@ public abstract class PiercingGazeLivingEntityMixin {
     /** redirect 取 max 后的有效伤害量，供情况 C 补 actuallyHurt 时使用 */
     private static final ThreadLocal<Float> PIERCING_EFFECTIVE_AMOUNT = new ThreadLocal<>();
 
+    /** 递归调用栈帧：保存外层 (inPiercing, eventPosted, effectiveAmount) 三态，effectiveAmount 可为 null */
+    private record PiercingStackFrame(boolean inPiercing, boolean eventPosted, Float effectiveAmount) {}
+
     /** 递归调用栈：保存外层 (IN_PIERCING, POSTED, AMOUNT) 三态，hurt HEAD 压栈、RETURN 弹栈 */
-    private static final ThreadLocal<Deque<Object[]>> PIERCING_STACK = ThreadLocal.withInitial(ArrayDeque::new);
+    private static final ThreadLocal<Deque<PiercingStackFrame>> PIERCING_STACK = ThreadLocal.withInitial(ArrayDeque::new);
 
     @Inject(method = "m_6469_", at = @At("HEAD"))
     private void onHurtEnter(DamageSource source, float amount, CallbackInfoReturnable<Boolean> cir) {
         // 压栈保存外层状态，重置本层（递归 hurt 不污染外层）
-        PIERCING_STACK.get().push(new Object[]{
+        PIERCING_STACK.get().push(new PiercingStackFrame(
             IN_PIERCING.get(), PIERCING_EVENT_POSTED.get(), PIERCING_EFFECTIVE_AMOUNT.get()
-        });
+        ));
         IN_PIERCING.set(false);
         PIERCING_EVENT_POSTED.set(false);
         PIERCING_EFFECTIVE_AMOUNT.remove();
@@ -131,9 +134,9 @@ public abstract class PiercingGazeLivingEntityMixin {
             // 风暴守卫：外层已在破敌之眼穿透内（栈顶 IN_PIERCING=true）-> 本层是递归 hurt，跳过穿透逻辑防风暴。
             // redirect 已不 post 事件；此处跳过补 post / actuallyHurt / 血量检测 / 清无敌，
             // 否则情况 A 补 post 会再次触发监听器递归
-            Deque<Object[]> stackCheck = PIERCING_STACK.get();
-            Object[] outerCheck = stackCheck.peek();
-            if (outerCheck != null && (Boolean) outerCheck[0]) {
+            Deque<PiercingStackFrame> stackCheck = PIERCING_STACK.get();
+            PiercingStackFrame outerCheck = stackCheck.peek();
+            if (outerCheck != null && outerCheck.inPiercing()) {
                 return;
             }
 
@@ -182,14 +185,13 @@ public abstract class PiercingGazeLivingEntityMixin {
             }
         } finally {
             // 弹栈恢复外层状态（递归 hurt 不污染外层）
-            Deque<Object[]> stack = PIERCING_STACK.get();
-            Object[] outer = stack.poll();
+            Deque<PiercingStackFrame> stack = PIERCING_STACK.get();
+            PiercingStackFrame outer = stack.poll();
             if (outer != null) {
-                IN_PIERCING.set((Boolean) outer[0]);
-                PIERCING_EVENT_POSTED.set((Boolean) outer[1]);
-                Float outerAmt = (Float) outer[2];
-                if (outerAmt != null) {
-                    PIERCING_EFFECTIVE_AMOUNT.set(outerAmt);
+                IN_PIERCING.set(outer.inPiercing());
+                PIERCING_EVENT_POSTED.set(outer.eventPosted());
+                if (outer.effectiveAmount() != null) {
+                    PIERCING_EFFECTIVE_AMOUNT.set(outer.effectiveAmount());
                 } else {
                     PIERCING_EFFECTIVE_AMOUNT.remove();
                 }
@@ -243,9 +245,9 @@ public abstract class PiercingGazeLivingEntityMixin {
         // 风暴守卫：外层已在破敌之眼穿透内（栈顶 IN_PIERCING=true）-> 不 post 事件，直接返回原 amount。
         // 走原版 ForgeHooks.onLivingHurt 仍会 post 事件触发监听器导致递归，无法防风暴；
         // 返回 amount 跳过 post，递归 hurt 不触发 LivingHurtEvent 监听器，打破递归链
-        Deque<Object[]> stack = PIERCING_STACK.get();
-        Object[] outer = stack.peek();
-        if (outer != null && (Boolean) outer[0]) {
+        Deque<PiercingStackFrame> stack = PIERCING_STACK.get();
+        PiercingStackFrame outer = stack.peek();
+        if (outer != null && outer.inPiercing()) {
             return amount;
         }
 

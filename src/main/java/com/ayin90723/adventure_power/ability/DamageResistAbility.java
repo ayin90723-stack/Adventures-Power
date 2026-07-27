@@ -1,15 +1,14 @@
 package com.ayin90723.adventure_power.ability;
 
 import com.ayin90723.adventure_power.config.ModConfig;
-import net.minecraft.network.chat.Component;
 
 /**
- * 伤害抗性 — 减少所受伤害百分比。
+ * 伤害抗性 - 减少所受伤害百分比。
  * 解锁条件：4 里程碑
  * 成长公式：base + per_milestone × (count - required)
- * 默认范围：10% → 40%
+ * 默认范围：10% -> 40%
  */
-public class DamageResistAbility extends AbstractAbility {
+public class DamageResistAbility extends LinearGrowthAbility {
 
     public DamageResistAbility() {
         super(4);
@@ -21,21 +20,18 @@ public class DamageResistAbility extends AbstractAbility {
     }
 
     @Override
-    public Component name() {
-        return Component.translatable("ability.adventure_power.damage_resist");
+    protected float base() {
+        return ModConfig.DAMAGE_RESIST_BASE.get();
     }
 
     @Override
-    public Component description() {
-        return Component.translatable("ability.adventure_power.damage_resist.desc");
+    protected float perMilestone() {
+        return ModConfig.DAMAGE_RESIST_PER_MILESTONE.get();
     }
 
-    /**
-     * 返回伤害减免百分比。从配置读取 base + per_milestone × (count - required)，
-     * 最低为 0（防止负值）。
-     */
+    /** 最低 0 防负值（防御性：countAtUnlock 未设置或数据包异常时） */
     @Override
     public float value(int count) {
-        return Math.max(0, ModConfig.DAMAGE_RESIST_BASE.get() + ModConfig.DAMAGE_RESIST_PER_MILESTONE.get() * (count - countAtUnlock));
+        return Math.max(0, super.value(count));
     }
 }

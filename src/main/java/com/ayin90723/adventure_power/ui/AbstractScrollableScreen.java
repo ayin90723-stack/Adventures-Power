@@ -50,6 +50,8 @@ public abstract class AbstractScrollableScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollDelta) {
+        // 无内容可滚动时返回 false，交父类处理，避免吞掉子容器滚动事件
+        if (maxScroll() <= 0) return false;
         scrollOffset -= (int) (scrollDelta * rowHeight());
         clampScroll();
         return true;

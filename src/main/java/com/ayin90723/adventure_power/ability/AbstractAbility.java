@@ -1,5 +1,7 @@
 package com.ayin90723.adventure_power.ability;
 
+import net.minecraft.network.chat.Component;
+
 /**
  * 能力基类 - 封装 {@code countAtUnlock} 字段与 {@code setCountAtUnlock} 样板。
  * <p>
@@ -24,6 +26,18 @@ public abstract class AbstractAbility implements Ability {
     @Override
     public void setCountAtUnlock(int n) {
         this.countAtUnlock = n;
+    }
+
+    /** 默认基于 id() 拼翻译键 ability.adventure_power.<id>，子类可覆写自定义 */
+    @Override
+    public Component name() {
+        return Component.translatable("ability.adventure_power." + id());
+    }
+
+    /** 默认基于 id() 拼翻译键 ability.adventure_power.<id>.desc，子类可覆写自定义 */
+    @Override
+    public Component description() {
+        return Component.translatable("ability.adventure_power." + id() + ".desc");
     }
 
     @Override

@@ -1,6 +1,5 @@
 package com.ayin90723.adventure_power.ability;
 
-import net.minecraft.network.chat.Component;
 
 /**
  * 不朽装备 — 装备不会消耗耐久。
@@ -18,13 +17,4 @@ public class UndyingGearAbility extends AbstractAbility {
         return "undying_gear";
     }
 
-    @Override
-    public Component name() {
-        return Component.translatable("ability.adventure_power.undying_gear");
-    }
-
-    @Override
-    public Component description() {
-        return Component.translatable("ability.adventure_power.undying_gear.desc");
-    }
 }

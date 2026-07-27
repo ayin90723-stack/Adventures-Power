@@ -4,6 +4,7 @@ import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.AbilityGate;
 import net.minecraft.world.entity.ai.attributes.Attributes;
@@ -14,7 +15,7 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
 /**
- * 不动如山能力处理器 — 管理原版击退抗性属性值。
+ * 不动如山能力处理器 - 管理原版击退抗性属性值。
  * <p>
  * 不动如山直接操作 {@link Attributes#KNOCKBACK_RESISTANCE} 属性，
  * 不自行拦截击退计算，与其他模组的击退修改保持兼容。
@@ -26,46 +27,26 @@ import net.minecraftforge.fml.common.Mod;
 public class KnockbackResistHandler {
 
     /**
-     * 每 tick 检查：不动如山能力启用 → 设置击退抗性属性；
-     * 能力禁用 → 重置为 0。仅在值发生变化时写入，避免无效操作。
+     * 每 tick 检查：统一计算期望击退抗性值，仅在当前值不一致时写入。
+     * 覆盖启用/禁用/里程碑变化三种情况，避免三路分支重复代码。
      */
-    @SubscribeEvent
-    public static void onPlayerTick(TickEvent.PlayerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END) return;
-        Player player = event.player;
-        if (player.level().isClientSide()) return;
-
-        var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
-        if (progressOpt.isEmpty()) return;
-        var progress = progressOpt.get();
-
-        if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
-
+    /** 门禁后业务（由 PlayerTickDispatcher 调用）：不动如山击退抗性属性同步 */
+    public static void onTick(Player player, IAdventureProgress progress) {
         boolean shouldHave = progress.isAbilityEnabled("knockback_resist");
         var attr = player.getAttribute(Attributes.KNOCKBACK_RESISTANCE);
         if (attr == null) return;
 
         double currentVal = attr.getBaseValue();
-        boolean hasKBResist = currentVal > 0.001;
-
-        if (shouldHave && !hasKBResist) {
+        double expected = 0.0;
+        if (shouldHave) {
             Ability ability = AbilityRegistry.get("knockback_resist");
             if (ability != null) {
                 float percent = AbilityGate.awakenedPercent(ability, progress.getUnlockedMilestoneCount(), progress.isFullyUnlocked(), ModConfig.KNOCKBACK_RESIST_HARD_CAP.get().floatValue());
-                attr.setBaseValue(percent / 100.0);
+                expected = percent / 100.0;
             }
-        } else if (!shouldHave && hasKBResist) {
-            attr.setBaseValue(0.0);
-        } else if (shouldHave && hasKBResist) {
-            // 能力启用中，检查里程碑是否变化 → 更新值
-            Ability ability = AbilityRegistry.get("knockback_resist");
-            if (ability != null) {
-                float percent = AbilityGate.awakenedPercent(ability, progress.getUnlockedMilestoneCount(), progress.isFullyUnlocked(), ModConfig.KNOCKBACK_RESIST_HARD_CAP.get().floatValue());
-                float expected = percent / 100.0f;
-                if (Math.abs(currentVal - expected) > 0.001) {
-                    attr.setBaseValue(expected);
-                }
-            }
+        }
+        if (Math.abs(currentVal - expected) > 0.001) {
+            attr.setBaseValue(expected);
         }
     }
 

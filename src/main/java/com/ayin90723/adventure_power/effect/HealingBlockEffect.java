@@ -1,6 +1,7 @@
 package com.ayin90723.adventure_power.effect;
 
 import com.ayin90723.adventure_power.AdventurePower;
+import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import com.ayin90723.adventure_power.util.PersistentDataKeys;
 import net.minecraft.nbt.CompoundTag;
@@ -43,9 +44,6 @@ public class HealingBlockEffect extends MobEffect {
    /** 跨维度传送宽限期：记录实体连续未在维度中找到的 tick 数，防止传送时误清理 */
    private static final Map<UUID, Integer> MISSING_TICKS = new ConcurrentHashMap<>();
 
-   // TODO: 临时字段，后续改为从配置系统读取
-   private static final boolean ALLOW_BOSS_PHASE_TWO = true;
-
    public HealingBlockEffect() {
       super(MobEffectCategory.HARMFUL, 0x8B0000); // 暗红色
    }
@@ -76,7 +74,7 @@ public class HealingBlockEffect extends MobEffect {
       long endTime = target.level().getGameTime() + durationTicks;
       target.getPersistentData().putLong(NBT_KEY, endTime);
       // 记录施加时的血量，用于后续拦截 setHealth() 直写回血
-      TRACKED_HEALTH.put(target.getUUID(), target.getHealth());
+      TRACKED_HEALTH.put(target.getUUID(), HealthUtil.getHealthDirect(target));
       // 同时施加 MobEffect 作为视觉指示器
       MobEffect visualEffect = ModEffects.UNDYING_SLASH.get();
       if (visualEffect != null) {
@@ -96,7 +94,7 @@ public class HealingBlockEffect extends MobEffect {
 
    /** 检查是否应允许二阶段（Boss 实体 + 配置启用） */
    private static boolean shouldAllowPhaseTwo(LivingEntity entity) {
-      if (!ALLOW_BOSS_PHASE_TWO) {
+      if (!ModConfig.HEALING_BLOCK_ALLOW_BOSS_PHASE_TWO.get()) {
          return false;
       }
       return entity instanceof WitherBoss || entity instanceof EnderDragon;
@@ -112,27 +110,15 @@ public class HealingBlockEffect extends MobEffect {
          }
       }
 
-      /** 每 tick 检查：拦截绕过 LivingHealEvent 的 setHealth() 直写回血 */
+      /** 每 tick 检查：过期清理追踪记录（钳制由 HealingBlockMixin.onTickTailClamp 在 tick 末尾负责） */
       @SubscribeEvent
       public static void onLivingTick(LivingTickEvent event) {
          LivingEntity entity = event.getEntity();
          if (entity.level().isClientSide()) return;
-
-         UUID uuid = entity.getUUID();
-         if (isActive(entity)) {
-            Float tracked = TRACKED_HEALTH.get(uuid);
-            if (tracked != null && entity.getHealth() > tracked) {
-               // 血量异常增长（可能被其他 mod 的 setHealth() 直写），钳制回记录值
-               // 使用 setAllHealthLikeRaw 直写 DataItem.value 字段，
-               // 绕过 SynchedEntityData.set() 的 dirty 标记/监听器/Mixin 注入
-               HealthUtil.setAllHealthLikeRaw(entity, tracked);
-            }
-            // 更新记录值（允许血量下降，但禁止上升）
-            TRACKED_HEALTH.put(uuid, Math.min(entity.getHealth(), tracked != null ? tracked : entity.getHealth()));
-         } else {
+         if (!isActive(entity)) {
             // 效果已过期，清理追踪记录与宽限期
-            TRACKED_HEALTH.remove(uuid);
-            MISSING_TICKS.remove(uuid);
+            TRACKED_HEALTH.remove(entity.getUUID());
+            MISSING_TICKS.remove(entity.getUUID());
          }
       }
 
@@ -180,9 +166,10 @@ public class HealingBlockEffect extends MobEffect {
                   found.add(uuid);
                   Float tracked = TRACKED_HEALTH.get(uuid);
                   if (tracked != null) {
-                     float current = living.getHealth();
+                     float current = HealthUtil.getHealthDirect(living);
                      if (current > tracked) {
                         HealthUtil.setAllHealthLikeRaw(living, tracked);
+                        current = tracked;
                      }
                      TRACKED_HEALTH.put(uuid, Math.min(current, tracked));
                   }

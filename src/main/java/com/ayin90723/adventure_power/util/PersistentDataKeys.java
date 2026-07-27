@@ -20,6 +20,9 @@ public final class PersistentDataKeys {
     /** 首次发放冒险的开始标记，防止重复发放（boolean） */
     public static final String GOT_BEGIN_KEY = "MME_GotAdventureBegin";
 
+    /** 开局安全网已执行标记（boolean）：PlayerTickHandler 首次 tick 补发+激活后置 true */
+    public static final String VERIFIED_BEGIN_ITEM_KEY = "MME_VerifiedBeginItem";
+
     /** 旧版永久解锁标记（v1.0 遗留），登录时迁移后清除（boolean） */
     public static final String OLD_UNLOCKED_KEY = "MME_AdventureUnlocked";
 

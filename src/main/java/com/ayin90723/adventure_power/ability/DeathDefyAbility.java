@@ -1,7 +1,6 @@
 package com.ayin90723.adventure_power.ability;
 
 import com.ayin90723.adventure_power.config.ModConfig;
-import net.minecraft.network.chat.Component;
 
 /**
  * 死亡抗拒 — 致命伤害触发无敌并回血。
@@ -17,16 +16,6 @@ public class DeathDefyAbility extends AbstractAbility {
     @Override
     public String id() {
         return "death_defy";
-    }
-
-    @Override
-    public Component name() {
-        return Component.translatable("ability.adventure_power.death_defy");
-    }
-
-    @Override
-    public Component description() {
-        return Component.translatable("ability.adventure_power.death_defy.desc");
     }
 
     /**

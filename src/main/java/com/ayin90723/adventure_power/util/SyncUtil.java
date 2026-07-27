@@ -38,38 +38,53 @@ public final class SyncUtil {
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
             CompoundTag syncData = progress.serializeNBT();
             // 附带里程碑注册表元数据给客户端（用于 tooltip 渲染 + 能力可用性判断）
-            List<Milestone> all = MilestoneRegistry.getAll();
-            CompoundTag registryMeta = new CompoundTag();
-            registryMeta.putInt("count", all.size());
-            for (int i = 0; i < all.size(); i++) {
-                Milestone m = all.get(i);
-                CompoundTag mTag = new CompoundTag();
-                mTag.putString("id", m.id());
-                mTag.putString("name", m.name());
-                // 传递 abilities 列表，让客户端能正确判断能力可用性
-                CompoundTag abilitiesTag = new CompoundTag();
-                List<String> abilityList = m.abilities();
-                for (int j = 0; j < abilityList.size(); j++) {
-                    abilitiesTag.putString("a_" + j, abilityList.get(j));
-                }
-                abilitiesTag.putInt("count", abilityList.size());
-                mTag.put("abilities", abilitiesTag);
-                // 传递 advancement 和 trigger，供客户端 UI 显示解锁条件
-                if (m.advancement() != null) mTag.putString("advancement", m.advancement().toString());
-                if (m.trigger() != null) {
-                    CompoundTag trigTag = new CompoundTag();
-                    trigTag.putString("type", m.trigger().type());
-                    if (m.trigger().y() != null) trigTag.putInt("y", m.trigger().y());
-                    if (m.trigger().entity() != null) trigTag.putString("entity", m.trigger().entity().toString());
-                    mTag.put("trigger", trigTag);
-                }
-                registryMeta.put("m_" + i, mTag);
-            }
-            syncData.put("_milestone_registry", registryMeta);
+            syncData.put("_milestone_registry", getRegistryMeta());
             NetworkHandler.INSTANCE.send(
                 PacketDistributor.PLAYER.with(() -> sp),
                 new NetworkHandler.AdventureSyncPacket(syncData)
             );
         });
+    }
+
+    /** 里程碑注册表元数据缓存版本（与 MilestoneRegistry.version 对应，变化时重建） */
+    private static int cachedRegistryVersion = -1;
+    private static CompoundTag cachedRegistryMeta;
+
+    /** 里程碑注册表元数据（按 version 缓存，/reload 或客户端同步后惰性重建） */
+    private static CompoundTag getRegistryMeta() {
+        int version = MilestoneRegistry.getVersion();
+        if (cachedRegistryMeta != null && cachedRegistryVersion == version) {
+            return cachedRegistryMeta.copy();
+        }
+        cachedRegistryVersion = version;
+        List<Milestone> all = MilestoneRegistry.getAll();
+        CompoundTag registryMeta = new CompoundTag();
+        registryMeta.putInt("count", all.size());
+        for (int i = 0; i < all.size(); i++) {
+            Milestone m = all.get(i);
+            CompoundTag mTag = new CompoundTag();
+            mTag.putString("id", m.id());
+            mTag.putString("name", m.name());
+            // 传递 abilities 列表，让客户端能正确判断能力可用性
+            CompoundTag abilitiesTag = new CompoundTag();
+            List<String> abilityList = m.abilities();
+            for (int j = 0; j < abilityList.size(); j++) {
+                abilitiesTag.putString("a_" + j, abilityList.get(j));
+            }
+            abilitiesTag.putInt("count", abilityList.size());
+            mTag.put("abilities", abilitiesTag);
+            // 传递 advancement 和 trigger，供客户端 UI 显示解锁条件
+            if (m.advancement() != null) mTag.putString("advancement", m.advancement().toString());
+            if (m.trigger() != null) {
+                CompoundTag trigTag = new CompoundTag();
+                trigTag.putString("type", m.trigger().type());
+                if (m.trigger().y() != null) trigTag.putInt("y", m.trigger().y());
+                if (m.trigger().entity() != null) trigTag.putString("entity", m.trigger().entity().toString());
+                mTag.put("trigger", trigTag);
+            }
+            registryMeta.put("m_" + i, mTag);
+        }
+        cachedRegistryMeta = registryMeta;
+        return registryMeta.copy();
     }
 }

@@ -44,11 +44,11 @@ import java.util.Collection;
 @Mod.EventBusSubscriber(modid = AdventurePower.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class LootAllHandler {
 
-    /** 满载而归额外滚取期间为 true，供 canRun / addRandomItems Mixin 识别 */
-    public static final ThreadLocal<Boolean> BYPASS = ThreadLocal.withInitial(() -> Boolean.FALSE);
+    /** 满载而归额外滚取期间 >0（计数器，支持嵌套），供 canRun / addRandomItems Mixin 识别 */
+    public static final ThreadLocal<Integer> BYPASS = ThreadLocal.withInitial(() -> 0);
 
-    /** 觉醒取最大数量期间为 true，供 LootContextBuilderMixin 识别 */
-    public static final ThreadLocal<Boolean> AWAKEN = ThreadLocal.withInitial(() -> Boolean.FALSE);
+    /** 觉醒取最大数量期间 >0（计数器），供 LootContextBuilderMixin 识别 */
+    public static final ThreadLocal<Integer> AWAKEN = ThreadLocal.withInitial(() -> 0);
 
     @SubscribeEvent
     public static void onLivingDrops(LivingDropsEvent event) {
@@ -94,12 +94,12 @@ public class LootAllHandler {
         Vec3 pos = entity.position();
         // 保存-恢复前值：防止 getRandomItems 内部触发嵌套 LivingDropsEvent 时，
         // 内层 finally 清掉外层标志位，导致外层剩余 copies 轮次失效
-        boolean prevBypass = BYPASS.get();
-        boolean prevAwaken = AWAKEN.get();
+        int prevBypass = BYPASS.get();
+        int prevAwaken = AWAKEN.get();
         int maxItems = ModConfig.LOOT_ALL_MAX_ITEMS.get();
         int generated = 0;
-        BYPASS.set(true);
-        AWAKEN.set(awakened);
+        BYPASS.set(prevBypass + 1);
+        AWAKEN.set(prevAwaken + (awakened ? 1 : 0));
         try {
             lootLoop:
             for (int i = 0; i < copies; i++) {

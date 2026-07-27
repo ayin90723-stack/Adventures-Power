@@ -36,6 +36,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>
  * 独立工具类（非 Mixin），可被 {@code PiercingGazeLivingEntityMixin} 共用。
  *
+ *
+ * <h3>已知限制</h3>
+ * 字段名模式匹配可能误命中含 "vulnerable" 子串的非无敌字段（如
+ * {@code isVulnerableToWater}），将其置 true。误匹配场景罕见且影响有限，
+ * 精确修复需为每个模组建黑名单，暂以启发式接受。
+ *
  * @see com.ayin90723.adventure_power.mixin.PiercingGazeLivingEntityMixin
  * @see HealthUtil#CUSTOM_HEALTH_KEYS_CACHE
  */

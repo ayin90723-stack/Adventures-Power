@@ -31,6 +31,8 @@ public interface IAdventureProgress {
 
     Set<String> getDisabledAbilities();
     default boolean isAbilityEnabled(String id) { return !getDisabledAbilities().contains(id); }
+    /** 该能力是否属于某已解锁里程碑（仅里程碑归属，不检查手动开关） */
+    boolean isAbilityUnlocked(String id);
     boolean toggleAbility(String id);
 
     // ===== 死亡抗拒 =====

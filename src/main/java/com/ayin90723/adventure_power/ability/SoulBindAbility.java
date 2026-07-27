@@ -1,6 +1,5 @@
 package com.ayin90723.adventure_power.ability;
 
-import net.minecraft.network.chat.Component;
 
 /**
  * 灵魂绑定 — 死亡不掉落物品。
@@ -18,13 +17,4 @@ public class SoulBindAbility extends AbstractAbility {
         return "soul_bind";
     }
 
-    @Override
-    public Component name() {
-        return Component.translatable("ability.adventure_power.soul_bind");
-    }
-
-    @Override
-    public Component description() {
-        return Component.translatable("ability.adventure_power.soul_bind.desc");
-    }
 }

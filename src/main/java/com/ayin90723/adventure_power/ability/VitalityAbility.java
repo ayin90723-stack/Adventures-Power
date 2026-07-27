@@ -1,7 +1,6 @@
 package com.ayin90723.adventure_power.ability;
 
 import com.ayin90723.adventure_power.config.ModConfig;
-import net.minecraft.network.chat.Component;
 
 /**
  * 坚韧之躯 — 提高最大生命值。
@@ -18,16 +17,6 @@ public class VitalityAbility extends LinearGrowthAbility {
     @Override
     public String id() {
         return "vitality";
-    }
-
-    @Override
-    public Component name() {
-        return Component.translatable("ability.adventure_power.vitality");
-    }
-
-    @Override
-    public Component description() {
-        return Component.translatable("ability.adventure_power.vitality.desc");
     }
 
     @Override

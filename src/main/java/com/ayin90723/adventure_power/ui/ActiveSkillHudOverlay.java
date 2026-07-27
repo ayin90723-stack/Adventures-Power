@@ -1,6 +1,6 @@
 package com.ayin90723.adventure_power.ui;
 
-import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.ui.ClientHudDataCache;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
@@ -34,18 +34,13 @@ public class ActiveSkillHudOverlay {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return;
 
-        var progressOpt = mc.player.getCapability(AdventureProgressCapability.CAPABILITY).resolve();
-        if (progressOpt.isEmpty()) return;
-        var progress = progressOpt.get();
+        if (!ClientHudDataCache.activeSkillReady) return;
 
-        if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
-        if (!progress.isAbilityEnabled("active_skill")) return;
-
-        long currentTime = mc.level.getGameTime();
+        long currentTime = ClientHudDataCache.currentGameTime;
         // 非切换后 3 秒内且无技能冷却中 → 不显示
         boolean recentSwitch = (currentTime - lastSwitchTime) < SWITCH_DISPLAY_TICKS;
-        long judgmentCd = progress.getJudgmentCooldownEnd();
-        long sanctuaryCd = progress.getSanctuaryCooldownEnd();
+        long judgmentCd = ClientHudDataCache.judgmentCdEnd;
+        long sanctuaryCd = ClientHudDataCache.sanctuaryCdEnd;
         boolean anyCooldown = (judgmentCd > 0 && currentTime < judgmentCd)
                             || (sanctuaryCd > 0 && currentTime < sanctuaryCd);
         if (!recentSwitch && !anyCooldown) return;
@@ -57,12 +52,12 @@ public class ActiveSkillHudOverlay {
         // 审判行
         renderSkillRow(graphics, mc, x, y,
             Component.translatable("skill.adventure_power.judgment"),
-            judgmentCd, currentTime, progress.getActiveSkillIndex() == 0);
+            judgmentCd, currentTime, ClientHudDataCache.activeSkillIndex == 0);
 
         // 庇护行
         renderSkillRow(graphics, mc, x, y + 14,
             Component.translatable("skill.adventure_power.sanctuary"),
-            sanctuaryCd, currentTime, progress.getActiveSkillIndex() == 1);
+            sanctuaryCd, currentTime, ClientHudDataCache.activeSkillIndex == 1);
     }
 
     private static void renderSkillRow(GuiGraphics graphics, Minecraft mc, int x, int y,

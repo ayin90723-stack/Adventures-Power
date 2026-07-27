@@ -1,6 +1,5 @@
 package com.ayin90723.adventure_power.ability;
 
-import net.minecraft.network.chat.Component;
 
 /**
  * 破敌之眼 — 攻击无视目标护甲和抗性。
@@ -18,13 +17,4 @@ public class PiercingGazeAbility extends AbstractAbility {
         return "piercing_gaze";
     }
 
-    @Override
-    public Component name() {
-        return Component.translatable("ability.adventure_power.piercing_gaze");
-    }
-
-    @Override
-    public Component description() {
-        return Component.translatable("ability.adventure_power.piercing_gaze.desc");
-    }
 }

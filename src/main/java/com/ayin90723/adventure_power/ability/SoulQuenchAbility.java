@@ -1,7 +1,6 @@
 package com.ayin90723.adventure_power.ability;
 
 import com.ayin90723.adventure_power.config.ModConfig;
-import net.minecraft.network.chat.Component;
 
 /**
  * 淬魂之力 — 真实百分比伤害，绕过护甲/抗性。
@@ -17,16 +16,6 @@ public class SoulQuenchAbility extends AbstractAbility {
     @Override
     public String id() {
         return "soul_quench";
-    }
-
-    @Override
-    public Component name() {
-        return Component.translatable("ability.adventure_power.soul_quench");
-    }
-
-    @Override
-    public Component description() {
-        return Component.translatable("ability.adventure_power.soul_quench.desc");
     }
 
     /** 固定伤害，从配置读取。countAtUnlock+1 起为第二档。 */

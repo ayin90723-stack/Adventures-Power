@@ -1,6 +1,5 @@
 package com.ayin90723.adventure_power.ability;
 
-import net.minecraft.network.chat.Component;
 
 /**
  * 满载而归 - 击杀生物后，在原版掉落基础上额外按掉落表"每样一份"追加掉落。
@@ -31,13 +30,4 @@ public class LootAllAbility extends AbstractAbility {
         return "loot_all";
     }
 
-    @Override
-    public Component name() {
-        return Component.translatable("ability.adventure_power.loot_all");
-    }
-
-    @Override
-    public Component description() {
-        return Component.translatable("ability.adventure_power.loot_all.desc");
-    }
 }

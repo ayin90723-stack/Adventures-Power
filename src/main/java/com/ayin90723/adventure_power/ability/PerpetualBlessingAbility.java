@@ -1,6 +1,5 @@
 package com.ayin90723.adventure_power.ability;
 
-import net.minecraft.network.chat.Component;
 
 /**
  * 恩赐永驻 - 正面药水效果低于保底阈值时自动续期，Buff 永不自然耗尽。
@@ -18,13 +17,4 @@ public class PerpetualBlessingAbility extends AbstractAbility {
         return "perpetual_blessing";
     }
 
-    @Override
-    public Component name() {
-        return Component.translatable("ability.adventure_power.perpetual_blessing");
-    }
-
-    @Override
-    public Component description() {
-        return Component.translatable("ability.adventure_power.perpetual_blessing.desc");
-    }
 }

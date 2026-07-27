@@ -3,9 +3,14 @@ package com.ayin90723.adventure_power.handler;
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.PersistentDataKeys;
+import com.ayin90723.adventure_power.util.RejectHealthManipUtil;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -14,6 +19,7 @@ import net.minecraft.network.protocol.game.ClientboundSetExperiencePacket;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectCategory;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
@@ -64,6 +70,9 @@ public class PlayerStateHandler {
         UUID.fromString("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
     private static final UUID AWAKEN_UNDYING_WEAPON_UUID =
         UUID.fromString("b2c3d4e5-f6a7-8901-bcde-f12345678901");
+
+    /** 庇护激活前的原始移动速度（恢复时还原，不覆盖其他模组修改） */
+    private static final Map<UUID, Double> ORIGINAL_MOVE_SPEED = new HashMap<>();
 
     // ========================================================================
     //  1. 灵魂绑定 (SoulBind) — 死亡保 Buff + 经验
@@ -157,9 +166,10 @@ public class PlayerStateHandler {
                 }
             }
         } else {
-            // 非死亡 clone（维度切换）：无需转移 soul_bind 数据。
-            // SOUL_BIND_*_KEY 仅在死亡时写入并由死亡分支消费 + remove，维度切换时 original 不持有这些 key；
-            // 经验由原版 restoreFrom 复制，buff 由原版保留，灵魂绑定不干预维度切换。
+            // 非死亡 clone（维度切换）：防御性清理 original 残留的 soul_bind key
+            // （死亡写入但未消费，如被其他模组取消死亡事件后走维度切换）
+            original.getPersistentData().remove(SOUL_BIND_BUFFS_KEY);
+            original.getPersistentData().remove(SOUL_BIND_EXP_KEY);
         }
 
         // 转移 Buff 黑名单 + 首次发放标记：Forge Clone 仅自动复制 "PlayerPersisted" 子 key，
@@ -172,6 +182,10 @@ public class PlayerStateHandler {
         if (origPersistData.contains(PersistentDataKeys.GOT_BEGIN_KEY)) {
             player.getPersistentData().putBoolean(PersistentDataKeys.GOT_BEGIN_KEY,
                 origPersistData.getBoolean(PersistentDataKeys.GOT_BEGIN_KEY));
+        }
+        if (origPersistData.contains(PersistentDataKeys.VERIFIED_BEGIN_ITEM_KEY)) {
+            player.getPersistentData().putBoolean(PersistentDataKeys.VERIFIED_BEGIN_ITEM_KEY,
+                origPersistData.getBoolean(PersistentDataKeys.VERIFIED_BEGIN_ITEM_KEY));
         }
 
         // 维度切换后恢复翱翔飞行能力（mayfly 被重置）
@@ -186,6 +200,10 @@ public class PlayerStateHandler {
     @SubscribeEvent
     public static void onPlayerLogout(net.minecraftforge.event.entity.player.PlayerEvent.PlayerLoggedOutEvent event) {
         removeUndyingGearAwakened(event.getEntity());
+        // 清理 ATTR_OWNER 中该玩家条目：玩家登出不触发 setRemoved，
+        // 否则 value 强引用会阻止 ServerPlayer 被 GC（内存泄漏）
+        RejectHealthManipUtil.clearOwner(event.getEntity());
+        // 不清理 ORIGINAL_MOVE_SPEED：庇护期间登出后,重登时 onTick 的 else 分支需 remove 恢复原始速度
     }
 
     /** 游戏模式切换后恢复翱翔飞行能力（原版会在切回生存时重置 mayfly）。
@@ -203,6 +221,10 @@ public class PlayerStateHandler {
             && !player.getAbilities().instabuild && !player.isSpectator()) {
             player.getAbilities().mayfly = true;
             progress.setSoarGrantedFlight(true);
+            // 创造飞行中退回生存：自动开启 flying 防坠落（地面保留双击空格触发）
+            if (!player.onGround() && !player.getAbilities().flying) {
+                player.getAbilities().flying = true;
+            }
             player.onUpdateAbilities();
         }
     }
@@ -227,6 +249,29 @@ public class PlayerStateHandler {
                 }
             }
         });
+    }
+
+    /**
+     * 翱翔能力开关时立即同步 mayfly 状态（由 AbilityTogglePacket 调用，不等下一 tick）。
+     * 业务逻辑从网络层抽出至此，保持网络包只做转发。
+     * @param enabled true=启用翱翔（授 mayfly），false=禁用（回收 mayfly）
+     */
+    public static void applySoarState(Player player, boolean enabled) {
+        if (player.level().isClientSide()) return;
+        if (enabled) {
+            if (!player.getAbilities().mayfly && !player.getAbilities().instabuild
+                && !player.isSpectator()) {
+                player.getAbilities().mayfly = true;
+                player.onUpdateAbilities();
+            }
+        } else {
+            if (player.getAbilities().mayfly && !player.getAbilities().instabuild
+                && !player.isSpectator()) {
+                player.getAbilities().mayfly = false;
+                player.getAbilities().flying = false;
+                player.onUpdateAbilities();
+            }
+        }
     }
 
     // ========================================================================
@@ -311,7 +356,7 @@ public class PlayerStateHandler {
     // ========================================================================
 
     /**
-     * 净魂通过 {@link #onPlayerTick} 中每 tick 清除残留负面效果实现。
+     * 净魂通过 {@link #onTick} 中每 tick 清除残留负面效果实现。
      * <p>
      * 不再使用 {@code MobEffectEvent.Applicable}——该事件在 Forge 1.20.1 中不可取消，
      * RevelationFix 等模组的 Mixin 会对其 {@code setCanceled()} 抛出
@@ -331,29 +376,27 @@ public class PlayerStateHandler {
      * </ul>
      * <p>
      * 受击坚韧的 tick 逻辑（超时归零）已在
-     * {@link PlayerTickHandler#onPlayerTick} 中处理，此处不重复。
+     * {@link PlayerTickHandler#onTick} 中处理，此处不重复。
      */
-    @SubscribeEvent
-    public static void onPlayerTick(TickEvent.PlayerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END) return;
-        Player player = event.player;
-        if (player.level().isClientSide()) return;
-
-        var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
-        if (progressOpt.isEmpty()) return;
-        var progress = progressOpt.get();
-
-        // 门禁：至少需要 adventurer 状态
-        boolean isGateOpen = progress.isAdventurer() || progress.isFullyUnlocked();
-        if (!isGateOpen) return;
+    /** 门禁后业务（由 PlayerTickDispatcher 调用）：净魂 / 翱翔 / 不朽装备觉醒 / 庇护移动速度 */
+    public static void onTick(Player player, IAdventureProgress progress) {
 
         // ---- 净魂兜底 + 觉醒虚弱光环 ----
         if (progress.isAbilityEnabled("purified_soul")) {
-            player.getActiveEffects().stream()
-                .filter(e -> e.getEffect().getCategory() == MobEffectCategory.HARMFUL)
-                .map(MobEffectInstance::getEffect)
-                .toList()
-                .forEach(player::removeEffect);
+            // 先快速判断有无有害效果，无则跳过（大多数 tick 玩家无负面效果），
+            // 有则收集到独立 list 再 remove（避免遍历 activeEffects 视图时修改触发 CME）
+            List<MobEffect> toRemove = null;
+            for (MobEffectInstance e : player.getActiveEffects()) {
+                if (e.getEffect().getCategory() == MobEffectCategory.HARMFUL) {
+                    if (toRemove == null) toRemove = new ArrayList<>();
+                    toRemove.add(e.getEffect());
+                }
+            }
+            if (toRemove != null) {
+                for (MobEffect effect : toRemove) {
+                    player.removeEffect(effect);
+                }
+            }
 
             // 觉醒：周期性给周围敌对生物施加虚弱II
             if (progress.isFullyUnlocked()
@@ -421,14 +464,14 @@ public class PlayerStateHandler {
                 ? 0.1 * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SANCTUARY_SPEED.get()
                 : 0.0;
             if (Math.abs(sanctuarySpeedAttr.getBaseValue() - target) > 0.001) {
+                // 首次激活：记录原始移动速度（恢复时还原，不覆盖其他模组修改）
+                ORIGINAL_MOVE_SPEED.putIfAbsent(player.getUUID(), sanctuarySpeedAttr.getBaseValue());
                 sanctuarySpeedAttr.setBaseValue(target);
             }
         } else if (!inSanctuary && sanctuarySpeedAttr != null) {
-            // 庇护结束后恢复原版移动速度（仅当仍处于本模组写入的锁定/减速值时）
-            double slowSpeed = 0.1 * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SANCTUARY_SPEED.get();
-            double base = sanctuarySpeedAttr.getBaseValue();
-            if (Math.abs(base - slowSpeed) < 0.001 || Math.abs(base) < 0.001) {
-                sanctuarySpeedAttr.setBaseValue(0.1);
+            Double original = ORIGINAL_MOVE_SPEED.remove(player.getUUID());
+            if (original != null) {
+                sanctuarySpeedAttr.setBaseValue(original);
             }
         }
     }
@@ -471,7 +514,7 @@ public class PlayerStateHandler {
                 progress.setResilienceStacks(stacks + 1);
             }
 
-            // 更新时间戳（供 PlayerTickHandler.onPlayerTick 超时归零使用）
+            // 更新时间戳（供 PlayerTickHandler.onTick 超时归零使用）
             progress.setLastHurtTime(currentTime);
         });
     }

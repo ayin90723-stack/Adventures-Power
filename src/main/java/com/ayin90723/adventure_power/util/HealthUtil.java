@@ -284,14 +284,14 @@ public class HealthUtil {
                     boolean matched;
                     if (rawValue instanceof Float f) {
                         matched = Math.abs(f - healthBefore) < 0.01F;
-                        if (matched) DATA_ITEM_VALUE_FIELD.set(item, Float.valueOf(health));
+                        if (matched) DATA_ITEM_VALUE_FIELD.set(item, health);
                     } else if (rawValue instanceof Double d) {
                         matched = Math.abs(d - (double) healthBefore) < 0.01;
                         if (matched) DATA_ITEM_VALUE_FIELD.set(item, Double.valueOf((double) health));
                     } else if (rawValue instanceof Integer i) {
                         // Integer 型血量近似匹配（部分 mod 用 Integer 存百分比血量）
                         matched = Math.abs(i - (int) healthBefore) <= 1;
-                        if (matched) DATA_ITEM_VALUE_FIELD.set(item, Integer.valueOf((int) health));
+                        if (matched) DATA_ITEM_VALUE_FIELD.set(item, (int) health);
                     }
                 } catch (IllegalAccessException ignored) {
                     // 单个 DataItem 写入失败，继续处理下一个
@@ -338,7 +338,7 @@ public class HealthUtil {
                 try {
                     Object rawValue = DATA_ITEM_VALUE_FIELD.get(item);
                     if (rawValue instanceof Float f && f < -0.01F) {
-                        DATA_ITEM_VALUE_FIELD.set(item, Float.valueOf(0.0F));
+                        DATA_ITEM_VALUE_FIELD.set(item, 0.0F);
                     }
                 } catch (IllegalAccessException ignored) {
                 }

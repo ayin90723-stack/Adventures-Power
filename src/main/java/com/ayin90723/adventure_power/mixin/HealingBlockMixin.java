@@ -37,7 +37,7 @@ public class HealingBlockMixin {
             return;
         }
         Float tracked = HealingBlockEffect.getTrackedHealth(self);
-        float current = self.getHealth();
+        float current = HealthUtil.getHealthDirect(self);
         if (tracked != null) {
             HealingBlockEffect.updateTrackedHealth(self, Math.min(current, tracked));
         }
@@ -63,7 +63,7 @@ public class HealingBlockMixin {
         if (tracked == null) {
             return;
         }
-        float current = self.getHealth();
+        float current = HealthUtil.getHealthDirect(self);
         if (current > tracked) {
             HealthUtil.setAllHealthLikeRaw(self, tracked);
         }

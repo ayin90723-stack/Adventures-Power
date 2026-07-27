@@ -52,7 +52,7 @@ public abstract class LootItemConditionalFunctionMixin {
         remap = false
     )
     private boolean adventure_power$lootAllBypassFunctionCond(Predicate<LootContext> predicate, Object context) {
-        if (LootAllHandler.BYPASS.get()) {
+        if (LootAllHandler.BYPASS.get() > 0) {
             return true;
         }
         return predicate.test((LootContext) context);

@@ -1,7 +1,6 @@
 package com.ayin90723.adventure_power.ability;
 
 import com.ayin90723.adventure_power.config.ModConfig;
-import net.minecraft.network.chat.Component;
 
 /**
  * 无形之手 — 增加方块交互距离。
@@ -18,16 +17,6 @@ public class ExtendedReachAbility extends LinearGrowthAbility {
     @Override
     public String id() {
         return "extended_reach";
-    }
-
-    @Override
-    public Component name() {
-        return Component.translatable("ability.adventure_power.extended_reach");
-    }
-
-    @Override
-    public Component description() {
-        return Component.translatable("ability.adventure_power.extended_reach.desc");
     }
 
     @Override

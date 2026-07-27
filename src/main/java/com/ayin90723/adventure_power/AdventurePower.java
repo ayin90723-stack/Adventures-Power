@@ -61,13 +61,13 @@ public class AdventurePower {
     public static boolean hasPiercingGaze(LivingEntity entity) {
         if (entity instanceof Player player) {
             return AdventureProgressCapability.getAdventureProgress(player)
-                .map(p -> p.isAdventurer() && p.isAbilityEnabled("piercing_gaze")).orElse(false);
+                .map(p -> (p.isAdventurer() || p.isFullyUnlocked()) && p.isAbilityEnabled("piercing_gaze")).orElse(false);
         }
         return false;
     }
 
     public static boolean hasUndyingGear(Player player) {
         return AdventureProgressCapability.getAdventureProgress(player)
-            .map(p -> p.isAdventurer() && p.isAbilityEnabled("undying_gear")).orElse(false);
+            .map(p -> (p.isAdventurer() || p.isFullyUnlocked()) && p.isAbilityEnabled("undying_gear")).orElse(false);
     }
 }

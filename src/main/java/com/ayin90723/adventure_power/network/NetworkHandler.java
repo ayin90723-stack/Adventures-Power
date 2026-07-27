@@ -1,6 +1,7 @@
 package com.ayin90723.adventure_power.network;
 
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.handler.PlayerStateHandler;
 import com.ayin90723.adventure_power.util.BuffExclusionManager;
 import com.ayin90723.adventure_power.util.SyncUtil;
 import com.ayin90723.adventure_power.input.DoubleJumpHandler;
@@ -235,45 +236,10 @@ public class NetworkHandler {
             ctx.get().enqueueWork(() -> {
                 Minecraft mc = Minecraft.getInstance();
                 if (mc.player != null) {
-                    // 先提取里程碑注册表元数据初始化客户端 MilestoneRegistry
+                    // 先提取里程碑注册表元数据初始化客户端 MilestoneRegistry（直接 NBT 构建，不经 JSON 中转）
                     if (msg.data.contains("_milestone_registry")) {
-                        net.minecraft.nbt.CompoundTag registryMeta = msg.data.getCompound("_milestone_registry");
-                        int count = registryMeta.getInt("count");
-                        java.util.List<String> milestoneJsons = new java.util.ArrayList<>();
-                        for (int i = 0; i < count; i++) {
-                            net.minecraft.nbt.CompoundTag mTag = registryMeta.getCompound("m_" + i);
-                            String id = mTag.getString("id");
-                            String name = mTag.getString("name");
-                            // 解析 abilities
-                            StringBuilder abilitiesJson = new StringBuilder("[");
-                            if (mTag.contains("abilities")) {
-                                net.minecraft.nbt.CompoundTag abTag = mTag.getCompound("abilities");
-                                int abCount = abTag.getInt("count");
-                                for (int j = 0; j < abCount; j++) {
-                                    if (j > 0) abilitiesJson.append(",");
-                                    abilitiesJson.append("\"").append(abTag.getString("a_" + j)).append("\"");
-                                }
-                            }
-                            abilitiesJson.append("]");
-                            // advancement 和 trigger
-                            String advStr = mTag.contains("advancement")
-                                ? "\"" + mTag.getString("advancement") + "\"" : "null";
-                            String trigStr = "null";
-                            if (mTag.contains("trigger")) {
-                                net.minecraft.nbt.CompoundTag trigTag = mTag.getCompound("trigger");
-                                StringBuilder ts = new StringBuilder("{\"type\":\"" + trigTag.getString("type") + "\"");
-                                if (trigTag.contains("y")) ts.append(",\"y\":").append(trigTag.getInt("y"));
-                                if (trigTag.contains("entity")) ts.append(",\"entity\":\"").append(trigTag.getString("entity")).append("\"");
-                                ts.append("}");
-                                trigStr = ts.toString();
-                            }
-                            milestoneJsons.add("{\"id\":\"" + id + "\",\"name\":\"" + name
-                                + "\",\"abilities\":" + abilitiesJson.toString()
-                                + ",\"advancement\":" + advStr + ",\"trigger\":" + trigStr + "}");
-                        }
-                        if (!milestoneJsons.isEmpty()) {
-                            com.ayin90723.adventure_power.util.MilestoneRegistry.clientInit(milestoneJsons);
-                        }
+                        com.ayin90723.adventure_power.util.MilestoneRegistry.clientInitFromNbt(
+                            msg.data.getCompound("_milestone_registry"));
                     }
                     mc.player.getCapability(AdventureProgressCapability.CAPABILITY).ifPresent(
                         progress -> progress.deserializeNBT(msg.data));
@@ -312,20 +278,7 @@ public class NetworkHandler {
                     if ("soar".equals(msg.id)) {
                         boolean enabled = AdventureProgressCapability.getAdventureProgress(player)
                             .map(p -> p.isAbilityEnabled("soar")).orElse(false);
-                        if (enabled) {
-                            if (!player.getAbilities().mayfly && !player.getAbilities().instabuild
-                                && !player.isSpectator()) {
-                                player.getAbilities().mayfly = true;
-                                player.onUpdateAbilities();
-                            }
-                        } else {
-                            if (player.getAbilities().mayfly && !player.getAbilities().instabuild
-                                && !player.isSpectator()) {
-                                player.getAbilities().mayfly = false;
-                                player.getAbilities().flying = false;
-                                player.onUpdateAbilities();
-                            }
-                        }
+                        PlayerStateHandler.applySoarState(player, enabled);
                     }
                 }
             });

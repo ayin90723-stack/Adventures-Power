@@ -43,13 +43,21 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
     // ===== 能力 tab =====
     private final Set<String> disabledAbilities = new HashSet<>();
     private final List<Map.Entry<String, Component>> abilityEntries = new ArrayList<>();
+    private final List<String> abilityNames = new ArrayList<>();
 
     // ===== Buff tab =====
     private final Set<String> excludedEffects = new HashSet<>();
     private final List<MobEffectInstance> displayEffects = new ArrayList<>();
+    private final List<String> displayEffectNames = new ArrayList<>();
     private boolean ready = false;
     private boolean buffExtendEnabled = true;
     private int refreshTick = 0;
+
+    // ===== 里程碑 tab 缓存（按 version 失效，避免每帧 AbilityRegistry.get + 遍历计数） =====
+    private static int cachedMilestoneVersion = -1;
+    private static List<List<Component>> milestoneAbilityNames = List.of();
+    /** 标签 Component，init 时构建（语言切换重开即更新） */
+    private Component[] tabLabels = new Component[0];
 
     // ===== 布局 =====
     private int leftX;
@@ -86,6 +94,12 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
     protected void init() {
         super.init();
         this.leftX = this.width / 2 - PANEL_WIDTH / 2;
+        this.tabLabels = new Component[] {
+            Component.translatable("screen.adventure_power.tab.buff"),
+            Component.translatable("screen.adventure_power.tab.ability"),
+            Component.translatable("screen.adventure_power.tab.milestone")
+        };
+        ensureMilestoneAbilityCache();
         // 打开即请求 Buff 黑名单（为切到 Buff tab 预备数据）
         NetworkHandler.sendBuffBlacklistRequest();
         Minecraft mc = Minecraft.getInstance();
@@ -123,6 +137,7 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         Minecraft mc = Minecraft.getInstance();
         disabledAbilities.clear();
         abilityEntries.clear();
+        abilityNames.clear();
         if (mc.player == null) return;
         mc.player.getCapability(AdventureProgressCapability.CAPABILITY).ifPresent(progress -> {
             disabledAbilities.addAll(progress.getDisabledAbilities());
@@ -130,12 +145,14 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         for (var entry : AdventureProgressCapability.KNOWN_ABILITIES.entrySet()) {
             if (AdventureProgressCapability.isAbilityAvailable(mc.player, entry.getKey())) {
                 abilityEntries.add(entry);
+                abilityNames.add(entry.getValue().getString());
             }
         }
     }
 
     private void refreshDisplayEffects() {
         displayEffects.clear();
+        displayEffectNames.clear();
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
         for (MobEffectInstance effect : mc.player.getActiveEffects()) {
@@ -144,6 +161,30 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
             }
         }
         displayEffects.sort((a, b) -> Integer.compare(b.getDuration(), a.getDuration()));
+        // 预计算显示名（含罗马数字），避免每帧 getDisplayName().getString()
+        for (MobEffectInstance effect : displayEffects) {
+            String name = effect.getEffect().getDisplayName().getString();
+            if (effect.getAmplifier() > 0) {
+                name += " " + toRoman(effect.getAmplifier() + 1);
+            }
+            displayEffectNames.add(name);
+        }
+    }
+
+    /** 重建里程碑能力名缓存（按 version 失效，/reload 或客户端同步后惰性重建） */
+    private static void ensureMilestoneAbilityCache() {
+        if (cachedMilestoneVersion == MilestoneRegistry.getVersion()) return;
+        cachedMilestoneVersion = MilestoneRegistry.getVersion();
+        List<List<Component>> built = new ArrayList<>();
+        for (Milestone m : MilestoneRegistry.getAll()) {
+            List<Component> names = new ArrayList<>();
+            for (String id : m.abilities()) {
+                Ability a = AbilityRegistry.get(id);
+                if (a != null) names.add(a.name());
+            }
+            built.add(List.copyOf(names));
+        }
+        milestoneAbilityNames = List.copyOf(built);
     }
 
     @Override
@@ -161,6 +202,11 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
     @Override
     protected int rowHeight() {
         return currentTab == Tab.MILESTONE ? MILESTONE_ROW_HEIGHT : ROW_HEIGHT;
+    }
+
+    /** 滚动条 X 坐标（右侧固定位置，统一能力/Buff tab） */
+    private int getScrollBarX() {
+        return leftX + PANEL_WIDTH + 4;
     }
 
     @Override
@@ -182,11 +228,7 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
     }
 
     private void renderTabs(GuiGraphics graphics, int mouseX, int mouseY) {
-        Component[] labels = {
-            Component.translatable("screen.adventure_power.tab.buff"),
-            Component.translatable("screen.adventure_power.tab.ability"),
-            Component.translatable("screen.adventure_power.tab.milestone")
-        };
+        Component[] labels = this.tabLabels;
         Tab[] tabs = Tab.values();
         int totalWidth = 3 * TAB_WIDTH + 2 * TAB_GAP;
         int startX = (this.width - totalWidth) / 2;
@@ -219,7 +261,7 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         for (int i = startRow; i < endRow; i++) {
             var entry = abilityEntries.get(i);
             String id = entry.getKey();
-            Component name = entry.getValue();
+            String name = abilityNames.get(i);
             int y = TOP_Y + i * ROW_HEIGHT - scrollOffset;
             boolean isDisabled = disabledAbilities.contains(id);
             if (mouseX >= leftX && mouseX <= leftX + PANEL_WIDTH
@@ -228,14 +270,14 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
             }
             String dot = isDisabled ? "§7○" : "§a●";
             graphics.drawString(this.font, dot, leftX + 5, y, isDisabled ? COLOR_GRAY : COLOR_GREEN);
-            graphics.drawString(this.font, name.getString(), leftX + 22, y, COLOR_WHITE);
+            graphics.drawString(this.font, name, leftX + 22, y, COLOR_WHITE);
             Component status = isDisabled
                 ? Component.translatable("screen.adventure_power.disabled")
                 : Component.translatable("screen.adventure_power.enabled");
             graphics.drawString(this.font, status.getString(), leftX + 140, y,
                 isDisabled ? COLOR_GRAY : COLOR_GREEN);
         }
-        renderScrollBar(graphics, leftX + PANEL_WIDTH + 4, TOP_Y);
+        renderScrollBar(graphics, getScrollBarX(), TOP_Y);
         graphics.drawCenteredString(this.font,
             Component.literal("§7单击切换能力开关"), this.width / 2, this.height - 22, COLOR_GRAY);
     }
@@ -277,10 +319,7 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
             }
             String dot = isExcluded ? "§7○" : "§a●";
             graphics.drawString(this.font, dot, leftX + 5, y, isExcluded ? COLOR_GRAY : COLOR_GREEN);
-            String name = effect.getEffect().getDisplayName().getString();
-            if (effect.getAmplifier() > 0) {
-                name += " " + toRoman(effect.getAmplifier() + 1);
-            }
+            String name = displayEffectNames.get(i);
             graphics.drawString(this.font, name, leftX + 22, y, COLOR_WHITE);
             int seconds = effect.getDuration() / 20;
             String timeStr = seconds >= 60
@@ -294,7 +333,7 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
             graphics.drawString(this.font, status, leftX + 140, y,
                 isExcluded ? COLOR_GRAY : COLOR_GREEN);
         }
-        renderScrollBar(graphics, leftX + PANEL_WIDTH + 4, TOP_Y);
+        renderScrollBar(graphics, getScrollBarX(), TOP_Y);
         graphics.drawCenteredString(this.font,
             Component.literal("§7单击切换效果排除状态"), this.width / 2, this.height - 22, COLOR_GRAY);
     }
@@ -304,6 +343,7 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         final int LEFT_X = 30;
         final int RIGHT_X = 220;
         int total = MilestoneRegistry.getMilestoneCount();
+        ensureMilestoneAbilityCache();
         graphics.drawString(this.font, Component.literal("进度").withStyle(s -> s.withColor(COLOR_GRAY)),
             LEFT_X, TOP_Y - 14, COLOR_GRAY);
         graphics.drawString(this.font, Component.literal("解锁条件").withStyle(s -> s.withColor(COLOR_GRAY)),
@@ -335,11 +375,10 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
                 .withStyle(s -> s.withColor(unlocked ? COLOR_GREEN : COLOR_GRAY)));
             if (unlocked) {
                 left.append(Component.literal("  §8->  "));
-                List<String> ids = m.abilities();
-                for (int j = 0; j < ids.size(); j++) {
+                List<Component> names = milestoneAbilityNames.get(i);
+                for (int j = 0; j < names.size(); j++) {
                     if (j > 0) left.append(Component.literal(" §8· "));
-                    Ability a = AbilityRegistry.get(ids.get(j));
-                    if (a != null) left.append(a.name().copy().withStyle(s -> s.withColor(COLOR_WHITE)));
+                    left.append(names.get(j).copy().withStyle(s -> s.withColor(COLOR_WHITE)));
                 }
             }
             graphics.drawString(this.font, left, LEFT_X, y + 4, COLOR_WHITE);
@@ -349,10 +388,7 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         }
 
         if (progress != null) {
-            int unlockedCount = 0;
-            for (Milestone m : MilestoneRegistry.getAll()) {
-                if (progress.isMilestoneUnlocked(m.id())) unlockedCount++;
-            }
+            int unlockedCount = progress.getUnlockedMilestoneCount();
             graphics.drawCenteredString(this.font,
                 Component.literal("已解锁: " + unlockedCount + " / " + total).withStyle(s -> s.withColor(COLOR_GOLD)),
                 this.width / 2, this.height - 16, COLOR_GOLD);

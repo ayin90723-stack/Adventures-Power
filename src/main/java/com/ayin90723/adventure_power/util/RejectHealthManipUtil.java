@@ -2,6 +2,7 @@ package com.ayin90723.adventure_power.util;
 
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.player.Player;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -21,5 +22,16 @@ public class RejectHealthManipUtil {
     /** 查询 AttributeInstance 的所有者 */
     public static LivingEntity getOwner(AttributeInstance instance) {
         return ATTR_OWNER.get(instance);
+    }
+
+    /**
+     * 玩家登出时清理该玩家的 ATTR_OWNER 条目。
+     * <p>
+     * ATTR_OWNER 的 value 是 LivingEntity 强引用，而玩家登出不触发
+     * {@code setRemoved}（{@code RejectHealthManipMixin.cleanupOnRemoval}
+     * 不生效），条目会残留导致 ServerPlayer 对象无法被 GC。此处主动清理。
+     */
+    public static void clearOwner(Player player) {
+        ATTR_OWNER.values().removeIf(v -> v == player);
     }
 }

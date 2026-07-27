@@ -31,6 +31,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * 服务端主线程执行，ThreadLocal 天然隔离调用链，无锁、无 UUID 查表、
  * 无需 tick 级扫描清理过期条目。
  *
+ * <h3>已知限制</h3>
+ * {@code HURT_DEPTH} 由 {@code hurt()} 的 HEAD/RETURN 注入维护。若 {@code hurt()}
+ * 内部抛出未捕获异常，RETURN 不执行，depth 残留 +1，导致同线程后续
+ * {@code setHealth} 保护误判为"合法 hurt 路径"而放行外部篡改。Mixin 无异常
+ * 回调，彻底修复需重构 hurt 拦截；现实触发条件罕见（需他人在 hurt 内抛
+ * 异常），暂以已知限制接受。
+ *
  * @see RejectHealthManipAttributeMixin
  * @see RejectHealthManipUtil
  */

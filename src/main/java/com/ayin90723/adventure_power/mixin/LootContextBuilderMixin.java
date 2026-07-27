@@ -38,7 +38,7 @@ public abstract class LootContextBuilderMixin {
         index = 1
     )
     private RandomSource adventure_power$lootAllMaxCount(RandomSource original) {
-        if (LootAllHandler.BYPASS.get() && LootAllHandler.AWAKEN.get()) {
+        if (LootAllHandler.BYPASS.get() > 0 && LootAllHandler.AWAKEN.get() > 0) {
             return ConstantMaxRandomSource.INSTANCE;
         }
         return original;

@@ -64,15 +64,13 @@ public class MilestoneTriggerManager {
         if (SURVIVE_NIGHT_TRIGGERED.contains(uuid)) return;
         if (!AdventureProgressCapability.isAdventurer(player)) return;
 
-        for (Milestone m : MilestoneRegistry.getAll()) {
-            if (m.trigger() != null && "survive_night".equals(m.trigger().type())) {
-                if (AdventureProgressCapability.getAdventureProgress(player)
-                    .map(p -> p.isMilestoneUnlocked(m.id())).orElse(true)) continue;
-                long dayTime = player.level().getDayTime();
-                if (dayTime > DAY_CYCLE_TICKS && player.level().isDay()) {
-                    AdventureProgressCapability.grantMilestone(sp, m.id());
-                    SURVIVE_NIGHT_TRIGGERED.add(uuid);
-                }
+        for (Milestone m : MilestoneRegistry.getByTriggerType("survive_night")) {
+            if (AdventureProgressCapability.getAdventureProgress(player)
+                .map(p -> p.isMilestoneUnlocked(m.id())).orElse(true)) continue;
+            long dayTime = player.level().getDayTime();
+            if (dayTime > DAY_CYCLE_TICKS && player.level().isDay()) {
+                AdventureProgressCapability.grantMilestone(sp, m.id());
+                SURVIVE_NIGHT_TRIGGERED.add(uuid);
             }
         }
     }
@@ -89,13 +87,11 @@ public class MilestoneTriggerManager {
         if (FIRST_DEATH_TRIGGERED.contains(uuid)) return;
         if (!AdventureProgressCapability.isAdventurer(player)) return;
 
-        for (Milestone m : MilestoneRegistry.getAll()) {
-            if (m.trigger() != null && "first_death".equals(m.trigger().type())) {
-                if (AdventureProgressCapability.getAdventureProgress(player)
-                    .map(p -> p.isMilestoneUnlocked(m.id())).orElse(true)) continue;
-                AdventureProgressCapability.grantMilestone(player, m.id());
-                FIRST_DEATH_TRIGGERED.add(uuid);
-            }
+        for (Milestone m : MilestoneRegistry.getByTriggerType("first_death")) {
+            if (AdventureProgressCapability.getAdventureProgress(player)
+                .map(p -> p.isMilestoneUnlocked(m.id())).orElse(true)) continue;
+            AdventureProgressCapability.grantMilestone(player, m.id());
+            FIRST_DEATH_TRIGGERED.add(uuid);
         }
     }
 
@@ -111,13 +107,11 @@ public class MilestoneTriggerManager {
         if (FIRST_TRADE_TRIGGERED.contains(uuid)) return;
         if (!AdventureProgressCapability.isAdventurer(player)) return;
 
-        for (Milestone m : MilestoneRegistry.getAll()) {
-            if (m.trigger() != null && "first_trade".equals(m.trigger().type())) {
-                if (AdventureProgressCapability.getAdventureProgress(player)
-                    .map(p -> p.isMilestoneUnlocked(m.id())).orElse(true)) continue;
-                AdventureProgressCapability.grantMilestone(player, m.id());
-                FIRST_TRADE_TRIGGERED.add(uuid);
-            }
+        for (Milestone m : MilestoneRegistry.getByTriggerType("first_trade")) {
+            if (AdventureProgressCapability.getAdventureProgress(player)
+                .map(p -> p.isMilestoneUnlocked(m.id())).orElse(true)) continue;
+            AdventureProgressCapability.grantMilestone(player, m.id());
+            FIRST_TRADE_TRIGGERED.add(uuid);
         }
     }
 
@@ -134,16 +128,14 @@ public class MilestoneTriggerManager {
         UUID uuid = player.getUUID();
         Set<String> triggered = Y_BELOW_TRIGGERED.computeIfAbsent(uuid, k -> new HashSet<>());
 
-        for (Milestone m : MilestoneRegistry.getAll()) {
-            if (m.trigger() != null && "y_below".equals(m.trigger().type())) {
-                if (triggered.contains(m.id())) continue;
-                if (AdventureProgressCapability.getAdventureProgress(player)
-                    .map(p -> p.isMilestoneUnlocked(m.id())).orElse(true)) continue;
-                int threshold = m.trigger().y() != null ? m.trigger().y() : 0;
-                if (player.getY() < threshold) {
-                    AdventureProgressCapability.grantMilestone(sp, m.id());
-                    triggered.add(m.id());
-                }
+        for (Milestone m : MilestoneRegistry.getByTriggerType("y_below")) {
+            if (triggered.contains(m.id())) continue;
+            if (AdventureProgressCapability.getAdventureProgress(player)
+                .map(p -> p.isMilestoneUnlocked(m.id())).orElse(true)) continue;
+            int threshold = m.trigger().y() != null ? m.trigger().y() : 0;
+            if (player.getY() < threshold) {
+                AdventureProgressCapability.grantMilestone(sp, m.id());
+                triggered.add(m.id());
             }
         }
     }
@@ -160,18 +152,16 @@ public class MilestoneTriggerManager {
         UUID uuid = player.getUUID();
         Set<String> triggered = FIRST_KILL_TRIGGERED.computeIfAbsent(uuid, k -> new HashSet<>());
 
-        for (Milestone m : MilestoneRegistry.getAll()) {
-            if (m.trigger() != null && "first_kill".equals(m.trigger().type())) {
-                if (triggered.contains(m.id())) continue;
-                if (AdventureProgressCapability.getAdventureProgress(player)
-                    .map(p -> p.isMilestoneUnlocked(m.id())).orElse(true)) continue;
-                if (m.trigger().entity() == null) continue;
+        for (Milestone m : MilestoneRegistry.getByTriggerType("first_kill")) {
+            if (triggered.contains(m.id())) continue;
+            if (AdventureProgressCapability.getAdventureProgress(player)
+                .map(p -> p.isMilestoneUnlocked(m.id())).orElse(true)) continue;
+            if (m.trigger().entity() == null) continue;
 
-                EntityType<?> requiredType = ForgeRegistries.ENTITY_TYPES.getValue(m.trigger().entity());
-                if (requiredType != null && event.getEntity().getType() == requiredType) {
-                    AdventureProgressCapability.grantMilestone(player, m.id());
-                    triggered.add(m.id());
-                }
+            EntityType<?> requiredType = ForgeRegistries.ENTITY_TYPES.getValue(m.trigger().entity());
+            if (requiredType != null && event.getEntity().getType() == requiredType) {
+                AdventureProgressCapability.grantMilestone(player, m.id());
+                triggered.add(m.id());
             }
         }
     }

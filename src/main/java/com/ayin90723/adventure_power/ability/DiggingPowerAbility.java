@@ -1,7 +1,6 @@
 package com.ayin90723.adventure_power.ability;
 
 import com.ayin90723.adventure_power.config.ModConfig;
-import net.minecraft.network.chat.Component;
 
 /**
  * 大地之力 — 提升挖掘速度。
@@ -18,16 +17,6 @@ public class DiggingPowerAbility extends LinearGrowthAbility {
     @Override
     public String id() {
         return "digging_power";
-    }
-
-    @Override
-    public Component name() {
-        return Component.translatable("ability.adventure_power.digging_power");
-    }
-
-    @Override
-    public Component description() {
-        return Component.translatable("ability.adventure_power.digging_power.desc");
     }
 
     @Override

@@ -16,13 +16,11 @@ import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.effect.MobEffectCategory;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.TamableAnimal;
-import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
 
+import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 public class ActiveSkillHandler {
 
@@ -113,13 +111,13 @@ public class ActiveSkillHandler {
         ServerLevel level = (ServerLevel) player.level();
         for (LivingEntity target : targets) {
             float maxHpPart = target.getMaxHealth() * hpRatio;
-            float currentHpPart = target.getHealth() * hpRatio;
+            float currentHpPart = HealthUtil.getHealthDirect(target) * hpRatio;
             float totalDamage = baseDamage + maxHpPart + currentHpPart;
 
             var source = DamageUtil.createJudgment(level, player);
-            float healthBefore = target.getHealth();
+            float healthBefore = HealthUtil.getHealthDirect(target);
             target.hurt(source, totalDamage);
-            float actualDealt = healthBefore - target.getHealth();
+            float actualDealt = healthBefore - HealthUtil.getHealthDirect(target);
             target.invulnerableTime = 0;
 
             float epsilon = Math.max(0.01F, totalDamage * 0.01F);
@@ -154,15 +152,11 @@ public class ActiveSkillHandler {
         return targets.size();
     }
 
-    /** 敌对目标判定：Monster（非驯服）+ 排除友好火力 */
+    /** 目标判定：排除玩家(PVP)和友好火力(驯服生物)，其余都打 */
     private static boolean isHostileTarget(Player player, LivingEntity target) {
         if (target instanceof Player) return false;
         if (FriendlyFireProtection.isOwnerTarget(player, target)) return false;
-        if (target instanceof TamableAnimal) return false;
-        // 铁傀儡 / 雪傀儡等服务端友方生物检测
-        if (target.getType().getDescriptionId().contains("iron_golem")
-            || target.getType().getDescriptionId().contains("snow_golem")) return false;
-        return target instanceof Monster;
+        return true;
     }
 
     // ===== 旅者庇护 =====
@@ -182,12 +176,12 @@ public class ActiveSkillHandler {
         SyncUtil.syncCapabilityToPersistent(player, progress);
         SyncUtil.syncToClient(player);
 
-        // 清除玩家身上负面效果（与死亡抗拒一致）
-        player.getActiveEffects().stream()
-            .filter(e -> e.getEffect().getCategory() == MobEffectCategory.HARMFUL)
-            .map(MobEffectInstance::getEffect)
-            .collect(Collectors.toList())
-            .forEach(player::removeEffect);
+        // 清除玩家身上负面效果（与死亡抗拒一致，先快照再 remove 防 CME）
+        for (MobEffectInstance e : new ArrayList<>(player.getActiveEffects())) {
+            if (e.getEffect().getCategory() == MobEffectCategory.HARMFUL) {
+                player.removeEffect(e.getEffect());
+            }
+        }
         player.clearFire();
 
         ServerLevel level = (ServerLevel) player.level();

@@ -24,7 +24,7 @@ public abstract class LootPoolEntryContainerMixin {
 
     @Inject(method = "m_79639_", at = @At("HEAD"), cancellable = true)
     private void adventure_power$lootAllCanRun(LootContext context, CallbackInfoReturnable<Boolean> cir) {
-        if (LootAllHandler.BYPASS.get()) {
+        if (LootAllHandler.BYPASS.get() > 0) {
             cir.setReturnValue(true);
         }
     }

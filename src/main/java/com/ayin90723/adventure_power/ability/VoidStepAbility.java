@@ -1,7 +1,6 @@
 package com.ayin90723.adventure_power.ability;
 
 import com.ayin90723.adventure_power.config.ModConfig;
-import net.minecraft.network.chat.Component;
 
 /**
  * 虚空踏步 - 空中多段跳。
@@ -18,16 +17,6 @@ public class VoidStepAbility extends AbstractAbility {
     @Override
     public String id() {
         return "void_step";
-    }
-
-    @Override
-    public Component name() {
-        return Component.translatable("ability.adventure_power.void_step");
-    }
-
-    @Override
-    public Component description() {
-        return Component.translatable("ability.adventure_power.void_step.desc");
     }
 
     /**

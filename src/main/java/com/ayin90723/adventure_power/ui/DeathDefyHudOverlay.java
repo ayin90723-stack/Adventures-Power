@@ -1,6 +1,5 @@
 package com.ayin90723.adventure_power.ui;
 
-import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraftforge.api.distmarker.Dist;
@@ -28,14 +27,10 @@ public class DeathDefyHudOverlay {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return;
 
-        long currentTime = mc.level.getGameTime();
-        var progressOpt = mc.player.getCapability(AdventureProgressCapability.CAPABILITY).resolve();
-        if (progressOpt.isEmpty()) return;
-        var progress = progressOpt.get();
+        long currentTime = ClientHudDataCache.currentGameTime;
+        if (!ClientHudDataCache.deathDefyEnabled) return;
 
-        if (!progress.isAbilityEnabled("death_defy")) return;
-
-        long invulEnd = progress.getDeathDefyInvulEnd();
+        long invulEnd = ClientHudDataCache.deathDefyInvulEnd;
         if (invulEnd <= 0 || currentTime >= invulEnd) return;
 
         int remainingTicks = (int) (invulEnd - currentTime);

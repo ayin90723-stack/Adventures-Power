@@ -1,7 +1,6 @@
 package com.ayin90723.adventure_power.ability;
 
 import com.ayin90723.adventure_power.config.ModConfig;
-import net.minecraft.network.chat.Component;
 
 /**
  * 影杀 — 影子血量系统，归零时饱和式斩杀。
@@ -17,16 +16,6 @@ public class ShadowKillAbility extends AbstractAbility {
     @Override
     public String id() {
         return "shadow_kill";
-    }
-
-    @Override
-    public Component name() {
-        return Component.translatable("ability.adventure_power.shadow_kill");
-    }
-
-    @Override
-    public Component description() {
-        return Component.translatable("ability.adventure_power.shadow_kill.desc");
     }
 
     /**

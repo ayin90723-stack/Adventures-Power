@@ -5,6 +5,7 @@ import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.ability.SoulQuenchAbility;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.effect.HealingBlockEffect;
 import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.DamageUtil;
@@ -93,23 +94,23 @@ public class CombatAbilityHandler {
             handleDamageResist(event, target);
         }
 
-        // 攻击方能力（需攻击者为冒险者）
+        // 攻击方能力（取一次 progress 复用，避免每个能力各查一次 Capability）
         if (rawAttacker instanceof Player attacker) {
             if (FriendlyFireProtection.isOwnerTarget(attacker, target)) return;
-            if (!AdventureProgressCapability.isAdventurer(attacker) && !AdventureProgressCapability.isFullyUnlocked(attacker)) return;
+            var progress = AdventureProgressCapability.getAdventureProgress(attacker).orElse(null);
+            if (progress == null) return;
+            if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
 
-            handleHealingBlock(event, target, attacker);
-            handlePiercingGazeAwakened(event, target, attacker);
-            handleSoulQuench(event, target, attacker);
-            ShadowKillHelper.handleShadowKill(event, target, attacker);
+            if (progress.isAbilityEnabled("healing_block")) handleHealingBlock(event, target, attacker, progress);
+            if (progress.isFullyUnlocked() && progress.isAbilityEnabled("piercing_gaze")) handlePiercingGazeAwakened(event, target, attacker, progress);
+            if (progress.isAbilityEnabled("soul_quench")) handleSoulQuench(event, target, attacker, progress);
+            if (progress.isAbilityEnabled("shadow_kill")) ShadowKillHelper.handleShadowKill(event, target, attacker, progress);
         }
     }
 
-    /** 破敌之眼觉醒：破无敌一击后，目标 N tick 内无法获得无敌帧 */
-    private static void handlePiercingGazeAwakened(LivingHurtEvent event, LivingEntity target, Player attacker) {
+    /** 破敌之眼觉醒：破无敌一击后，目标 N tick 内无法获得无敌帧（piercing_gaze+fullyUnlocked 已在 onLivingHurt 门禁） */
+    private static void handlePiercingGazeAwakened(LivingHurtEvent event, LivingEntity target, Player attacker, IAdventureProgress progress) {
         if (target.invulnerableTime <= 0) return;
-        if (!AbilityGate.getActiveProgress(attacker, "piercing_gaze").filter(p -> p.isFullyUnlocked()).isPresent()) return;
-        // 标记目标禁无敌帧
         long endTime = target.level().getGameTime() + com.ayin90723.adventure_power.config.ModConfig.AWAKEN_PIERCING_GAZE_NO_IFRAME_TICKS.get();
         target.getPersistentData().putLong(PIERCING_GAZE_NO_IFRAME_END_KEY, endTime);
     }
@@ -138,64 +139,58 @@ public class CombatAbilityHandler {
      * bypasses_enchantments + bypasses_cooldown）施加，若 hurt() 被外部
      * mod 拦截则通过 HealthUtil 直写血量兜底。
      */
-    private static void handleSoulQuench(LivingHurtEvent event, LivingEntity target, Player attacker) {
-        AbilityGate.getActiveProgress(attacker, "soul_quench").ifPresent(progress -> {
+    private static void handleSoulQuench(LivingHurtEvent event, LivingEntity target, Player attacker, IAdventureProgress progress) {
+        int milestones = progress.getUnlockedMilestoneCount();
+        Ability raw = AbilityRegistry.get("soul_quench");
+        if (!(raw instanceof SoulQuenchAbility ability)) return;
 
-            // 跳过自身造成的穿透伤害，防递归
-            if (DamageUtil.isInternalSource(event.getSource())) return;
+        float flatDamage = ability.flatDamage(milestones);
+        float hpRatio = ability.hpRatio(milestones);
 
-            int milestones = progress.getUnlockedMilestoneCount();
-            Ability raw = AbilityRegistry.get("soul_quench");
-            if (!(raw instanceof SoulQuenchAbility ability)) return;
+        float extraDamage = flatDamage
+            + target.getMaxHealth() * hpRatio
+            + HealthUtil.getHealthDirect(target) * hpRatio;
 
-            float flatDamage = ability.flatDamage(milestones);
-            float hpRatio = ability.hpRatio(milestones);
+        if (HealingBlockEffect.isActive(target)) {
+            extraDamage *= com.ayin90723.adventure_power.config.ModConfig.SOUL_QUENCH_HEALING_BLOCK_MULTIPLIER.get().floatValue();
+        }
 
-            float extraDamage = flatDamage
-                + target.getMaxHealth() * hpRatio
-                + target.getHealth() * hpRatio;
-
-            if (HealingBlockEffect.isActive(target)) {
-                extraDamage *= com.ayin90723.adventure_power.config.ModConfig.SOUL_QUENCH_HEALING_BLOCK_MULTIPLIER.get().floatValue();
+        // 觉醒：斩杀线 — 目标低于阈值 HP 时伤害翻倍
+        if (progress.isFullyUnlocked()) {
+            float threshold = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SOUL_QUENCH_EXECUTE_THRESHOLD.get().floatValue();
+            if (HealthUtil.getHealthDirect(target) <= target.getMaxHealth() * threshold) {
+                extraDamage *= 2.0F;
             }
+        }
 
-            // 觉醒：斩杀线 — 目标低于阈值 HP 时伤害翻倍
-            if (progress.isFullyUnlocked()) {
-                float threshold = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SOUL_QUENCH_EXECUTE_THRESHOLD.get().floatValue();
-                if (target.getHealth() <= target.getMaxHealth() * threshold) {
-                    extraDamage *= 2.0F;
-                }
+        if (extraDamage <= 0.0F) return;
+
+        // 构建穿透伤害类型：绕过护甲/无敌/附魔保护/攻击冷却
+        var source = DamageUtil.createSoulStrike(target.level(), attacker);
+
+        float healthBefore = HealthUtil.getHealthDirect(target);
+        target.hurt(source, extraDamage);
+        float actualDealt = healthBefore - HealthUtil.getHealthDirect(target);
+
+        // 清零无敌帧 + 受击闪烁：hurt() 后原版会将 invulnerableTime 设为 10
+        target.invulnerableTime = 0;
+        clearHurtTime(target);
+
+        // 兜底：hurt() 被外部 mod（Boss 限伤/硬上限等）拦截 → 直写血量
+        float epsilon = Math.max(0.01F, extraDamage * 0.01F);
+        if (target.isAlive() && actualDealt < extraDamage - epsilon) {
+            float correctedHealth = Math.max(healthBefore - extraDamage, 0.0F);
+            HealthUtil.setAllHealthLikeRaw(target, correctedHealth);
+            if (correctedHealth <= 0.0F) {
+                clearHurtTime(target);
+                target.invulnerableTime = 0;
+                target.setLastHurtByMob(attacker);
+                target.setLastHurtByPlayer(attacker);
+                attacker.awardKillScore(target, 1, target.level().damageSources().mobAttack(attacker));
+                setDeathScoreNegativeOne(target);  // 防止 die() 内部重复计数
+                target.die(source);
             }
-
-            if (extraDamage <= 0.0F) return;
-
-            // 构建穿透伤害类型：绕过护甲/无敌/附魔保护/攻击冷却
-            var source = DamageUtil.createSoulStrike(target.level(), attacker);
-
-            float healthBefore = target.getHealth();
-            target.hurt(source, extraDamage);
-            float actualDealt = healthBefore - target.getHealth();
-
-            // 清零无敌帧 + 受击闪烁：hurt() 后原版会将 invulnerableTime 设为 10
-            target.invulnerableTime = 0;
-            clearHurtTime(target);
-
-            // 兜底：hurt() 被外部 mod（Boss 限伤/硬上限等）拦截 → 直写血量
-            float epsilon = Math.max(0.01F, extraDamage * 0.01F);
-            if (target.isAlive() && actualDealt < extraDamage - epsilon) {
-                float correctedHealth = Math.max(healthBefore - extraDamage, 0.0F);
-                HealthUtil.setAllHealthLikeRaw(target, correctedHealth);
-                if (correctedHealth <= 0.0F) {
-                    clearHurtTime(target);
-                    target.invulnerableTime = 0;
-                    target.setLastHurtByMob(attacker);
-                    target.setLastHurtByPlayer(attacker);
-                    attacker.awardKillScore(target, 1, target.level().damageSources().mobAttack(attacker));
-                    setDeathScoreNegativeOne(target);  // 防止 die() 内部重复计数
-                    target.die(source);
-                }
-            }
-        });
+        }
     }
 
     /** 清零实体 hurtTime（反射方式），防止个别 Boss 将 hurtTime>0 作为额外无敌判据 */
@@ -222,7 +217,12 @@ public class CombatAbilityHandler {
         HURT_TIME_FIELD = f;
     }
 
-    /** 将实体的 deathScore 设为 -1，阻止 die() 内部重复调用 awardKillScore */
+    /**
+     * 将实体的 deathScore 设为 -1，阻止 die() 内部重复调用 awardKillScore。
+     * <p>
+     * 反射兜底：仅在外部 Boss 绕过 hurt()/setHealth() 直接调 die() 时触发。
+     * 若长时间不触发可考虑移除；保留以防 awardKillScore 副作用（记分板/成就统计）。
+     */
     private static void setDeathScoreNegativeOne(LivingEntity target) {
         try {
             java.lang.reflect.Field f = LivingEntity.class.getDeclaredField("f_20920_");
@@ -239,26 +239,19 @@ public class CombatAbilityHandler {
 
     // ==================== 5. 禁疗之触 — 攻击施加禁疗 ====================
 
-    private static void handleHealingBlock(LivingHurtEvent event, LivingEntity target, Player attacker) {
-        // 跳过内部穿透伤害，防止淬魂等内部 hurt() 刷新禁疗计时器
-        if (DamageUtil.isInternalSource(event.getSource())) return;
+    private static void handleHealingBlock(LivingHurtEvent event, LivingEntity target, Player attacker, IAdventureProgress progress) {
+        int milestones = progress.getUnlockedMilestoneCount();
+        Ability ability = AbilityRegistry.get("healing_block");
+        if (ability == null) return;
 
-        AbilityGate.getActiveProgress(attacker, "healing_block").ifPresent(progress -> {
+        int durationSeconds = (int) ability.value(milestones);
+        int durationTicks = durationSeconds * 20;
+        HealingBlockEffect.apply(target, durationTicks);
 
-            int milestones = progress.getUnlockedMilestoneCount();
-            Ability ability = AbilityRegistry.get("healing_block");
-            if (ability == null) return;
-
-            int durationSeconds = (int) ability.value(milestones);
-            int durationTicks = durationSeconds * 20;
-            HealingBlockEffect.apply(target, durationTicks);
-
-            // 觉醒：禁疗+易伤 - 标记目标易伤（与禁疗同期到期）
-            if (progress.isFullyUnlocked()) {
-                long endTime = target.level().getGameTime() + durationTicks;
-                target.getPersistentData().putLong(HEALING_BLOCK_VULN_END_KEY, endTime);
-            }
-        });
+        if (progress.isFullyUnlocked()) {
+            long endTime = target.level().getGameTime() + durationTicks;
+            target.getPersistentData().putLong(HEALING_BLOCK_VULN_END_KEY, endTime);
+        }
     }
 
     /** 禁疗之触觉醒易伤：被禁疗标记的目标受伤 +X%（与禁疗同期到期） */

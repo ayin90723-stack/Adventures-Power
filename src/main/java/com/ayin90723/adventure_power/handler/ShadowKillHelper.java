@@ -4,6 +4,7 @@ import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.ability.ShadowKillAbility;
+import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.DamageUtil;
 import com.ayin90723.adventure_power.util.HealthUtil;
@@ -80,93 +81,93 @@ public class ShadowKillHelper {
      * @param target   受伤实体
      * @param attacker 攻击玩家
      */
-    public static void handleShadowKill(LivingHurtEvent event, LivingEntity target, Player attacker) {
+    public static void handleShadowKill(LivingHurtEvent event, LivingEntity target, Player attacker, IAdventureProgress progress) {
         if (target instanceof Player) return;  // PVP 无效
         if (!target.isAlive()) return;
 
-        AbilityGate.getActiveProgress(attacker, "shadow_kill").ifPresent(progress -> {
+        // 跳过内部穿透伤害，防重入
+        if (DamageUtil.isInternalSource(event.getSource())) return;
+        if (KILLING.contains(target.getUUID())) return;
 
-            // 跳过内部穿透伤害，防重入
-            if (DamageUtil.isInternalSource(event.getSource())) return;
-            if (KILLING.contains(target.getUUID())) return;
+        int milestones = progress.getUnlockedMilestoneCount();
+        Ability raw = AbilityRegistry.get("shadow_kill");
+        if (!(raw instanceof ShadowKillAbility ability)) return;
 
-            int milestones = progress.getUnlockedMilestoneCount();
-            Ability raw = AbilityRegistry.get("shadow_kill");
-            if (!(raw instanceof ShadowKillAbility ability)) return;
+        float flatDamage = ability.flatDamage();
+        float hpRatio = ability.hpRatio();
 
-            float flatDamage = ability.flatDamage();
-            float hpRatio = ability.hpRatio();
+        // 从攻击者侧读取影子血量
+        CompoundTag playerData = attacker.getPersistentData();
+        CompoundTag shadowData = playerData.getCompound(NBT_SP_DATA);
+        long gameTime = attacker.level().getGameTime();
 
-            // 从攻击者侧读取影子血量
-            CompoundTag playerData = attacker.getPersistentData();
-            CompoundTag shadowData = playerData.getCompound(NBT_SP_DATA);
-            long gameTime = attacker.level().getGameTime();
+        // 懒清理过期条目
+        cleanupExpiredShadowData(shadowData, gameTime);
 
-            // 懒清理过期条目
-            cleanupExpiredShadowData(shadowData, gameTime);
+        String targetKey = target.getUUID().toString();
+        float totalHP, shadowHP;
+        boolean isNew = false;
 
-            String targetKey = target.getUUID().toString();
-            float totalHP, shadowHP;
-            boolean isNew = false;
+        CompoundTag entry;
+        if (shadowData.contains(targetKey)) {
+            entry = shadowData.getCompound(targetKey);
+            totalHP = entry.getFloat(NBT_SP_TOTAL_HP);
+            shadowHP = entry.getFloat(NBT_SP_SHADOW_HP);
+        } else {
+            totalHP = target.getMaxHealth();
+            shadowHP = totalHP;
+            isNew = true;
+            entry = new CompoundTag();
+        }
 
-            if (shadowData.contains(targetKey)) {
-                CompoundTag entry = shadowData.getCompound(targetKey);
-                totalHP = entry.getFloat(NBT_SP_TOTAL_HP);
-                shadowHP = entry.getFloat(NBT_SP_SHADOW_HP);
-            } else {
-                totalHP = target.getMaxHealth();
-                shadowHP = totalHP;
-                isNew = true;
-            }
+        // 削减影子血量
+        float damage = flatDamage + totalHP * hpRatio;
+        shadowHP = Math.max(0.0F, shadowHP - damage);
 
-            // 削减影子血量
-            float damage = flatDamage + totalHP * hpRatio;
-            shadowHP = Math.max(0.0F, shadowHP - damage);
-
-            // 写回攻击者侧 NBT
-            CompoundTag entry = new CompoundTag();
-            entry.putFloat(NBT_SP_TOTAL_HP, totalHP);
-            entry.putFloat(NBT_SP_SHADOW_HP, shadowHP);
-            entry.putLong(NBT_SP_END_TIME, gameTime + com.ayin90723.adventure_power.config.ModConfig.SHADOW_KILL_DATA_EXPIRE_TICKS.get());
+        // 写回攻击者侧 NBT（复用 entry，已有条目不需新建）
+        entry.putFloat(NBT_SP_TOTAL_HP, totalHP);
+        entry.putFloat(NBT_SP_SHADOW_HP, shadowHP);
+        entry.putLong(NBT_SP_END_TIME, gameTime + com.ayin90723.adventure_power.config.ModConfig.SHADOW_KILL_DATA_EXPIRE_TICKS.get());
+        if (isNew) {
             shadowData.put(targetKey, entry);
-            playerData.put(NBT_SP_DATA, shadowData);
+        }
+        playerData.put(NBT_SP_DATA, shadowData);
 
-            // 更新 BossBar
-            updateShadowHPBossBar(target, attacker, shadowHP, totalHP);
+        // 更新 BossBar
+        updateShadowHPBossBar(target, attacker, shadowHP, totalHP);
 
-            // 粒子反馈
-            if (target.level() instanceof ServerLevel sl) {
-                sl.sendParticles(ParticleTypes.SOUL_FIRE_FLAME,
-                    target.getX(), target.getY() + target.getBbHeight() * 0.7, target.getZ(),
-                    5, 0.3, 0.3, 0.3, 0.02);
-                if (isNew) {
-                    sl.sendParticles(ParticleTypes.SCULK_SOUL,
-                        target.getX(), target.getY() + target.getBbHeight() * 0.5, target.getZ(),
-                        30, 0.8, 0.8, 0.8, 0.05);
-                }
+        // 粒子反馈
+        if (target.level() instanceof ServerLevel sl) {
+            sl.sendParticles(ParticleTypes.SOUL_FIRE_FLAME,
+                target.getX(), target.getY() + target.getBbHeight() * 0.7, target.getZ(),
+                5, 0.3, 0.3, 0.3, 0.02);
+            if (isNew) {
+                sl.sendParticles(ParticleTypes.SCULK_SOUL,
+                    target.getX(), target.getY() + target.getBbHeight() * 0.5, target.getZ(),
+                    30, 0.8, 0.8, 0.8, 0.05);
             }
+        }
 
-            // 影子血量归零 → 饱和式秒杀
-            if (shadowHP <= 0.0F) {
-                shadowData.remove(targetKey);
-                if (shadowData.isEmpty()) {
-                    playerData.remove(NBT_SP_DATA);
-                } else {
-                    playerData.put(NBT_SP_DATA, shadowData);
-                }
-                removeShadowHPBossBar(target);
-
-                event.setCanceled(true);  // 取消原事件伤害，避免与下面 hurt() 叠加
-                target.setLastHurtByMob(attacker);
-                target.setLastHurtByPlayer(attacker);
-                executeShadowKill(target, attacker, event.getSource());
-
-                // 觉醒：影杀 AOE 爆炸
-                if (progress.isFullyUnlocked()) {
-                    shadowKillAoe(attacker, target);
-                }
+        // 影子血量归零 → 饱和式秒杀
+        if (shadowHP <= 0.0F) {
+            shadowData.remove(targetKey);
+            if (shadowData.isEmpty()) {
+                playerData.remove(NBT_SP_DATA);
+            } else {
+                playerData.put(NBT_SP_DATA, shadowData);
             }
-        });
+            removeShadowHPBossBar(target);
+
+            event.setCanceled(true);  // 取消原事件伤害，避免与下面 hurt() 叠加
+            target.setLastHurtByMob(attacker);
+            target.setLastHurtByPlayer(attacker);
+            executeShadowKill(target, attacker, event.getSource());
+
+            // 觉醒：影杀 AOE 爆炸
+            if (progress.isFullyUnlocked()) {
+                shadowKillAoe(attacker, target);
+            }
+        }
     }
 
     // ==================== 饱和式秒杀 ====================

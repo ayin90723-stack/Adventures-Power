@@ -1,7 +1,6 @@
 package com.ayin90723.adventure_power.ability;
 
 import com.ayin90723.adventure_power.config.ModConfig;
-import net.minecraft.network.chat.Component;
 
 /**
  * 不动如山 — 百分比减少受到的击退距离。
@@ -18,16 +17,6 @@ public class KnockbackResistAbility extends LinearGrowthAbility {
     @Override
     public String id() {
         return "knockback_resist";
-    }
-
-    @Override
-    public Component name() {
-        return Component.translatable("ability.adventure_power.knockback_resist");
-    }
-
-    @Override
-    public Component description() {
-        return Component.translatable("ability.adventure_power.knockback_resist.desc");
     }
 
     @Override

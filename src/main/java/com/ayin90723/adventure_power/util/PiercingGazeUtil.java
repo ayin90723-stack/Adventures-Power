@@ -62,9 +62,9 @@ public final class PiercingGazeUtil {
      * 非玩家实体（理论上不会持有，但保留兼容）只检查附魔。
      */
     public static boolean hasPiercingGaze(LivingEntity entity) {
-        return AdventurePower.hasPiercingGaze(entity)
-            && (!(entity instanceof Player player)
-                || AdventureProgressCapability.isAbilityAvailable(player, "piercing_gaze"));
+        // AdventurePower.hasPiercingGaze 已含 (isAdventurer||isFullyUnlocked) && isAbilityEnabled 检查
+        // isAbilityEnabled 内部已蕴含 isAbilityUnlocked（enabledAbilityCache.contains），无需再查 isAbilityAvailable
+        return AdventurePower.hasPiercingGaze(entity);
     }
 
     /**
@@ -139,7 +139,7 @@ public final class PiercingGazeUtil {
      * @param healthBefore actuallyHurt 执行前的血量（用于检测血量是否被恢复）
      */
     public static void afterPierceFallback(LivingEntity target, float effectiveAmount, float healthBefore) {
-        if (effectiveAmount > 0.0F && target.getHealth() >= healthBefore && target.isAlive()) {
+        if (effectiveAmount > 0.0F && HealthUtil.getHealthDirect(target) >= healthBefore && target.isAlive()) {
             HealthUtil.setAllHealthLikeRaw(target, Math.max(0.0F, healthBefore - effectiveAmount));
         }
         InvulClearUtil.clearCustomInvulTimers(target);
