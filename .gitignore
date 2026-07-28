@@ -28,7 +28,7 @@ logs/
 # Maven local repo (用于发布)
 mcmodsrepo/
 
-# Claude Code
+# Claude Code（CLAUDE.md 是本地指令文件，含项目约定与个人偏好，不随仓库发布）
 CLAUDE.md
 .claude/
 
@@ -40,7 +40,6 @@ libs/
 *.bak
 *~
 发布介绍.md
-CLAUDE.md
 
 # Forge 源码补丁副本（ForgeGradle 生成）
 patches/
