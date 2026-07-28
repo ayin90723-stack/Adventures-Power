@@ -1,45 +1,30 @@
 package com.ayin90723.adventure_power.input;
 
-import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.config.ModConfig;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
 
 /**
  * 虚空踏步空中跳跃的共享施力逻辑。
  * <p>
- * 客户端预测与服务端权威<b>必须调用同一套公式</b>，否则两端 Y 速度不一致会产生顿挫
- * （客户端先预测一个值，服务端 motion 包覆盖为另一个值 -> 视觉抖动）。
+ * 客户端预测与服务端权威<b>必须调用同一套 Y 公式</b>，否则两端 Y 速度不一致会产生顿挫。
  * </p>
  * <p>
- * 本类只负责「施加跳跃力」，不处理网络同步与服务端跳数计数：
+ * 本类只负责「施加跳跃力」，不处理网络同步与跳数计数：
  * <ul>
- *   <li>客户端 {@link JumpInputHandler} 调用 {@link #applyJump} 做即时预测</li>
- *   <li>服务端 {@link DoubleJumpHandler} 调用 {@link #applyJump} 后另行发送 motion 包同步</li>
+ *   <li>客户端 {@link JumpInputHandler} 调用 {@link #applyJump} 做即时预测（dash=true 时含御风冲刺）</li>
+ *   <li>服务端 {@link DoubleJumpHandler} 调用 {@link #applyJump}（dash=false，只设 Y；水平冲刺由客户端预测，位置客户端权威）</li>
  * </ul>
  */
 public final class VoidStepMovement {
-    /** 疾跑时附加的水平冲量，对齐原版 {@code LivingEntity#jumpFromGround} 的 0.2 */
-    public static final double SPRINT_BOOST = 0.2;
 
     private VoidStepMovement() {}
 
     /**
-     * 返回玩家可在空中执行的额外跳跃次数。
-     * 非觉醒 = 1（二段跳），觉醒 = {@code AWAKEN_VOID_STEP_JUMPS - 1}（三段跳）。
-     */
-    public static int getMaxAirJumps(Player player) {
-        boolean awakened = AdventureProgressCapability.getAdventureProgress(player)
-            .map(p -> p.isFullyUnlocked()).orElse(false);
-        return awakened ? ModConfig.AWAKEN_VOID_STEP_JUMPS.get() - 1 : 1;
-    }
-
-    /**
-     * 计算空中跳跃的 Y 速度（覆盖式，非叠加）。
+     * 计算空中跳跃的 Y 速度。
      * 基础值 = 原版跳跃力（0.42 × 方块系数 + 跳跃提升加成）× {@code VOID_STEP_POWER}。
      */
     public static float calculateJumpPower(LivingEntity entity) {
@@ -51,28 +36,29 @@ public final class VoidStepMovement {
     }
 
     /**
-     * 施加空中跳跃力。Y 取 {@code max(当前Y, power)} + （可选）疾跑水平冲量 + hasImpulse + 摔落距离清零。
+     * 施加空中跳跃力。Y 直接覆盖为 power（对齐原版 {@code jumpFromGround}，无弹跳感）+ hasImpulse + 摔落距离清零；
+     * dash=true 时额外朝玩家朝向施加「御风」水平冲刺。
      * <p>
-     * Y 用 max 而非硬覆盖：上升中再跳不减速（消除三段跳顿挫），下落中拉起到 power。
-     * 客户端预测与服务端权威共用此公式，两端一致。
+     * Y 直接覆盖而非 max：与原版跳跃一致，避免 max 保留当前更高速度产生的「弹跳感」。
      * </p>
      * <p>
-     * 客户端预测时 {@code addSprintBoost = false}：仅动 Y，水平冲量留给服务端加。
-     * 原因：两端 {@code isSprinting()} 采样时刻不同，客户端若也加水平冲量会在服务端 motion 包覆盖时产生水平跳变；
-     * 且服务端若未通过校验（静默 return），客户端保留的水平冲量会导致斜飞。
-     * 服务端权威执行时 {@code addSprintBoost = true}：完整添加水平冲量。
+     * <b>御风（dash）</b>：朝玩家视角朝向（{@code YRot} 水平方向）施加冲刺冲量，由 {@code AWAKEN_VOID_STEP_DASH} 控制。
+     * 客户端在觉醒+疾跑时调用 dash=true（预测）；服务端调用 dash=false（只设 Y，水平冲刺由客户端预测，位置客户端权威）。
      * </p>
+     * @param dash 是否施加御风冲刺
      */
-    public static void applyJump(LivingEntity entity, float power, boolean addSprintBoost) {
+    public static void applyJump(LivingEntity entity, float power, boolean dash) {
         Vec3 motion = entity.getDeltaMovement();
-        entity.setDeltaMovement(motion.x(), Math.max(motion.y, power), motion.z());
+        entity.setDeltaMovement(motion.x(), power, motion.z());
         entity.hasImpulse = true;
         entity.fallDistance = 0.0F;
 
-        if (addSprintBoost && entity.isSprinting()) {
+        if (dash) {
+            // 御风：朝玩家朝向水平冲刺
             float yRot = entity.getYRot() * Mth.DEG_TO_RAD;
+            double dashAmount = ModConfig.AWAKEN_VOID_STEP_DASH.get();
             entity.addDeltaMovement(new Vec3(
-                -Mth.sin(yRot) * SPRINT_BOOST, 0.0, Mth.cos(yRot) * SPRINT_BOOST));
+                -Mth.sin(yRot) * dashAmount, 0.0, Mth.cos(yRot) * dashAmount));
         }
     }
 

@@ -3,10 +3,10 @@ package com.ayin90723.adventure_power.ability;
 import com.ayin90723.adventure_power.config.ModConfig;
 
 /**
- * 虚空踏步 - 空中多段跳。
+ * 虚空踏步 - 空中二段跳。
  * 解锁条件：2 里程碑
  * 数值：固定跳跃力度倍率（{@link ModConfig#VOID_STEP_POWER}），无里程碑成长。
- * 觉醒后由 {@link ModConfig#AWAKEN_VOID_STEP_JUMPS} 控制三段跳。
+ * 觉醒后获得「御风」：疾跑时二段跳朝视角方向水平冲刺（{@link ModConfig#AWAKEN_VOID_STEP_DASH}），松开疾跑为纯垂直跳。
  */
 public class VoidStepAbility extends AbstractAbility {
 

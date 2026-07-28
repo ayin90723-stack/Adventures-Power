@@ -103,7 +103,7 @@ public class ModConfig {
 
     // ==================== 觉醒强化 ====================
     public static final DoubleValue AWAKEN_MULTIPLIER;
-    public static final IntValue AWAKEN_VOID_STEP_JUMPS;
+    public static final DoubleValue AWAKEN_VOID_STEP_DASH;
     public static final DoubleValue AWAKEN_SOAR_SPEED;
     public static final DoubleValue AWAKEN_SOUL_QUENCH_EXECUTE_THRESHOLD;
     public static final DoubleValue AWAKEN_SHADOW_KILL_AOE_RADIUS;
@@ -299,8 +299,8 @@ public class ModConfig {
         BUILDER.push("觉醒强化");
         AWAKEN_MULTIPLIER = BUILDER.comment("觉醒数值强化倍率")
             .defineInRange("awaken_multiplier", 1.5, 0.5, 10.0);
-        AWAKEN_VOID_STEP_JUMPS = BUILDER.comment("觉醒虚空踏步 - 总跳跃次数")
-            .defineInRange("awaken_void_step_jumps", 3, 2, 10);
+        AWAKEN_VOID_STEP_DASH = BUILDER.comment("觉醒虚空踏步·御风 - 二段跳时朝视角方向的水平冲刺冲量")
+            .defineInRange("awaken_void_step_dash", 0.6, 0.0, 2.0);
         AWAKEN_SOAR_SPEED = BUILDER.comment("觉醒翱翔 - 飞行速度倍率")
             .defineInRange("awaken_soar_speed", 1.5, 1.0, 5.0);
         AWAKEN_SOUL_QUENCH_EXECUTE_THRESHOLD = BUILDER.comment("觉醒淬魂之力 - 斩杀线阈值（生命比例）")

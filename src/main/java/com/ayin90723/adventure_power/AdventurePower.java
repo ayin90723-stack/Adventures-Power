@@ -4,7 +4,6 @@ import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.effect.ModAttributes;
 import com.ayin90723.adventure_power.effect.ModEffects;
-import com.ayin90723.adventure_power.input.JumpInputHandler;
 import com.ayin90723.adventure_power.item.AdventureEndRecipe;
 import com.ayin90723.adventure_power.item.ModItems;
 import com.ayin90723.adventure_power.network.NetworkHandler;
@@ -46,7 +45,6 @@ public class AdventurePower {
         RECIPE_SERIALIZERS.register(modEventBus);
 
         // 事件订阅
-        MinecraftForge.EVENT_BUS.register(JumpInputHandler.class);
         MinecraftForge.EVENT_BUS.register(this);
 
         modEventBus.addListener(this::commonSetup);

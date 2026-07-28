@@ -2,106 +2,85 @@ package com.ayin90723.adventure_power.input;
 
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.network.NetworkHandler;
-import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.event.TickEvent.ClientTickEvent;
-import net.minecraftforge.event.TickEvent.Phase;
+import net.minecraftforge.client.event.MovementInputUpdateEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
+import net.minecraftforge.fml.common.Mod.EventBusSubscriber.Bus;
 
 /**
- * 空中多段跳客户端输入检测。
+ * 空中二段跳客户端输入检测。
  * <p>
- * 采用<b>边沿检测</b>：追踪空格「按下瞬间」，按一下跳一次，松开再按再触发下一次。
- * 地面起跳仍走原版（按住空格由原版 noJumpDelay 控制连续地面跳），空中跳必须松开空格再按。
- * 这样玩家从地面起跳后可立即按出二段跳，无强制冷却等待，手感对齐其他多段跳模组。
+ * 钩子使用 {@link MovementInputUpdateEvent}（原版输入更新后、aiStep 前，与原版跳跃同 tick 生效），
+ * 比 ClientTickEvent.END 更早，二段跳与原版跳跃无缝衔接，无 1 tick 延迟，手感丝滑。
  * </p>
  * <p>
- * <b>陈旧网络包防护</b>：每个空中周期（落地->起跳->落地）分配唯一递增 {@code airPhaseId}，
- * 请求携带此 id，服务端比对不匹配直接丢弃，防止网络延迟导致陈旧包在新周期重新通过校验并叠加冲量。
+ * 采用<b>边沿检测</b>：追踪 {@code input.jump}「按下瞬间」，按一下跳一次，松开再按再触发。
+ * 地面起跳仍走原版（input.jump 持续由原版处理），空中跳必须松开空格再按。
  * </p>
  * <p>
- * <b>客户端跳数限制</b>：客户端必须自行维护 {@code clientJumpsUsed} 并以
- * {@link VoidStepMovement#getMaxAirJumps} 为天花板，避免超过服务端允许次数后客户端仍持续施力。
+ * <b>客户端跳数限制</b>：维护 {@code clientJumpsUsed}，落地清零，空中仅允许跳 1 次。
  * </p>
  * <p>
- * <b>施力分工</b>：客户端预测仅动 Y（{@code addSprintBoost=false}），水平冲量交服务端施加。
- * 避免两端 {@code isSprinting()} 采样不同步导致 motion 包覆盖时水平跳变，
- * 亦防止服务端静默 return 时客户端保留水平冲量斜飞（配合 {@link DoubleJumpHandler} 的统一 motion 同步兜底）。
+ * <b>御风</b>：觉醒且疾跑时，二段跳附加水平冲刺（{@link VoidStepMovement#applyJump} dash=true）。
+ * 松开疾跑 = 纯垂直二段跳，按住疾跑 = 带水平冲刺，玩家可自由选择。
  * </p>
  */
-@EventBusSubscriber(Dist.CLIENT)
+@EventBusSubscriber(value = Dist.CLIENT, bus = Bus.FORGE)
 public class JumpInputHandler {
-    /** 上一 tick 的 onGround 状态，用于检测"刚离开地面"的瞬间 */
-    private static boolean wasOnGround = true;
-    /** 客户端已消耗的空中跳跃次数（与服务端对齐），落地清零 */
+    /** 客户端已消耗的空中跳跃次数，落地清零，空中仅允许 1 次 */
     private static int clientJumpsUsed = 0;
-    /** 当前空中周期 ID，落地递增，用于陈旧网络包防护 */
-    private static int currentAirPhaseId = 0;
-    /** 上一 tick 的空格按下状态，用于边沿检测（按下瞬间触发一次） */
+    /** 上一 tick 的 input.jump 状态，用于边沿检测 */
     private static boolean wasJumpDown = false;
     /** 上一 tick 的玩家引用，用于检测死亡重生/跨维度导致的实体替换 */
     private static Player lastPlayer = null;
 
     @SubscribeEvent
-    public static void onClientTick(ClientTickEvent event) {
-        if (event.phase != Phase.END) return;
+    public static void onMovementInputUpdate(MovementInputUpdateEvent event) {
+        Player player = event.getEntity();
 
-        var mc = Minecraft.getInstance();
-        var player = mc.player;
-        if (player == null || mc.level == null) return;
-
-        // 玩家引用变化（死亡重生/跨维度）-> 重置跳数与按键状态，保留 airPhaseId 继续递增
-        // （避免重生后 id 回到 0 与服务端残留 state 冲突；id 单调递增保证新周期必被识别）
+        // 玩家引用变化（死亡重生/跨维度）-> 重置跳数与按键状态
         if (player != lastPlayer) {
             lastPlayer = player;
-            wasOnGround = true;
             clientJumpsUsed = 0;
             wasJumpDown = false;
         }
 
         boolean onGround = player.onGround();
-
-        // 刚离开地面 -> 新空中周期，id 递增（不再设冷却，消除"跳起后要等"的延迟）
-        if (wasOnGround && !onGround) {
-            currentAirPhaseId++;
-        }
-
-        // 落地 -> 重置跳数，保持周期 id（下次离开地面再递增）
+        // 落地 -> 重置跳数
         if (onGround) {
             clientJumpsUsed = 0;
         }
-        wasOnGround = onGround;
 
-        // 边沿检测：先算边沿（用上一帧 wasJumpDown），再更新 wasJumpDown
-        boolean jumpDown = mc.options.keyJump.isDown();
+        // 边沿检测 input.jumping（原版跳跃标志）
+        boolean jumpDown = event.getInput().jumping;
         boolean jumpEdge = jumpDown && !wasJumpDown;
         wasJumpDown = jumpDown;
 
         // 门禁：必须已激活冒险者 + 已解锁虚空踏步能力
-        boolean abilityReady = AdventureProgressCapability.getAdventureProgress(player)
-            .map(p -> p.isAdventurer() && p.isAbilityEnabled("void_step"))
-            .orElse(false);
-        if (!abilityReady) return;
+        var progress = AdventureProgressCapability.getAdventureProgress(player);
+        boolean abilityReady = progress.map(p -> p.isAdventurer() && p.isAbilityEnabled("void_step")).orElse(false);
+        // 觉醒状态（御风）
+        boolean awakened = progress.map(p -> p.isFullyUnlocked()).orElse(false);
 
-        int maxJumps = VoidStepMovement.getMaxAirJumps(player);
+        if (!abilityReady) return;
 
         if (jumpEdge
             && !onGround
             && !player.getAbilities().flying
             && !player.isPassenger()
             && !player.isInWater()
-            && clientJumpsUsed < maxJumps) {
+            && clientJumpsUsed < 1) {
 
-            // 客户端预测：仅动 Y（水平冲量交服务端），公式与服务端一致，motion 包到达时数值一致无抖动
+            // 客户端预测：Y 直接覆盖（与服务端同公式），御风在觉醒+疾跑时附加冲刺
             float power = VoidStepMovement.calculateJumpPower(player);
-            VoidStepMovement.applyJump(player, power, false);
+            boolean dash = awakened && player.isSprinting();
+            VoidStepMovement.applyJump(player, power, dash);
 
-            // 消耗客户端跳数（与服务端对齐）
             clientJumpsUsed++;
-            // 发送请求到服务端执行正式逻辑，携带当前 airPhaseId 用于陈旧包校验
-            NetworkHandler.sendDoubleJumpRequest(currentAirPhaseId);
+            // 发送请求到服务端（服务端只设 Y，不冲刺）
+            NetworkHandler.sendDoubleJumpRequest();
         }
     }
 }

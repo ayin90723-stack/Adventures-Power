@@ -17,6 +17,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent.PlayerChangedDimensionEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent.PlayerLoggedInEvent;
+import net.minecraftforge.event.entity.player.PlayerEvent.PlayerRespawnEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
@@ -79,6 +80,19 @@ public class CapabilityLifecycleHandler {
         // 重生/穿越末地后客户端 Capability 不会自动同步，
         // 需要手动推送 AdventureSyncPacket 确保面板和 tooltip 状态正确
         SyncUtil.syncToClient(newPlayer);
+    }
+
+    // ===== Respawn（重生完成）=====
+
+    /** 玩家重生完成后补推 Capability 同步。
+     *  onPlayerClone 时发的同步包可能因客户端未完成 respawn 而未应用到新玩家，
+     *  导致刚解锁的能力（如初尝败绩解锁的 void_step）不立即生效，需开关能力才同步。
+     *  PlayerRespawnEvent 在重生完成后触发，客户端已 ready，此时同步可靠。 */
+    @SubscribeEvent
+    public static void onPlayerRespawn(PlayerRespawnEvent event) {
+        if (event.getEntity().level().isClientSide()) return;
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        SyncUtil.syncToClient(player);
     }
 
     // ===== 首次发放 + 旧数据迁移 =====
