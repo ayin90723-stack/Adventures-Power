@@ -105,7 +105,11 @@ public abstract class RejectHealthManipMixin {
         });
     }
 
-    // ===== 移除时清理 ATTR_OWNER =====
+    // ===== 移除时清理 ATTR_OWNER（防泄漏，不 cancel remove）=====
+    // 历史残留：原计划拦截对玩家的 remove 做保护，后意识到模组一般不对玩家 remove，
+    // 保留此注入仅做 ATTR_OWNER map 清理。玩家换维度(CHANGED_DIMENSION)/登出/死亡 respawn
+    // 都会触发原版 remove，此处清理 map 中指向该玩家的 AttributeInstance 条目，
+    // 避免 static map 持有已移除玩家引用导致 GC 泄漏。不 cancel remove。
 
     @Inject(method = "m_142687_", at = @At("HEAD"))
     private void cleanupOnRemoval(CallbackInfo ci) {

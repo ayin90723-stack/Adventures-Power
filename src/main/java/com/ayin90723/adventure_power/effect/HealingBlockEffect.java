@@ -131,7 +131,7 @@ public class HealingBlockEffect extends MobEffect {
       }
 
       /** 预先标记：HIGHEST 优先级记录禁疗之触实体即将死亡 */
-      @SubscribeEvent(priority = EventPriority.HIGHEST)
+      @SubscribeEvent(priority = EventPriority.HIGHEST, receiveCanceled = true)
       public static void onLivingDeathPreMark(LivingDeathEvent event) {
          if (isActive(event.getEntity())) {
             if (shouldAllowPhaseTwo(event.getEntity())) {
@@ -194,7 +194,7 @@ public class HealingBlockEffect extends MobEffect {
       }
 
       /** 最终保障：LOWEST 优先级兜底，检测 ForceKill 标记并强制死亡 */
-      @SubscribeEvent(priority = EventPriority.LOWEST)
+      @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
       public static void onLivingDeath(LivingDeathEvent event) {
          LivingEntity entity = event.getEntity();
          // 死亡时清理追踪记录、宽限期与禁疗之触 NBT 标记（防止玩家复活后残留禁疗）

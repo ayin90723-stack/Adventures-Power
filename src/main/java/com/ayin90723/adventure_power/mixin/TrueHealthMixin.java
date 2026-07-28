@@ -4,6 +4,7 @@ import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.HealthUtil;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import org.spongepowered.asm.mixin.Mixin;
@@ -256,9 +257,10 @@ public abstract class TrueHealthMixin {
     }
 
     // ===== 防直接死亡：die(DamageSource) HEAD =====
+    // SRG m_6667_ = die(DamageSource)。注意勿写成 m_6668_（= dropAllDeathLoot，仅掉落不触发死亡事件）。
 
     /**
-     * 拦截 {@code die(DamageSource)}，当 true_health 激活且备份血量 &gt; 0 时
+     * 拦截 {@code die(DamageSource)} (SRG {@code m_6667_})，当 true_health 激活且备份血量 &gt; 0 时
      * 直接取消死亡处理。
      *
      * <p>外部 Boss 可在不经过 {@code hurt()/setHealth()} 的前提下直接调用
@@ -266,9 +268,13 @@ public abstract class TrueHealthMixin {
      * 本注入阻止 {@code die()} 方法体执行，防止掉落物、死亡动画、经验损失
      * 等副作用发生。同时通过 {@link #onIsDeadOrDying} 确保即使 {@code die()}
      * 被绕过，实体也不会被 Minecraft 移除。</p>
+     *
+     * <p>事件层兜底：若本 Mixin 注入被 ASM 绕过（die() 照常执行并 post
+     * {@code LivingDeathEvent}），由 {@link com.ayin90723.adventure_power.handler.TrueHealthHandler}
+     * 在事件层 HIGH 优先级 cancel 死亡事件，作为最后防线。</p>
      */
-    @Inject(method = "m_6668_", at = @At("HEAD"), cancellable = true)
-    private void onDie(CallbackInfo ci) {
+    @Inject(method = "m_6667_", at = @At("HEAD"), cancellable = true)
+    private void onDie(DamageSource source, CallbackInfo ci) {
         LivingEntity self = (LivingEntity) (Object) this;
         IAdventureProgress progress = gatedProgress(self);
         if (progress == null) return;

@@ -50,7 +50,7 @@ public class HealingBlockMixin {
      * 和 {@code ServerTickEvent.END}，覆盖所有回血路径。
      * 对标泽林变体"灾害凝视"在自身 tick 末尾做血量钳制的设计。
      */
-    @Inject(method = "m_8107_", at = @At("TAIL"))
+    @Inject(method = "m_8119_", at = @At("TAIL"))
     private void onTickTailClamp(CallbackInfo ci) {
         LivingEntity self = (LivingEntity) (Object) this;
         if (self.level().isClientSide()) {

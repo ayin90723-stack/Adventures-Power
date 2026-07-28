@@ -225,7 +225,8 @@ public abstract class PiercingGazeLivingEntityMixin {
         method = "m_6469_",
         at = @At(
             value = "INVOKE",
-            target = "Lnet/minecraftforge/common/ForgeHooks;onLivingHurt(Lnet/minecraft/world/entity/LivingEntity;Lnet/minecraft/world/damagesource/DamageSource;F)F"
+            target = "Lnet/minecraftforge/common/ForgeHooks;onLivingHurt(Lnet/minecraft/world/entity/LivingEntity;Lnet/minecraft/world/damagesource/DamageSource;F)F",
+            remap = false
         ),
         require = 0
     )

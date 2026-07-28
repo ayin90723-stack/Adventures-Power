@@ -64,7 +64,7 @@ public abstract class DeathDefyMixin {
      * 强制写回目标值。固定目标血量 20（而非 {@code getMaxHealth()}）避免
      * 亚波伦结界临时改 maxHealth 导致的钳制值错误。
      */
-    @Inject(method = "m_8107_", at = @At("TAIL"))
+    @Inject(method = "m_8119_", at = @At("TAIL"))
     private void onTickTailClamp(CallbackInfo ci) {
         LivingEntity self = (LivingEntity) (Object) this;
         if (!(self instanceof Player player)) return;
