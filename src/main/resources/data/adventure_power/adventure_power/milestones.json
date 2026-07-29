@@ -3,7 +3,7 @@
     {
       "id": "first_night",
       "name": "初次夜冕",
-      "abilities": ["agility", "digging_power", "perpetual_blessing"],
+      "abilities": ["agility", "digging_power"],
       "advancement": null,
       "trigger": { "type": "survive_night" }
     },
@@ -17,35 +17,35 @@
     {
       "id": "first_trade",
       "name": "初次交易",
-      "abilities": ["soul_bind", "knockback_resist"],
+      "abilities": ["soul_bind", "knockback_resist", "swift"],
       "advancement": null,
       "trigger": { "type": "first_trade" }
     },
     {
       "id": "first_deep",
       "name": "初探地底",
-      "abilities": ["damage_resist", "extended_reach"],
+      "abilities": ["all_seeing", "extended_reach", "magnet"],
       "advancement": null,
       "trigger": { "type": "y_below", "y": 0 }
     },
     {
       "id": "first_enchant",
       "name": "初次附魔",
-      "abilities": ["undying_gear", "fortune_favor"],
+      "abilities": ["undying_gear", "fortune_favor", "xp_boost"],
       "advancement": "minecraft:story/enchant_item",
       "trigger": null
     },
     {
       "id": "nether",
       "name": "炽热之门",
-      "abilities": ["env_immunity", "lifesteal"],
+      "abilities": ["env_immunity", "lifesteal", "damage_resist"],
       "advancement": "minecraft:story/enter_the_nether",
       "trigger": null
     },
     {
       "id": "wither",
       "name": "凋零之陨",
-      "abilities": ["healing_block", "vitality"],
+      "abilities": ["healing_block", "vitality", "death_defy"],
       "advancement": null,
       "trigger": { "type": "first_kill", "entity": "minecraft:wither" }
     },
@@ -59,7 +59,7 @@
     {
       "id": "dragon",
       "name": "终末之翼",
-      "abilities": ["soar", "soul_quench", "piercing_gaze", "death_defy"],
+      "abilities": ["soar", "soul_quench", "piercing_gaze", "perpetual_blessing"],
       "advancement": "minecraft:end/kill_dragon",
       "trigger": null
     },

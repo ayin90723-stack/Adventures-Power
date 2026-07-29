@@ -7,7 +7,9 @@ import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.util.AbilityGate;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import java.util.UUID;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraftforge.common.ForgeMod;
@@ -80,30 +82,36 @@ public class ExplorationAbilityHandler {
         // ---- 坚韧之躯 ----
         syncVitalityAttribute(player, progress.isAbilityEnabled("vitality"),
             progress.getUnlockedMilestoneCount(), progress.isFullyUnlocked());
+
+        // ---- 加速 ----
+        syncSpeedAttribute(player, progress.isAbilityEnabled("swift"),
+            progress.getUnlockedMilestoneCount(), progress.isFullyUnlocked());
     }
 
     private static void syncReachAttribute(Player player, boolean enabled, int milestones, boolean fullyUnlocked) {
-        var attr = player.getAttribute(ForgeMod.BLOCK_REACH.get());
-        if (attr == null) return;
-
-        double defaultValue = ForgeMod.BLOCK_REACH.get().getDefaultValue();
-        double currentVal = attr.getBaseValue();
-
-        if (enabled) {
-            Ability ability = AbilityRegistry.get("extended_reach");
-            if (ability == null) return;
-            float bonus = ability.value(milestones);
+        Ability ability = AbilityRegistry.get("extended_reach");
+        float bonus = 0.0F;
+        if (enabled && ability != null) {
+            bonus = ability.value(milestones);
             if (fullyUnlocked) {
                 bonus *= com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get().floatValue();
             }
-            double expected = defaultValue + bonus;
-            if (Math.abs(currentVal - expected) > 0.001) {
-                attr.setBaseValue(expected);
-            }
-        } else {
-            if (Math.abs(currentVal - defaultValue) > 0.001) {
-                attr.setBaseValue(defaultValue);
-            }
+        }
+        // 方块触及 + 实体触及（攻击距离）
+        applyReachAttr(player, ForgeMod.BLOCK_REACH.get(), bonus);
+        applyReachAttr(player, ForgeMod.ENTITY_REACH.get(), bonus);
+    }
+
+    /** 设置触及属性 baseValue = 默认 + bonus（bonus=0 时恢复默认） */
+    private static void applyReachAttr(Player player,
+                                       net.minecraft.world.entity.ai.attributes.Attribute attr, float bonus) {
+        if (attr == null) return;
+        var inst = player.getAttribute(attr);
+        if (inst == null) return;
+        double def = attr.getDefaultValue();
+        double expected = def + bonus;
+        if (Math.abs(inst.getBaseValue() - expected) > 0.001) {
+            inst.setBaseValue(expected);
         }
     }
 
@@ -139,6 +147,37 @@ public class ExplorationAbilityHandler {
         }
     }
 
+    /** 加速·移速加成的 modifier UUID（固定，用于移除/更新） */
+    private static final UUID SWIFT_SPEED_MODIFIER_UUID =
+        java.util.UUID.fromString("c4f2a3b1-7d8e-4a6b-9c0d-1e2f3a4b5c6d");
+
+    private static void syncSpeedAttribute(Player player, boolean enabled, int milestones, boolean fullyUnlocked) {
+        var attr = player.getAttribute(Attributes.MOVEMENT_SPEED);
+        if (attr == null) return;
+        float bonus = 0.0F;
+        if (enabled) {
+            Ability ability = AbilityRegistry.get("swift");
+            if (ability != null) {
+                bonus = ability.value(milestones);  // 移速加成比例（类似迅捷药水）
+                if (fullyUnlocked) {
+                    bonus *= com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get().floatValue();
+                }
+            }
+        }
+        // 仅在加成变化时更新 modifier，避免每 tick add/remove 开销
+        AttributeModifier existing = attr.getModifier(SWIFT_SPEED_MODIFIER_UUID);
+        if (bonus > 0.0F) {
+            if (existing == null || existing.getAmount() != bonus) {
+                if (existing != null) attr.removeModifier(SWIFT_SPEED_MODIFIER_UUID);
+                // MULTIPLY_TOTAL：与迅捷药水同 operation，作为额外附加速度，不改基础值
+                attr.addTransientModifier(new AttributeModifier(SWIFT_SPEED_MODIFIER_UUID,
+                    "adventure_power_swift", bonus, AttributeModifier.Operation.MULTIPLY_TOTAL));
+            }
+        } else if (existing != null) {
+            attr.removeModifier(SWIFT_SPEED_MODIFIER_UUID);
+        }
+    }
+
     // ==================== 维度切换/重生恢复 ====================
 
     /**
@@ -160,6 +199,9 @@ public class ExplorationAbilityHandler {
             if (progress.isAbilityEnabled("vitality")) {
                 syncVitalityAttribute(player, true, milestones, fullyUnlocked);
             }
+            if (progress.isAbilityEnabled("swift")) {
+                syncSpeedAttribute(player, true, milestones, fullyUnlocked);
+            }
         });
     }
 
@@ -177,10 +219,22 @@ public class ExplorationAbilityHandler {
         if (reachAttr != null && Math.abs(reachAttr.getBaseValue() - ForgeMod.BLOCK_REACH.get().getDefaultValue()) > 0.001) {
             reachAttr.setBaseValue(ForgeMod.BLOCK_REACH.get().getDefaultValue());
         }
+        if (ForgeMod.ENTITY_REACH.get() != null) {
+            var entityReachAttr = player.getAttribute(ForgeMod.ENTITY_REACH.get());
+            double erDef = ForgeMod.ENTITY_REACH.get().getDefaultValue();
+            if (entityReachAttr != null && Math.abs(entityReachAttr.getBaseValue() - erDef) > 0.001) {
+                entityReachAttr.setBaseValue(erDef);
+            }
+        }
 
         var healthAttr = player.getAttribute(Attributes.MAX_HEALTH);
         if (healthAttr != null && Math.abs(healthAttr.getBaseValue() - 20.0) > 0.001) {
             healthAttr.setBaseValue(20.0);
+        }
+
+        var speedAttr = player.getAttribute(Attributes.MOVEMENT_SPEED);
+        if (speedAttr != null) {
+            speedAttr.removeModifier(SWIFT_SPEED_MODIFIER_UUID);
         }
     }
 }

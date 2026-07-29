@@ -5,6 +5,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -18,6 +20,9 @@ import net.minecraft.world.phys.Vec3;
  *   <li>客户端 {@link JumpInputHandler} 调用 {@link #applyJump} 做即时预测（dash=true 时含御风冲刺）</li>
  *   <li>服务端 {@link DoubleJumpHandler} 调用 {@link #applyJump}（dash=false，只设 Y；水平冲刺由客户端预测，位置客户端权威）</li>
  * </ul>
+ * <p>
+ * <b>动量物理</b>：二段跳保留当前水平速度（motion.x/z 不变），跑得快自然跳得远；
+ * 御风冲刺冲量随当前移速加成（当前移速 / 基础移速），跑得快冲得远。
  */
 public final class VoidStepMovement {
 
@@ -42,7 +47,8 @@ public final class VoidStepMovement {
      * Y 直接覆盖而非 max：与原版跳跃一致，避免 max 保留当前更高速度产生的「弹跳感」。
      * </p>
      * <p>
-     * <b>御风（dash）</b>：朝玩家视角朝向（{@code YRot} 水平方向）施加冲刺冲量，由 {@code AWAKEN_VOID_STEP_DASH} 控制。
+     * <b>御风（dash）</b>：朝玩家视角朝向（{@code YRot} 水平方向）施加冲刺冲量，由 {@code AWAKEN_VOID_STEP_DASH} 控制，
+     * 并随当前移速加成（当前移速 / 基础移速），跑得快冲得远（动量物理）。
      * 客户端在觉醒+疾跑时调用 dash=true（预测）；服务端调用 dash=false（只设 Y，水平冲刺由客户端预测，位置客户端权威）。
      * </p>
      * @param dash 是否施加御风冲刺
@@ -54,9 +60,18 @@ public final class VoidStepMovement {
         entity.fallDistance = 0.0F;
 
         if (dash) {
-            // 御风：朝玩家朝向水平冲刺
             float yRot = entity.getYRot() * Mth.DEG_TO_RAD;
             double dashAmount = ModConfig.AWAKEN_VOID_STEP_DASH.get();
+            // 御风冲刺随移速加成（跑得快冲得远，动量物理一致）
+            if (entity instanceof Player p) {
+                var attr = p.getAttribute(Attributes.MOVEMENT_SPEED);
+                if (attr != null) {
+                    double def = attr.getAttribute().getDefaultValue();
+                    if (def > 0) {
+                        dashAmount *= attr.getValue() / def;
+                    }
+                }
+            }
             entity.addDeltaMovement(new Vec3(
                 -Mth.sin(yRot) * dashAmount, 0.0, Mth.cos(yRot) * dashAmount));
         }

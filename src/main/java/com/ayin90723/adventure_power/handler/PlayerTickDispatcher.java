@@ -45,5 +45,8 @@ public class PlayerTickDispatcher {
         ExplorationAbilityHandler.onTick(player, progress);
         RecoveryHandler.onTick(player, progress);
         KnockbackResistHandler.onTick(player, progress);
+        MagnetHandler.onTick(player, progress);
+        AllSeeingHandler.onTick(player, progress);
+        SwiftHandler.onTick(player, progress);
     }
 }

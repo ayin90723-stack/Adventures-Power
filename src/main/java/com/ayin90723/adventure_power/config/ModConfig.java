@@ -101,6 +101,25 @@ public class ModConfig {
     public static final IntValue ACTIVE_SKILL_SANCTUARY_COOLDOWN;
     public static final IntValue ACTIVE_SKILL_GCD;
 
+    // --- 磁吸 ---
+    public static final DoubleValue MAGNET_RADIUS_BASE;
+    public static final DoubleValue MAGNET_RADIUS_PER_MILESTONE;
+    public static final DoubleValue MAGNET_PICKUP_RADIUS;
+    public static final IntValue MAGNET_SCAN_INTERVAL;
+
+    // --- 经验加成 ---
+    public static final DoubleValue XP_BOOST_BASE;
+    public static final DoubleValue XP_BOOST_PER_MILESTONE;
+
+    // --- 全视之眼 ---
+    public static final IntValue ALL_SEEING_NIGHT_VISION_DURATION;
+
+    // --- 加速 ---
+    public static final DoubleValue SWIFT_SPEED_BASE;
+    public static final DoubleValue SWIFT_SPEED_PER_MILESTONE;
+    public static final DoubleValue SWIFT_EXHAUSTION_REDUCTION;
+    public static final IntValue SWIFT_WATER_DURATION;
+
     // ==================== 觉醒强化 ====================
     public static final DoubleValue AWAKEN_MULTIPLIER;
     public static final DoubleValue AWAKEN_VOID_STEP_DASH;
@@ -124,6 +143,16 @@ public class ModConfig {
     public static final IntValue AWAKEN_RAPID_RECOVERY_BONUS;
     public static final BooleanValue LOOT_ALL_AWAKENED_MAX_COUNT;
     public static final IntValue LOOT_ALL_AWAKENED_COPIES;
+    public static final DoubleValue AWAKEN_MAGNET_RADIUS_MULT;
+    public static final BooleanValue AWAKEN_MAGNET_INCLUDE_XP;
+    public static final DoubleValue AWAKEN_XP_BOOST_MULT;
+    public static final IntValue AWAKEN_ALL_SEING_RADIUS;
+    public static final IntValue AWAKEN_ALL_SEING_INTERVAL;
+    public static final IntValue AWAKEN_ALL_SEING_DURATION;
+    public static final IntValue AWAKEN_ALL_SEING_RADAR_MAX;
+    public static final IntValue AWAKEN_ALL_SEING_RADAR_SCAN_INTERVAL;
+    public static final DoubleValue AWAKEN_SWIFT_PUSH_RADIUS;
+    public static final DoubleValue AWAKEN_SWIFT_PUSH_STRENGTH;
 
     static {
         BUILDER.push("冒险能力配置");
@@ -296,6 +325,40 @@ public class ModConfig {
             .defineInRange("active_skill_gcd", 10, 0, 100);
         BUILDER.pop();
 
+        BUILDER.push("磁吸");
+        MAGNET_RADIUS_BASE = BUILDER.comment("基础吸取半径（格），里程碑4时的值")
+            .defineInRange("magnet_radius_base", 5.0, 0.0, 32.0);
+        MAGNET_RADIUS_PER_MILESTONE = BUILDER.comment("每额外里程碑增加的吸取半径")
+            .defineInRange("magnet_radius_per_milestone", 0.5, 0.0, 8.0);
+        MAGNET_PICKUP_RADIUS = BUILDER.comment("自动拾取距离（格），物品进入此距离立即吸入背包")
+            .defineInRange("magnet_pickup_radius", 1.5, 0.5, 6.0);
+        MAGNET_SCAN_INTERVAL = BUILDER.comment("吸取扫描间隔（tick，默认5=每0.25秒，降低性能开销）")
+            .defineInRange("magnet_scan_interval", 5, 1, 40);
+        BUILDER.pop();
+
+        BUILDER.push("经验加成");
+        XP_BOOST_BASE = BUILDER.comment("基础经验倍率，里程碑5时的值（1.25=+25%）")
+            .defineInRange("xp_boost_base", 1.25, 1.0, 10.0);
+        XP_BOOST_PER_MILESTONE = BUILDER.comment("每额外里程碑增加的经验倍率")
+            .defineInRange("xp_boost_per_milestone", 0.05, 0.0, 2.0);
+        BUILDER.pop();
+
+        BUILDER.push("全视之眼");
+        ALL_SEEING_NIGHT_VISION_DURATION = BUILDER.comment("夜视刷新时长（tick，循环刷新保持常驻，默认220=11秒留余量）")
+            .defineInRange("all_seeing_night_vision_duration", 220, 60, 1200);
+        BUILDER.pop();
+
+        BUILDER.push("加速");
+        SWIFT_SPEED_BASE = BUILDER.comment("基础速度等级（SPEED amplifier，里程碑3时的值，0=速度I）")
+            .defineInRange("swift_speed_base", 0.05, 0.0, 5.0);
+        SWIFT_SPEED_PER_MILESTONE = BUILDER.comment("每额外里程碑增加的速度等级（0.5=每2里程碑+1级）")
+            .defineInRange("swift_speed_per_milestone", 0.02, 0.0, 3.0);
+        SWIFT_EXHAUSTION_REDUCTION = BUILDER.comment("疾跑饱食消耗降低比例（0.8=降低80%，1.0=完全免费）")
+            .defineInRange("swift_exhaustion_reduction", 0.8, 0.0, 1.0);
+        SWIFT_WATER_DURATION = BUILDER.comment("水下加速（海豚祝福）刷新时长（tick，循环刷新保持常驻）")
+            .defineInRange("swift_water_duration", 220, 60, 1200);
+        BUILDER.pop();
+
         BUILDER.push("觉醒强化");
         AWAKEN_MULTIPLIER = BUILDER.comment("觉醒数值强化倍率")
             .defineInRange("awaken_multiplier", 1.5, 0.5, 10.0);
@@ -341,6 +404,26 @@ public class ModConfig {
             .define("loot_all_awakened_max_count", true);
         LOOT_ALL_AWAKENED_COPIES = BUILDER.comment("觉醒满载而归 - 每样份数")
             .defineInRange("loot_all_awakened_copies", 2, 0, 64);
+        AWAKEN_MAGNET_RADIUS_MULT = BUILDER.comment("觉醒磁吸 - 吸取半径倍率")
+            .defineInRange("awaken_magnet_radius_mult", 1.5, 1.0, 5.0);
+        AWAKEN_MAGNET_INCLUDE_XP = BUILDER.comment("觉醒磁吸 - 是否吸取经验球")
+            .define("awaken_magnet_include_xp", true);
+        AWAKEN_XP_BOOST_MULT = BUILDER.comment("觉醒经验加成 - 倍率再乘此值")
+            .defineInRange("awaken_xp_boost_mult", 1.5, 1.0, 5.0);
+        AWAKEN_ALL_SEING_RADIUS = BUILDER.comment("觉醒全视之眼 - 实体高亮半径（格）")
+            .defineInRange("awaken_all_seeing_radius", 24, 1, 128);
+        AWAKEN_ALL_SEING_INTERVAL = BUILDER.comment("觉醒全视之眼 - 高亮刷新间隔（tick，默认20=1秒）")
+            .defineInRange("awaken_all_seing_interval", 20, 1, 200);
+        AWAKEN_ALL_SEING_DURATION = BUILDER.comment("觉醒全视之眼 - 高亮持续时间（tick）")
+            .defineInRange("awaken_all_seing_duration", 40, 20, 600);
+        AWAKEN_ALL_SEING_RADAR_MAX = BUILDER.comment("觉醒全视之眼 - 威胁雷达最多显示目标数（防堵屏）")
+            .defineInRange("awaken_all_seeing_radar_max", 6, 1, 16);
+        AWAKEN_ALL_SEING_RADAR_SCAN_INTERVAL = BUILDER.comment("觉醒全视之眼 - 雷达扫描间隔（tick，默认10=0.5秒）")
+            .defineInRange("awaken_all_seeing_radar_scan_interval", 10, 1, 100);
+        AWAKEN_SWIFT_PUSH_RADIUS = BUILDER.comment("觉醒加速 - 疾跑推开半径（格）")
+            .defineInRange("awaken_swift_push_radius", 3.0, 0.0, 16.0);
+        AWAKEN_SWIFT_PUSH_STRENGTH = BUILDER.comment("觉醒加速 - 疾跑推力强度")
+            .defineInRange("awaken_swift_push_strength", 0.6, 0.0, 4.0);
         BUILDER.pop(); // 觉醒强化
 
         BUILDER.pop(); // 能力数值

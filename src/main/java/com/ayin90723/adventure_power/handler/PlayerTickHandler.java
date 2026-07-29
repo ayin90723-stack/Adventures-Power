@@ -156,5 +156,7 @@ public class PlayerTickHandler {
         UUID uuid = event.getEntity().getUUID();
         lastBuffCheck.remove(uuid);
         BuffExclusionManager.clearCache(uuid);
+        MagnetHandler.onLogout(uuid);
+        SwiftHandler.onLogout(uuid);
     }
 }
