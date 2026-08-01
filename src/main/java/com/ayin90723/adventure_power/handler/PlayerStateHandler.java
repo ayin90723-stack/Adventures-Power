@@ -276,8 +276,12 @@ public class PlayerStateHandler {
                     player.getAbilities().mayfly = false;
                     player.getAbilities().flying = false;
                     player.getAbilities().setFlyingSpeed(0.05F);  // 与 tick 回收路径一致，重置飞行速度
-                    progress.setSoarGrantedFlight(false);
                     player.onUpdateAbilities();
+                }
+                // 无条件清标记（与 tick 回收路径一致）：关闭时即使没在飞也不残留，
+                // 防后续其他来源授予的 mayfly 被误判为翱翔给的而没收
+                if (progress.isSoarGrantedFlight()) {
+                    progress.setSoarGrantedFlight(false);
                 }
             }
         });
@@ -456,8 +460,12 @@ public class PlayerStateHandler {
                 player.getAbilities().mayfly = false;
                 player.getAbilities().flying = false;
                 player.getAbilities().setFlyingSpeed(0.05F);  // 恢复原版飞行速度
-                progress.setSoarGrantedFlight(false);
                 player.onUpdateAbilities();
+            }
+            // 无条件清标记：关闭时即使没在飞（mayfly=false 使回收分支不执行）也不残留，
+            // 否则之后其他来源（套装等）授予 mayfly 时会被本分支误判为翱翔给的而没收
+            if (progress.isSoarGrantedFlight()) {
+                progress.setSoarGrantedFlight(false);
             }
         }
 
