@@ -26,6 +26,7 @@ public class AllSeeingClientHandler {
         if (event.getFarPlaneDistance() < FAR_PLANE) {
             event.setFarPlaneDistance(FAR_PLANE);
         }
-        event.setNearPlaneDistance(0.0F);
+        // 近平面给一个极小正数而非 0：部分渲染器对 0 近平面敏感，可能导致深度裁剪异常
+        event.setNearPlaneDistance(0.05F);
     }
 }

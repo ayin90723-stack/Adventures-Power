@@ -1,5 +1,7 @@
 package com.ayin90723.adventure_power.mixin;
 
+import com.ayin90723.adventure_power.util.AbilityGate;
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import net.minecraft.world.entity.LivingEntity;
@@ -45,13 +47,13 @@ public abstract class DeathDefyMixin {
         }
         if (newHealth >= currentHealth) return;
 
-        AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if ((progress.isAdventurer() || progress.isFullyUnlocked())
-                  && progress.isAbilityEnabled("death_defy")
-                  && progress.isDeathDefyInvulnerable(player.level().getGameTime())) {
-                ci.cancel();
-            }
-        });
+        // ProgressCache 按 tick 缓存 progress 引用，避免 setHealth 高频调用每次 resolve
+        var progress = com.ayin90723.adventure_power.util.ProgressCache.get(player);
+        if (progress != null && (progress.isAdventurer() || progress.isFullyUnlocked())
+              && progress.isAbilityEnabled(AbilityIds.DEATH_DEFY)
+              && progress.isDeathDefyInvulnerable(player.level().getGameTime())) {
+            ci.cancel();
+        }
     }
 
     // ===== 层2：tick TAIL 兜底钳制 =====
@@ -70,19 +72,18 @@ public abstract class DeathDefyMixin {
         if (!(self instanceof Player player)) return;
         if (player.level().isClientSide()) return;
 
-        AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
-            if (!progress.isAbilityEnabled("death_defy")) return;
-            if (!progress.isDeathDefyInvulnerable(player.level().getGameTime())) return;
+        var progress = com.ayin90723.adventure_power.util.ProgressCache.get(player);
+        if (progress == null) return;
+        if (!AbilityGate.isActive(progress, AbilityIds.DEATH_DEFY)) return;
+        if (!progress.isDeathDefyInvulnerable(player.level().getGameTime())) return;
 
-            float current = HealthUtil.getHealthDirect(player);
-            if (current < DEATH_DEFY_CLAMP_HEALTH) {
-                // catchSetTrueHealth 直写了 DataItem.value → getHealth() 已反映新值
-                // setAllHealthLikeRaw 遍历所有血量条目并直接用反射写回，
-                // 覆盖 VarHandle 直写的结果
-                HealthUtil.setHealthDirect(player, DEATH_DEFY_CLAMP_HEALTH);
-                player.setHealth(DEATH_DEFY_CLAMP_HEALTH);
-            }
-        });
+        float current = HealthUtil.getHealthDirect(player);
+        if (current < DEATH_DEFY_CLAMP_HEALTH) {
+            // catchSetTrueHealth 直写了 DataItem.value → getHealth() 已反映新值
+            // setAllHealthLikeRaw 遍历所有血量条目并直接用反射写回，
+            // 覆盖 VarHandle 直写的结果
+            HealthUtil.setHealthDirect(player, DEATH_DEFY_CLAMP_HEALTH);
+            player.setHealth(DEATH_DEFY_CLAMP_HEALTH);
+        }
     }
 }

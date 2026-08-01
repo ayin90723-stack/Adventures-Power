@@ -1,6 +1,8 @@
 package com.ayin90723.adventure_power.handler;
 
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.AdventurePower;
+import com.mojang.logging.LogUtils;
 import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.ability.ShadowKillAbility;
@@ -53,6 +55,8 @@ import java.util.concurrent.ConcurrentHashMap;
 @Mod.EventBusSubscriber(modid = AdventurePower.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class ShadowKillHelper {
 
+    private static final org.slf4j.Logger LOGGER = LogUtils.getLogger();
+
     // ==================== 影杀 — 影子血量 NBT 键 (攻击者侧存储) ====================
     private static final String NBT_SP_DATA = PersistentDataKeys.SHADOW_HP_DATA;
     private static final String NBT_SP_TOTAL_HP = PersistentDataKeys.SHADOW_HP_TOTAL;
@@ -62,8 +66,12 @@ public class ShadowKillHelper {
     /** 防重入：正在斩杀中的目标 */
     private static final Set<UUID> KILLING = ConcurrentHashMap.newKeySet();
 
-    /** 同 tick 去重：防止原版 post + Layer 0 postHurtEvent 导致影杀调两次（双倍削减） */
-    private static final Set<UUID> SHADOW_KILL_TICKED = ConcurrentHashMap.newKeySet();
+    /**
+     * 同 tick 去重：防止原版 post + Layer 0 postHurtEvent 导致影杀调两次（双倍削减）。
+     * 按 (attacker, target) 复合 key——多人同 tick 攻击同一目标时，
+     * 不同攻击者的影子血量削减互不跳过，只防同一攻击者的重复结算。
+     */
+    private static final Set<String> SHADOW_KILL_TICKED = ConcurrentHashMap.newKeySet();
 
     /** target 有效性检测宽限：跨维度传送时短暂不在任何维度，避免误清 */
     private static final Map<UUID, Integer> MISSING_TARGET_TICKS = new ConcurrentHashMap<>();
@@ -95,10 +103,11 @@ public class ShadowKillHelper {
         if (DamageUtil.isInternalSource(event.getSource())) return;
         if (KILLING.contains(target.getUUID())) return;
         // 同 tick 去重：原版 LivingHurtEvent + Layer 0 postHurtEvent 可能同 tick 触发两次
-        if (!SHADOW_KILL_TICKED.add(target.getUUID())) return;
+        // （复合 key：同 attacker 同 target 才去重，不影响多人各削各的）
+        if (!SHADOW_KILL_TICKED.add(attacker.getUUID() + ":" + target.getUUID())) return;
 
         int milestones = progress.getUnlockedMilestoneCount();
-        Ability raw = AbilityRegistry.get("shadow_kill");
+        Ability raw = AbilityRegistry.get(AbilityIds.SHADOW_KILL);
         if (!(raw instanceof ShadowKillAbility ability)) return;
 
         float flatDamage = ability.flatDamage();
@@ -159,6 +168,7 @@ public class ShadowKillHelper {
         // 影子血量归零 → 饱和式秒杀
         if (shadowHP <= 0.0F) {
             shadowData.remove(targetKey);
+            MISSING_TARGET_TICKS.remove(target.getUUID());
             if (shadowData.isEmpty()) {
                 playerData.remove(NBT_SP_DATA);
             } else {
@@ -169,7 +179,7 @@ public class ShadowKillHelper {
             event.setCanceled(true);  // 取消原事件伤害，避免与下面 hurt() 叠加
             target.setLastHurtByMob(attacker);
             target.setLastHurtByPlayer(attacker);
-            executeShadowKill(target, attacker, event.getSource());
+            executeShadowKill(target, attacker);
 
             // 觉醒：影杀 AOE 爆炸
             if (progress.isFullyUnlocked()) {
@@ -213,10 +223,10 @@ public class ShadowKillHelper {
                 dropAll.setAccessible(true);
                 dropAll.invoke(target, source);
             } catch (Exception ex) {
-                ex.printStackTrace();
+                LOGGER.error("[ShadowKill] 反射/内部操作失败", ex);
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            LOGGER.error("[ShadowKill] 反射/内部操作失败", e);
         }
 
         // ④ 手动 post LivingDeathEvent（墓碑/任务模组可正常处理）
@@ -289,6 +299,7 @@ public class ShadowKillHelper {
         }
         for (String uuidKey : expired) {
             shadowData.remove(uuidKey);
+            MISSING_TARGET_TICKS.remove(UUID.fromString(uuidKey));
             removeShadowHPBossBarByUUID(uuidKey);
         }
     }
@@ -356,8 +367,9 @@ public class ShadowKillHelper {
             // 影子血量归零 → 触发斩杀
             if (newShadow <= 0.0F) {
                 shadowData.remove(targetKey);
+                MISSING_TARGET_TICKS.remove(target.getUUID());
                 removeShadowHPBossBar(target);
-                executeShadowKill(target, attacker, attacker.damageSources().playerAttack(attacker));
+                executeShadowKill(target, attacker);
                 count++;
                 continue;
             }
@@ -382,10 +394,14 @@ public class ShadowKillHelper {
     // ==================== 执行斩杀 ====================
 
     /**
-     * 执行影杀斩杀：清无敌帧 → hurt(Float.MAX_VALUE) → saturationKill 兜底。
+     * 执行影杀斩杀：清无敌帧 → hurt(内部 shadow_kill 伤害源) → saturationKill 兜底。
+     * <p>
+     * 使用内部伤害源而非普通玩家源：斩杀伤害不会重新触发嗜血吸血/淬魂追加/
+     * 影杀影子血量削减等模组能力结算（isInternalSource 统一拦截）。
      * NBT 清理和 BossBar 移除由调用方负责。
      */
-    private static void executeShadowKill(LivingEntity target, Player attacker, DamageSource killSource) {
+    private static void executeShadowKill(LivingEntity target, Player attacker) {
+        DamageSource killSource = DamageUtil.createShadowKill(target.level(), attacker);
         CombatAbilityHandler.clearHurtTime(target);
         target.invulnerableTime = 0;
         KILLING.add(target.getUUID());
@@ -410,6 +426,7 @@ public class ShadowKillHelper {
         if (target.level().isClientSide()) return;
 
         removeShadowHPBossBar(target);
+        MISSING_TARGET_TICKS.remove(target.getUUID());
         String targetKey = target.getUUID().toString();
         for (Player onlinePlayer : target.level().players()) {
             CompoundTag playerData = onlinePlayer.getPersistentData();
@@ -433,6 +450,10 @@ public class ShadowKillHelper {
     @SubscribeEvent
     public static void onServerTick(ServerTickEvent event) {
         if (event.phase != Phase.END) return;
+
+        // 防御性兜底：外部模组 cancel hurt() 导致 ThreadLocal 深度残留时归零
+        // （hurt 不跨 tick，tick 末深度必为 0 是不变量，无条件归零安全）
+        HealthUtil.resetHurtDepthPerTick();
 
         // 每 tick 清去重标记（防影杀同 tick 双倍削减）
         SHADOW_KILL_TICKED.clear();
@@ -508,6 +529,21 @@ public class ShadowKillHelper {
      */
     @SubscribeEvent
     public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
+        Map<UUID, ServerBossEvent> inner = SHADOW_HP_BARS.remove(event.getEntity().getUUID());
+        if (inner != null) {
+            for (ServerBossEvent bar : inner.values()) {
+                bar.removeAllPlayers();
+            }
+        }
+    }
+
+    /**
+     * 玩家死亡重生/换维度（Clone）时清理该玩家的影子血量 BossBar，
+     * 否则 bar 仍持有死亡旧实例，重生后同目标重复广播浪费带宽（客户端按 UUID 去重不显示重复）。
+     * 影子血量数据：死亡清零（刻意设计），维度切换由 CapabilityLifecycleHandler 转移。
+     */
+    @SubscribeEvent
+    public static void onPlayerClone(PlayerEvent.Clone event) {
         Map<UUID, ServerBossEvent> inner = SHADOW_HP_BARS.remove(event.getEntity().getUUID());
         if (inner != null) {
             for (ServerBossEvent bar : inner.values()) {

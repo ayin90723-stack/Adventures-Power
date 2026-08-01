@@ -20,6 +20,9 @@ public abstract class LinearGrowthAbility extends AbstractAbility {
 
     @Override
     public float value(int count) {
-        return base() + perMilestone() * (count - countAtUnlock);
+        // 下限保护：乱序解锁里程碑时 count - countAtUnlock 可能为负，
+        // 否则会出现反向效果（如坚韧之躯裁剪最大生命、鸿运当头扣附魔等级）
+        int growth = Math.max(0, count - countAtUnlock);
+        return base() + perMilestone() * growth;
     }
 }

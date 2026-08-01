@@ -46,22 +46,31 @@ public class CapabilityLifecycleHandler {
         Player oldPlayer = event.getOriginal();
         Player newPlayer = event.getEntity();
 
-        // 恢复策略：persistentData 是 Entity 自身的 NBT，不依赖 Capability 生命周期，
-        // 死亡/跨维度后依然可读。优先用它恢复，其次尝试 Capability 直读，最后扫描物品。
-        CompoundTag saved = oldPlayer.getPersistentData().getCompound(PersistentDataKeys.ADVENTURE_PROGRESS);
-
+        // 恢复策略（优先级：活跃 Capability > persistentData 快照 > 物品 NBT）：
+        // persistentData 快照只在登录/解锁等时机写入，登录后必然过期
+        // （能力开关、备份血量、受击坚韧层数等变更点不写快照），若优先用它恢复
+        // 会回滚玩家最近设置（能力开关被重置、backupHealth 回退触发 TrueHealth 误判）。
+        // 旧 Capability 才是活跃数据；先 reviveCaps() 处理死亡时 LazyOptional 失效的情况。
+        oldPlayer.reviveCaps();
+        CompoundTag saved = oldPlayer.getCapability(AdventureProgressCapability.CAPABILITY)
+            .map(IAdventureProgress::serializeNBT).orElse(new CompoundTag());
         if (saved.isEmpty()) {
-            // persistentData 为空 -> 尝试从旧 Capability 读取
-            // 先 reviveCaps() 因为死亡时 invalidateCaps() 可能已使 LazyOptional 失效
-            oldPlayer.reviveCaps();
-            saved = oldPlayer.getCapability(AdventureProgressCapability.CAPABILITY)
-                .map(IAdventureProgress::serializeNBT).orElse(new CompoundTag());
+            // Capability 未附加/已失效 -> 回退 persistentData 快照
+            saved = oldPlayer.getPersistentData().getCompound(PersistentDataKeys.ADVENTURE_PROGRESS);
         }
 
         if (!saved.isEmpty()) {
             final CompoundTag data = saved;
             newPlayer.getCapability(AdventureProgressCapability.CAPABILITY).ifPresent(newCap ->
                 newCap.deserializeNBT(data));
+        }
+
+        // 维度切换（非死亡 clone）保留影杀影子血量进度；死亡清零为刻意设计（重生后重新积累）
+        if (!event.isWasDeath()) {
+            CompoundTag oldShadowData = oldPlayer.getPersistentData().getCompound(PersistentDataKeys.SHADOW_HP_DATA);
+            if (!oldShadowData.isEmpty()) {
+                newPlayer.getPersistentData().put(PersistentDataKeys.SHADOW_HP_DATA, oldShadowData);
+            }
         }
 
         // 兜底：以上均未恢复 -> 扫描物品 NBT
@@ -129,6 +138,9 @@ public class CapabilityLifecycleHandler {
             // 4. 清理旧 AdventureStage NBT（可能残留在物品上）
             AdventureItemNbtUtil.cleanOldStageNbt(player);
 
+            // 5. 计分板写 0/1（未解锁写 0，便于命令方块区分「未解锁」与「从未初始化」）
+            ScoreboardUtil.updateScoreboard(player, progress.isFullyUnlocked());
+
             SyncUtil.syncCapabilityToPersistent(player, progress);
         });
 
@@ -176,12 +188,12 @@ public class CapabilityLifecycleHandler {
                 player.spawnAtLocation(stack);
                 if (player instanceof ServerPlayer sp) {
                     sp.displayClientMessage(
-                        Component.literal("§e你的物品栏已满，§6冒险的开始§e掉落在地上了！捡起并佩戴以开启冒险")
+                        Component.translatable("msg.adventure_power.inventory_full")
                             .withStyle(ChatFormatting.GOLD), false);
                 }
             } else if (player instanceof ServerPlayer sp) {
                 sp.displayClientMessage(
-                    Component.literal("§e你收到了一份 §6冒险的开始 §e- 佩戴它以开启冒险")
+                    Component.translatable("msg.adventure_power.got_begin")
                         .withStyle(ChatFormatting.GOLD), false);
             }
             persistent.putBoolean(PersistentDataKeys.GOT_BEGIN_KEY, true);

@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.util;
 
+import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.network.syncher.EntityDataAccessor;
@@ -43,12 +44,26 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class HealthUtil {
 
+    private static final org.slf4j.Logger LOGGER = LogUtils.getLogger();
+
     /**
      * hurt() 调用嵌套深度计数器。
      * 由 {@code RejectHealthManipMixin} 在 hurt() HEAD/RETURN 维护，
      * 由 {@code TrueHealthMixin} 在 setHealth RETURN 读取以判断是否合法 hurt 路径。
      */
     public static final ThreadLocal<Integer> HURT_DEPTH = ThreadLocal.withInitial(() -> 0);
+
+    /**
+     * 每 tick 末强制归零 HURT_DEPTH（由 ServerTickEnd 调用）。
+     * <p>
+     * 防御外部模组对 {@code hurt()} HEAD 做 cancellable cancel（低优先级 Mixin）：
+     * 此时 RETURN 注入不执行、深度残留 +1，reject_manip 的 setHealth 降血保护会
+     * 永久失效。hurt() 是同步调用且绝不跨 tick，故「tick 末深度必为 0」是稳定不变量，
+     * 无条件归零安全；泄漏窗口从「永久」降为「cancel 发生的同 tick 内」。
+     */
+    public static void resetHurtDepthPerTick() {
+        HURT_DEPTH.set(0);
+    }
 
     private static Field DATA_HEALTH_ID_FIELD;
     private static EntityDataAccessor<Float> DATA_HEALTH_ID;
@@ -61,7 +76,7 @@ public class HealthUtil {
                 DATA_HEALTH_ID_FIELD = LivingEntity.class.getDeclaredField("DATA_HEALTH_ID");
             } catch (NoSuchFieldException ex) {
                 System.err.println("[AdventurePower] HealthUtil: 无法反射获取 DATA_HEALTH_ID 字段，setHealthDirect 将不可用");
-                ex.printStackTrace();
+                LOGGER.error("[HealthUtil] 反射/内部操作失败", ex);
             }
         }
         if (DATA_HEALTH_ID_FIELD != null) {
@@ -96,7 +111,7 @@ public class HealthUtil {
                 if (value != null) return value;
             }
         } catch (IllegalAccessException | ClassCastException e) {
-            e.printStackTrace();
+            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
         }
         return target.getHealth();
     }
@@ -126,7 +141,7 @@ public class HealthUtil {
                 target.getEntityData().set(DATA_HEALTH_ID, health);
             }
         } catch (IllegalAccessException | ClassCastException e) {
-            e.printStackTrace();
+            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
         }
     }
 
@@ -163,7 +178,7 @@ public class HealthUtil {
                 ENTITY_DATA_ITEMS_FIELD = SynchedEntityData.class.getDeclaredField("itemsById");
             } catch (NoSuchFieldException ex) {
                 System.err.println("[AdventurePower] HealthUtil: 无法反射获取 SynchedEntityData.itemsById 字段");
-                ex.printStackTrace();
+                LOGGER.error("[HealthUtil] 反射/内部操作失败", ex);
             }
         }
         if (ENTITY_DATA_ITEMS_FIELD != null) {
@@ -179,7 +194,7 @@ public class HealthUtil {
             }
         } catch (ClassNotFoundException | NoSuchFieldException e) {
             System.err.println("[AdventurePower] HealthUtil: 无法反射获取 DataItem.value 字段");
-            e.printStackTrace();
+            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
         }
         if (DATA_ITEM_VALUE_FIELD != null) {
             DATA_ITEM_VALUE_FIELD.setAccessible(true);
@@ -298,7 +313,7 @@ public class HealthUtil {
                 }
             }
         } catch (IllegalAccessException | ClassCastException e) {
-            e.printStackTrace();
+            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
         }
     }
 
@@ -344,7 +359,7 @@ public class HealthUtil {
                 }
             }
         } catch (IllegalAccessException | ClassCastException e) {
-            e.printStackTrace();
+            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
         }
     }
 
@@ -437,7 +452,7 @@ public class HealthUtil {
             }
             ENTITY_REMOVE_METHOD.invoke(target, reason);
         } catch (Exception e) {
-            e.printStackTrace();
+            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
         }
     }
 
@@ -471,7 +486,7 @@ public class HealthUtil {
             }
             ENTITY_SET_REMOVED_METHOD.invoke(target, reason);
         } catch (Exception e) {
-            e.printStackTrace();
+            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
         }
     }
 
@@ -500,7 +515,7 @@ public class HealthUtil {
             }
             ENTITY_REMOVAL_REASON_FIELD.set(target, null);
         } catch (Exception e) {
-            e.printStackTrace();
+            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
         }
     }
 
@@ -564,7 +579,7 @@ public class HealthUtil {
             ep = reflectField(etlClz, "f_156904_", "passive");
         } catch (ClassNotFoundException e) {
             System.err.println("[AdventurePower] HealthUtil: 内部类反射初始化失败，eradicateFromWorld 将不可用");
-            e.printStackTrace();
+            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
         }
         ESM_VISIBLE_ENTITY_STORAGE = elu;
         ESM_KNOWN_UUIDS = ku;
@@ -824,7 +839,7 @@ public class HealthUtil {
             }
             ENTITY_REMOVAL_REASON_FIELD.set(target, reason);
         } catch (Exception e) {
-            e.printStackTrace();
+            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
         }
     }
 }

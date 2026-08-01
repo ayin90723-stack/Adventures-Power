@@ -4,7 +4,7 @@
 
 从 v1.1.5 起，"冒险的力量"的里程碑系统支持通过 **Minecraft 数据包** 完全自定义。
 
-v1.1.5 起**彻底移除了 Minecraft 成就系统**，里程碑进度通过饰品 tooltip 和 M 键界面查看。
+v1.1.5 起**彻底移除了 Minecraft 成就系统**，里程碑进度通过饰品 tooltip 和 P 键统一面板（冒险进度标签）查看。
 
 你可以：
 - 增减里程碑数量（不限于 10 个）
@@ -90,7 +90,7 @@ v1.1.5 起**彻底移除了 Minecraft 成就系统**，里程碑进度通过饰�
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `id` | string | ✅ | 里程碑唯一 ID。只能用小写字母、数字、下划线 |
-| `name` | string | ✅ | 显示在饰品 tooltip 和 M 键进度界面的名称 |
+| `name` | string | ✅ | 显示在饰品 tooltip 和 P 键进度界面的名称 |
 | `abilities` | string[] | ✅ | 该里程碑解锁后变为可用的能力 ID 列表 |
 | `advancement` | ResourceLocation | ❌ | 关联的原版成就。玩家获得该成就即触发里程碑。填写原版成就 ID（如 `minecraft:story/mine_stone`） |
 | `trigger` | object\|null | ❌ | 自定义触发器。`null` 表示不使用自定义触发 |
@@ -101,33 +101,38 @@ v1.1.5 起**彻底移除了 Minecraft 成就系统**，里程碑进度通过饰�
 
 ## 可用能力 ID
 
-26 种能力及其 ID：
+30 种能力及其 ID：
 
 | 能力名 | ID | 说明 |
 |--------|-----|------|
 | 灵巧 | `agility` | 概率闪避伤害 |
 | 大地之力 | `digging_power` | 提升挖掘速度 |
 | 恩赐永驻 | `perpetual_blessing` | 正面效果自动续期 |
-| 虚空踏步 | `void_step` | 二段跳（觉醒后三段跳） |
-| 休养生息 | `rapid_recovery` | 脱战自动回血 |
-| 灵魂绑定 | `soul_bind` | 死亡保留 Buff 和经验 |
+| 虚空踏步 | `void_step` | 二段跳（觉醒·御风：疾跑时朝视角冲刺） |
+| 休养生息 | `rapid_recovery` | 脱战直写回血 + 恢复饱食度 |
+| 灵魂绑定 | `soul_bind` | 死亡保留 Buff（觉醒保留经验） |
 | 不动如山 | `knockback_resist` | 减少击退 |
-| 伤害抗性 | `damage_resist` | 百分比减伤 |
+| 加速 | `swift` | 疾跑加速 + 降低疾跑饱食消耗（觉醒推开敌对生物） |
+| 全视之眼 | `all_seeing` | 夜视 + 去雾（觉醒威胁雷达） |
 | 无形之手 | `extended_reach` | 增加触及距离 |
+| 磁吸 | `magnet` | 自动吸取附近掉落物（觉醒范围扩大+经验球） |
 | 不朽装备 | `undying_gear` | 装备免耐久 |
 | 鸿运当头 | `fortune_favor` | 时运/抢夺加成 |
+| 经验加成 | `xp_boost` | 拾取经验球经验倍率（觉醒倍率提升） |
 | 环境免疫 | `env_immunity` | 免疫环境伤害 |
-| 嗜血 | `lifesteal` | 攻击吸血 |
+| 嗜血 | `lifesteal` | 攻击吸血（觉醒过量转护盾） |
+| 伤害抗性 | `damage_resist` | 百分比减伤 |
 | 禁疗之触 | `healing_block` | 禁疗目标 |
 | 坚韧之躯 | `vitality` | 提升最大生命值 |
+| 死亡抗拒 | `death_defy` | 免死一次（觉醒触发免费审判） |
 | 受击坚韧 | `resilience` | 受击叠层减伤 |
 | 净魂 | `purified_soul` | 免疫负面效果 |
 | 满载而归 | `loot_all` | 击杀生物额外掉落每样一份 |
 | 翱翔 | `soar` | 创造飞行 |
 | 淬魂之力 | `soul_quench` | 真实百分比伤害 |
 | 破敌之眼 | `piercing_gaze` | 穿透无敌 |
-| 死亡抗拒 | `death_defy` | 免死一次 |
-| 影杀 | `shadow_kill` | 影子血量斩杀 |
+| 恩赐永驻 | `perpetual_blessing` | 正面效果自动续期（觉醒不可驱散） |
+| 影杀 | `shadow_kill` | 影子血量斩杀（觉醒 AOE 链） |
 | 真实血量 | `true_health` | 保护血量 |
 | 拒绝篡改 | `reject_manip` | 拦截非法血量修改 |
 | 旅者之力 | `active_skill` | 主动技能（审判+庇护） |
@@ -144,7 +149,7 @@ v1.1.5 起**彻底移除了 Minecraft 成就系统**，里程碑进度通过饰�
 "trigger": { "type": "survive_night" }
 ```
 
-**触发条件**：游戏时间超过 24000 tick 且当前为白天。不需要额外参数。
+**触发条件**：游戏时间达到 23000 tick（第一个黎明）且当前为白天。不需要额外参数。
 
 ---
 
@@ -384,7 +389,7 @@ v1.1.5 起**彻底移除了 Minecraft 成就系统**，里程碑进度通过饰�
 | 灵巧 | `10% + 7% × (总数 - countAtUnlock)` | 闪避率 |
 | 伤害抗性 | `10% + 5% × (总数 - countAtUnlock)` | 减伤率 |
 | 不动如山 | `30% + 7% × (总数 - countAtUnlock)` | 击退抗性 |
-| 虚空踏步 | `1.0 + 0.03 × (总数 - countAtUnlock)` | 跳跃倍率 |
+| 虚空踏步 | 固定 1.2（无成长） | 跳跃倍率；觉醒·御风改为疾跑时朝视角冲刺 |
 | 休养生息 | `amp_base + amp_step × floor((总数 - countAtUnlock) / 2)` | 再生等级 |
 | 嗜血 | `5% + 2% × (总数 - countAtUnlock)` | 吸血率 |
 | 大地之力 | `1.3 + 0.05 × (总数 - countAtUnlock)` | 挖掘倍率 |
@@ -418,7 +423,7 @@ v1.1.5 起**彻底移除了 Minecraft 成就系统**，里程碑进度通过饰�
 
 检查：
 1. `advancement` 指向的成就 ID 是否正确（注意命名空间）
-2. 如果使用 `trigger`，触发条件是否满足（按 M 键查看解锁条件）
+2. 如果使用 `trigger`，触发条件是否满足（按 P 键打开冒险进度标签查看解锁条件）
 3. `advancement` 和 `trigger` 至少填一个
 4. 是否已佩戴冒险的开始饰品（未佩戴时不会触发）
 
@@ -457,7 +462,7 @@ v1.1.5 起**彻底移除了 Minecraft 成就系统**，里程碑进度通过饰�
 
 1. **先小改**：从默认 JSON 出发，每次只改一个里程碑，用 `/reload` 验证
 2. **检查日志**：模组在加载里程碑时会输出日志，`[MilestoneRegistry]` 前缀的信息包含加载了多少里程碑、是否有错误
-3. **按 M 键**：打开冒险进度界面，查看里程碑列表和解锁条件是否正确
+3. **按 P 键**：打开冒险统一面板（冒险进度标签），查看里程碑列表和解锁条件是否正确
 4. **用命令触发**：`/advancement grant @s only minecraft:story/mine_stone` 可手动触发原版成就来测试
 5. **备份存档**：改动数据包前备份世界，以防意外损坏进度
 

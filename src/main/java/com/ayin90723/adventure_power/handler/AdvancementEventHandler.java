@@ -64,7 +64,8 @@ public class AdvancementEventHandler {
             // 再检查 trigger 是否已可触发（所有 5 种类型均支持追赶）
             if (m.trigger() != null) {
                 boolean met = switch (m.trigger().type()) {
-                    case "survive_night" -> player.level().getDayTime() > 24000 && player.level().isDay();
+                    // 第一个黎明（23000）即判定度过首夜，与 MilestoneTriggerManager 保持一致
+                    case "survive_night" -> player.level().getDayTime() >= 23000 && player.level().isDay();
                     case "y_below" -> player.getY() < (m.trigger().y() != null ? m.trigger().y() : 0);
                     case "first_death" -> player.getStats().getValue(Stats.CUSTOM.get(Stats.DEATHS)) > 0;
                     case "first_trade" -> player.getStats().getValue(Stats.CUSTOM.get(Stats.TALKED_TO_VILLAGER)) > 0;
@@ -86,6 +87,8 @@ public class AdvancementEventHandler {
             SyncUtil.syncCapabilityToPersistent(player, progress);
             AdventureItemNbtUtil.syncAllAdventureItemNbt(player, progress);
             SyncUtil.syncToClient(player);
+            // 补解锁可能一次凑满 10/10 里程碑：必须走统一的觉醒级联，否则第 11 阶段永久失效
+            AdventureProgressCapability.activateFinalStageIfReady(player, progress);
         }
     }
 

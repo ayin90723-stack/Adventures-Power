@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.handler;
 
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
@@ -46,17 +47,23 @@ public class PlayerTickHandler {
     private static final int BUFF_CHECK_INTERVAL = 60;
     private static final Map<UUID, Long> lastBuffCheck = new HashMap<>();
 
+    /** 已执行过开局安全网的玩家（内存标记，避免每 tick 读 persistentData 的 NBT 查找） */
+    private static final Set<UUID> VERIFIED_BEGIN_ITEM = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     /**
      * 开局安全网（门禁前，由 PlayerTickDispatcher 调用）。
      * 补发冒险饰品 + 自动激活冒险者（每玩家仅一次）+ 测试入口全解锁。
      * 需对非冒险者执行，故在分发器门禁前调用。
      */
     public static void tickSafetyNet(Player player, IAdventureProgress progress) {
-        // 补发冒险饰品 + 自动激活冒险者（每玩家仅一次，persistentData 标记）
-        if (!player.getPersistentData().getBoolean(PersistentDataKeys.VERIFIED_BEGIN_ITEM_KEY)) {
-            player.getPersistentData().putBoolean(PersistentDataKeys.VERIFIED_BEGIN_ITEM_KEY, true);
-            CapabilityLifecycleHandler.giveAdventureBeginIfNeeded(player);
-            CapabilityLifecycleHandler.checkAndActivateAdventurer(player);
+        // 补发冒险饰品 + 自动激活冒险者（每玩家仅一次；内存标记 + persistentData 双保险）
+        if (!VERIFIED_BEGIN_ITEM.contains(player.getUUID())) {
+            VERIFIED_BEGIN_ITEM.add(player.getUUID());
+            if (!player.getPersistentData().getBoolean(PersistentDataKeys.VERIFIED_BEGIN_ITEM_KEY)) {
+                player.getPersistentData().putBoolean(PersistentDataKeys.VERIFIED_BEGIN_ITEM_KEY, true);
+                CapabilityLifecycleHandler.giveAdventureBeginIfNeeded(player);
+                CapabilityLifecycleHandler.checkAndActivateAdventurer(player);
+            }
         }
 
         // 测试便捷入口：持有冒险的终点 -> 自动全解锁（每 20 tick 检查一次，降低物品栏遍历开销）
@@ -79,7 +86,7 @@ public class PlayerTickHandler {
 
         // 翱翔飞行立即同步：fullyUnlocked 不等下一 tick handler，
         // 避免两处 TickEvent.Phase.END handler 执行顺序不确定导致的竞态
-        if (progress.isAbilityEnabled("soar") && !player.getAbilities().mayfly
+        if (progress.isAbilityEnabled(AbilityIds.SOAR) && !player.getAbilities().mayfly
             && !player.getAbilities().instabuild && !player.isSpectator()) {
             player.getAbilities().mayfly = true;
             player.onUpdateAbilities();
@@ -94,7 +101,7 @@ public class PlayerTickHandler {
         long currentTime = player.level().getGameTime();
 
         // Buff 延长（每 3 秒）
-        if (progress.isAbilityEnabled("perpetual_blessing")) {
+        if (progress.isAbilityEnabled(AbilityIds.PERPETUAL_BLESSING)) {
             long lastCheck = lastBuffCheck.getOrDefault(player.getUUID(), -1L);
             if (lastCheck == -1L) {
                 lastBuffCheck.put(player.getUUID(), currentTime);
@@ -107,12 +114,12 @@ public class PlayerTickHandler {
         }
 
         // 环境免疫：每 tick 清除火焰（先检查是否着火，避免无火时的不必要同步）
-        if (progress.isAbilityEnabled("env_immunity") && player.getRemainingFireTicks() > 0) {
+        if (progress.isAbilityEnabled(AbilityIds.ENV_IMMUNITY) && player.getRemainingFireTicks() > 0) {
             player.clearFire();
         }
 
         // 受击坚韧：超过 5 秒无受伤 -> 层数归零
-        if (progress.isAbilityEnabled("resilience")) {
+        if (progress.isAbilityEnabled(AbilityIds.RESILIENCE)) {
             long lastHurt = progress.getLastHurtTime();
             if (lastHurt > 0 && currentTime - lastHurt >= ModConfig.RESILIENCE_RESET_TICKS.get()) {
                 progress.setResilienceStacks(0);
@@ -140,8 +147,11 @@ public class PlayerTickHandler {
                 if (excluded.contains(effectId)) continue;
                 if (effect.getDuration() < threshold) {
                     extended = true;
+                    // 重建时携带 factorData（潮涌能量等环境效果数据），避免续期后丢失环境属性
+                    // （隐藏效果链 1.20.1 无 getter，按原 6 参构造器行为重建时不保留）
                     player.addEffect(new MobEffectInstance(effect.getEffect(), threshold,
-                        effect.getAmplifier(), effect.isAmbient(), effect.isVisible(), effect.showIcon()));
+                        effect.getAmplifier(), effect.isAmbient(), effect.isVisible(), effect.showIcon(),
+                        null, effect.getFactorData()));
                 }
             }
         }
@@ -155,6 +165,7 @@ public class PlayerTickHandler {
     public static void onPlayerLogout(PlayerLoggedOutEvent event) {
         UUID uuid = event.getEntity().getUUID();
         lastBuffCheck.remove(uuid);
+        VERIFIED_BEGIN_ITEM.remove(uuid);
         BuffExclusionManager.clearCache(uuid);
         MagnetHandler.onLogout(uuid);
         SwiftHandler.onLogout(uuid);

@@ -4,13 +4,13 @@ import com.ayin90723.adventure_power.config.ModConfig;
 
 /**
  * 死亡抗拒 — 致命伤害触发无敌并回血。
- * 解锁条件：9 里程碑
+ * 解锁条件：7 里程碑（凋零之陨）
  * 无敌/冷却时间从配置读取。
  */
 public class DeathDefyAbility extends AbstractAbility {
 
     public DeathDefyAbility() {
-        super(9);
+        super(7);
     }
 
     @Override

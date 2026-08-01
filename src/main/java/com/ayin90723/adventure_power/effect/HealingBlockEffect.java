@@ -115,10 +115,14 @@ public class HealingBlockEffect extends MobEffect {
       public static void onLivingTick(LivingTickEvent event) {
          LivingEntity entity = event.getEntity();
          if (entity.level().isClientSide()) return;
+         UUID uuid = entity.getUUID();
+         // 快路径：99.99% 实体从未被禁疗，先查内存追踪表，
+         // 避免每 tick 对全服实体做 NBT 查找 + CHM 原子操作
+         if (!TRACKED_HEALTH.containsKey(uuid)) return;
          if (!isActive(entity)) {
             // 效果已过期，清理追踪记录与宽限期
-            TRACKED_HEALTH.remove(entity.getUUID());
-            MISSING_TICKS.remove(entity.getUUID());
+            TRACKED_HEALTH.remove(uuid);
+            MISSING_TICKS.remove(uuid);
          }
       }
 

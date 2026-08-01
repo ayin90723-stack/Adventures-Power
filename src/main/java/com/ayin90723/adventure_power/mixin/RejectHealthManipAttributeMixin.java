@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.mixin;
 
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.util.RejectHealthManipUtil;
 import net.minecraft.server.MinecraftServer;
@@ -63,7 +64,7 @@ public class RejectHealthManipAttributeMixin {
     private static void checkAndReject(Player player, CallbackInfo ci) {
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
             if ((progress.isAdventurer() || progress.isFullyUnlocked())
-                  && progress.isAbilityEnabled("reject_manip")) {
+                  && progress.isAbilityEnabled(AbilityIds.REJECT_MANIP)) {
                 ci.cancel();
             }
         });

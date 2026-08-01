@@ -1,6 +1,9 @@
 package com.ayin90723.adventure_power.skill;
 
+import com.ayin90723.adventure_power.util.AbilityGate;
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.handler.CombatAbilityHandler;
 import com.ayin90723.adventure_power.util.SyncUtil;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
@@ -38,8 +41,7 @@ public class ActiveSkillHandler {
         var progress = progressOpt.get();
 
         // 门禁检查（里程碑归属由 isAbilityEnabled 内置硬门禁判定）
-        if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
-        if (!progress.isAbilityEnabled("active_skill")) return;
+        if (!AbilityGate.isActive(progress, AbilityIds.ACTIVE_SKILL)) return;
 
         long currentTime = player.level().getGameTime();
 
@@ -88,7 +90,7 @@ public class ActiveSkillHandler {
 
         // 防御性门禁：冒险者 + 里程碑解锁 active_skill 即可释放审判
         if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return 0;
-        if (!progress.isAbilityEnabled("active_skill")) return 0;
+        if (!progress.isAbilityEnabled(AbilityIds.ACTIVE_SKILL)) return 0;
 
         int milestones = progress.getUnlockedMilestoneCount();
         if (milestones == 0) milestones = 1;
@@ -128,6 +130,7 @@ public class ActiveSkillHandler {
                     target.invulnerableTime = 0;
                     target.setLastHurtByMob(player);
                     target.setLastHurtByPlayer(player);
+                    CombatAbilityHandler.setDeathScoreNegativeOne(target); // 防 die() 内部重复计数
                     target.die(source);
                 }
             }

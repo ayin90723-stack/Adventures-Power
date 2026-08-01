@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.handler;
 
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
@@ -26,6 +27,8 @@ import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
+import java.util.Map;
+
 /**
  * 战斗类能力效果处理器。
  * <p>
@@ -44,8 +47,13 @@ public class CombatAbilityHandler {
     /** 禁疗之触觉醒易伤 - 目标侧标记到期时间（gameTime） */
     private static final String HEALING_BLOCK_VULN_END_KEY = PersistentDataKeys.HEALING_BLOCK_VULN_END;
 
-    /** 破敌之眼觉醒禁无敌帧 - 目标侧标记到期时间（gameTime） */
-    private static final String PIERCING_GAZE_NO_IFRAME_END_KEY = PersistentDataKeys.PIERCING_GAZE_NO_IFRAME_END;
+    /**
+     * 破敌之眼觉醒禁无敌帧 - 目标侧标记到期时间（gameTime）。
+     * 内存表（弱 key）替代 persistentData：标记仅影响当前实体实例，无需持久化，
+     * 且避免每 tick 对全服实体做 persistentData 探测。实体 GC 后条目自动释放。
+     */
+    private static final Map<Entity, Long> PIERCING_GAZE_NO_IFRAME_END =
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
 
     // ==================== 1. 灵巧 — 概率闪避 ====================
 
@@ -56,9 +64,9 @@ public class CombatAbilityHandler {
         if (!(receiver instanceof Player player)) return;
         if (receiver.level().isClientSide()) return;
 
-        AbilityGate.getActiveProgress(player, "agility").ifPresent(progress -> {
+        AbilityGate.getActiveProgress(player, AbilityIds.AGILITY).ifPresent(progress -> {
             int milestones = progress.getUnlockedMilestoneCount();
-            Ability ability = AbilityRegistry.get("agility");
+            Ability ability = AbilityRegistry.get(AbilityIds.AGILITY);
             if (ability == null) return;
 
             float chance = AbilityGate.awakenedRatio(ability, milestones, progress.isFullyUnlocked());
@@ -101,10 +109,10 @@ public class CombatAbilityHandler {
             if (progress == null) return;
             if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
 
-            if (progress.isAbilityEnabled("healing_block")) handleHealingBlock(event, target, attacker, progress);
-            if (progress.isFullyUnlocked() && progress.isAbilityEnabled("piercing_gaze")) handlePiercingGazeAwakened(event, target, attacker, progress);
-            if (progress.isAbilityEnabled("soul_quench")) handleSoulQuench(event, target, attacker, progress);
-            if (progress.isAbilityEnabled("shadow_kill")) ShadowKillHelper.handleShadowKill(event, target, attacker, progress);
+            if (progress.isAbilityEnabled(AbilityIds.HEALING_BLOCK)) handleHealingBlock(event, target, attacker, progress);
+            if (progress.isFullyUnlocked() && progress.isAbilityEnabled(AbilityIds.PIERCING_GAZE)) handlePiercingGazeAwakened(event, target, attacker, progress);
+            if (progress.isAbilityEnabled(AbilityIds.SOUL_QUENCH)) handleSoulQuench(event, target, attacker, progress);
+            if (progress.isAbilityEnabled(AbilityIds.SHADOW_KILL)) ShadowKillHelper.handleShadowKill(event, target, attacker, progress);
         }
     }
 
@@ -112,16 +120,16 @@ public class CombatAbilityHandler {
     private static void handlePiercingGazeAwakened(LivingHurtEvent event, LivingEntity target, Player attacker, IAdventureProgress progress) {
         if (target.invulnerableTime <= 0) return;
         long endTime = target.level().getGameTime() + com.ayin90723.adventure_power.config.ModConfig.AWAKEN_PIERCING_GAZE_NO_IFRAME_TICKS.get();
-        target.getPersistentData().putLong(PIERCING_GAZE_NO_IFRAME_END_KEY, endTime);
+        PIERCING_GAZE_NO_IFRAME_END.put(target, endTime);
     }
 
     // ==================== 2. 伤害抗性 — 全伤害减免 ====================
 
     private static void handleDamageResist(LivingHurtEvent event, LivingEntity target) {
         if (!(target instanceof Player player)) return;
-        AbilityGate.getActiveProgress(player, "damage_resist").ifPresent(progress -> {
+        AbilityGate.getActiveProgress(player, AbilityIds.DAMAGE_RESIST).ifPresent(progress -> {
             int milestones = progress.getUnlockedMilestoneCount();
-            Ability ability = AbilityRegistry.get("damage_resist");
+            Ability ability = AbilityRegistry.get(AbilityIds.DAMAGE_RESIST);
             if (ability == null) return;
 
             float ratio = AbilityGate.awakenedRatio(ability, milestones, progress.isFullyUnlocked());
@@ -141,7 +149,7 @@ public class CombatAbilityHandler {
      */
     private static void handleSoulQuench(LivingHurtEvent event, LivingEntity target, Player attacker, IAdventureProgress progress) {
         int milestones = progress.getUnlockedMilestoneCount();
-        Ability raw = AbilityRegistry.get("soul_quench");
+        Ability raw = AbilityRegistry.get(AbilityIds.SOUL_QUENCH);
         if (!(raw instanceof SoulQuenchAbility ability)) return;
 
         float flatDamage = ability.flatDamage(milestones);
@@ -155,11 +163,11 @@ public class CombatAbilityHandler {
             extraDamage *= com.ayin90723.adventure_power.config.ModConfig.SOUL_QUENCH_HEALING_BLOCK_MULTIPLIER.get().floatValue();
         }
 
-        // 觉醒：斩杀线 — 目标低于阈值 HP 时伤害翻倍
+        // 觉醒：斩杀线 — 目标低于阈值 HP 时伤害按配置倍率放大（默认 2.0=翻倍）
         if (progress.isFullyUnlocked()) {
             float threshold = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SOUL_QUENCH_EXECUTE_THRESHOLD.get().floatValue();
             if (HealthUtil.getHealthDirect(target) <= target.getMaxHealth() * threshold) {
-                extraDamage *= 2.0F;
+                extraDamage *= com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SOUL_QUENCH_EXECUTE_MULTIPLIER.get().floatValue();
             }
         }
 
@@ -206,7 +214,8 @@ public class CombatAbilityHandler {
     static {
         java.lang.reflect.Field f = null;
         try {
-            f = LivingEntity.class.getDeclaredField("f_19802_");
+            // f_20916_ = hurtTime（f_19802_ 是 invulnerableTime，曾误写该字段导致清除失效）
+            f = LivingEntity.class.getDeclaredField("f_20916_");
             f.setAccessible(true);
         } catch (NoSuchFieldException e) {
             try {
@@ -222,10 +231,12 @@ public class CombatAbilityHandler {
      * <p>
      * 反射兜底：仅在外部 Boss 绕过 hurt()/setHealth() 直接调 die() 时触发。
      * 若长时间不触发可考虑移除；保留以防 awardKillScore 副作用（记分板/成就统计）。
+     * public 供 ActiveSkillHandler 审判兜底路径复用。
      */
-    private static void setDeathScoreNegativeOne(LivingEntity target) {
+    public static void setDeathScoreNegativeOne(LivingEntity target) {
         try {
-            java.lang.reflect.Field f = LivingEntity.class.getDeclaredField("f_20920_");
+            // f_20897_ = deathScore（f_20920_ 是 oAttackAnim(float)，对其 setInt 会抛异常导致静默失效）
+            java.lang.reflect.Field f = LivingEntity.class.getDeclaredField("f_20897_");
             f.setAccessible(true);
             f.setInt(target, -1);
         } catch (NoSuchFieldException e) {
@@ -241,7 +252,7 @@ public class CombatAbilityHandler {
 
     private static void handleHealingBlock(LivingHurtEvent event, LivingEntity target, Player attacker, IAdventureProgress progress) {
         int milestones = progress.getUnlockedMilestoneCount();
-        Ability ability = AbilityRegistry.get("healing_block");
+        Ability ability = AbilityRegistry.get(AbilityIds.HEALING_BLOCK);
         if (ability == null) return;
 
         int durationSeconds = (int) ability.value(milestones);
@@ -267,16 +278,17 @@ public class CombatAbilityHandler {
         event.setAmount(event.getAmount() * mult);
     }
 
-    /** 破敌之眼觉醒：标记期间目标无法获得无敌帧 */
+    /** 破敌之眼觉醒：标记期间目标无法获得无敌帧（内存表快路径，实体未标记时零开销） */
     @SubscribeEvent
     public static void onLivingTick(LivingTickEvent event) {
         LivingEntity entity = event.getEntity();
         if (entity.level().isClientSide()) return;
-        CompoundTag data = entity.getPersistentData();
-        if (!data.contains(PIERCING_GAZE_NO_IFRAME_END_KEY)) return;
-        long endTime = data.getLong(PIERCING_GAZE_NO_IFRAME_END_KEY);
+        // 99% 实体无无敌帧且无标记，先短路再查表
+        if (entity.invulnerableTime <= 0) return;
+        Long endTime = PIERCING_GAZE_NO_IFRAME_END.get(entity);
+        if (endTime == null) return;
         if (entity.level().getGameTime() > endTime) {
-            data.remove(PIERCING_GAZE_NO_IFRAME_END_KEY);
+            PIERCING_GAZE_NO_IFRAME_END.remove(entity);
             return;
         }
         if (entity.invulnerableTime > 0) {

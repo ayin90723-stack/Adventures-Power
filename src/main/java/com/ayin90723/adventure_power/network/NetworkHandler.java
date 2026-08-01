@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.network;
 
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.handler.PlayerStateHandler;
 import com.ayin90723.adventure_power.util.BuffExclusionManager;
@@ -12,6 +13,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraftforge.network.NetworkDirection;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.NetworkRegistry;
 import net.minecraftforge.network.PacketDistributor;
@@ -66,6 +68,10 @@ public class NetworkHandler {
         INSTANCE.registerMessage(packetId++, ActiveSkillPacket.class,
             ActiveSkillPacket::encode, ActiveSkillPacket::decode,
             ActiveSkillPacket::handle);
+        // 8 (id 7): SkillSwitch — 客户端→服务端：切换主动技能索引
+        INSTANCE.registerMessage(packetId++, SkillSwitchPacket.class,
+            SkillSwitchPacket::encode, SkillSwitchPacket::decode,
+            SkillSwitchPacket::handle);
     }
 
     // ===== 发送方法 =====
@@ -100,6 +106,11 @@ public class NetworkHandler {
         INSTANCE.sendToServer(new ActiveSkillPacket(skillIndex));
     }
 
+    /** 客户端发送技能切换请求（0=审判，1=庇护），由服务端持久化后回同步 */
+    public static void sendSkillSwitch(int skillIndex) {
+        INSTANCE.sendToServer(new SkillSwitchPacket(skillIndex));
+    }
+
     // ===== 辅助方法 =====
 
     /** 在服务端主线程执行，自动取发送者 ServerPlayer，为空则跳过 */
@@ -125,6 +136,10 @@ public class NetworkHandler {
         public static DoubleJumpPacket decode(FriendlyByteBuf buf) { return new DoubleJumpPacket(); }
 
         public static void handle(DoubleJumpPacket msg, Supplier<NetworkEvent.Context> ctx) {
+            if (ctx.get().getDirection() != NetworkDirection.PLAY_TO_SERVER) {
+                ctx.get().setPacketHandled(true);
+                return;
+            }
             runOnServer(ctx, player -> DoubleJumpHandler.handleDoubleJump(player));
         }
     }
@@ -146,6 +161,10 @@ public class NetworkHandler {
         }
 
         public static void handle(BuffTogglePacket msg, Supplier<NetworkEvent.Context> ctx) {
+            if (ctx.get().getDirection() != NetworkDirection.PLAY_TO_SERVER) {
+                ctx.get().setPacketHandled(true);
+                return;
+            }
             runOnServer(ctx, player -> {
                 if (AdventureProgressCapability.isAdventurer(player)
                     || AdventureProgressCapability.isFullyUnlocked(player)) {
@@ -194,6 +213,13 @@ public class NetworkHandler {
         }
 
         public static void handle(BuffBlacklistSyncPacket msg, Supplier<NetworkEvent.Context> ctx) {
+            // 方向防御：request=true 只能由服务端处理（C2S），request=false 只能由客户端处理（S2C）
+            // 语义与方向矛盾说明是伪造包，直接丢弃
+            boolean toClient = ctx.get().getDirection() == NetworkDirection.PLAY_TO_CLIENT;
+            if (msg.request == toClient) {
+                ctx.get().setPacketHandled(true);
+                return;
+            }
             if (msg.request) {
                 // 客户端→服务端：请求同步
                 runOnServer(ctx, player -> {
@@ -231,6 +257,11 @@ public class NetworkHandler {
         }
 
         public static void handle(AdventureSyncPacket msg, Supplier<NetworkEvent.Context> ctx) {
+            // 方向防御：本包只能由客户端处理（S2C），专用服务器上执行会 NPE 崩溃
+            if (ctx.get().getDirection() != NetworkDirection.PLAY_TO_CLIENT || msg.data == null) {
+                ctx.get().setPacketHandled(true);
+                return;
+            }
             ctx.get().enqueueWork(() -> {
                 Minecraft mc = Minecraft.getInstance();
                 if (mc.player != null) {
@@ -266,6 +297,10 @@ public class NetworkHandler {
         }
 
         public static void handle(AbilityTogglePacket msg, Supplier<NetworkEvent.Context> ctx) {
+            if (ctx.get().getDirection() != NetworkDirection.PLAY_TO_SERVER) {
+                ctx.get().setPacketHandled(true);
+                return;
+            }
             runOnServer(ctx, player -> {
                 if (AdventureProgressCapability.isAdventurer(player)
                     || AdventureProgressCapability.isFullyUnlocked(player)) {
@@ -273,9 +308,9 @@ public class NetworkHandler {
                     SyncUtil.syncToClient(player);
 
                     // 翱翔 toggle 后立即同步 mayfly，不等下一 tick handler
-                    if ("soar".equals(msg.id)) {
+                    if (AbilityIds.SOAR.equals(msg.id)) {
                         boolean enabled = AdventureProgressCapability.getAdventureProgress(player)
-                            .map(p -> p.isAbilityEnabled("soar")).orElse(false);
+                            .map(p -> p.isAbilityEnabled(AbilityIds.SOAR)).orElse(false);
                         PlayerStateHandler.applySoarState(player, enabled);
                     }
                 }
@@ -296,6 +331,10 @@ public class NetworkHandler {
         }
 
         public static void handle(AdventureSyncRequestPacket msg, Supplier<NetworkEvent.Context> ctx) {
+            if (ctx.get().getDirection() != NetworkDirection.PLAY_TO_SERVER) {
+                ctx.get().setPacketHandled(true);
+                return;
+            }
             runOnServer(ctx, player -> SyncUtil.syncToClient(player));
         }
     }
@@ -317,7 +356,48 @@ public class NetworkHandler {
         }
 
         public static void handle(ActiveSkillPacket msg, Supplier<NetworkEvent.Context> ctx) {
+            if (ctx.get().getDirection() != NetworkDirection.PLAY_TO_SERVER) {
+                ctx.get().setPacketHandled(true);
+                return;
+            }
             runOnServer(ctx, player -> ActiveSkillHandler.handleSkillRelease(player, msg.skillIndex));
+        }
+    }
+
+    /** 客户端→服务端：切换主动技能索引（0=审判，1=庇护）——服务端持久化后回同步，解决切换被任意 sync 覆盖的问题 */
+    public static class SkillSwitchPacket {
+        public final int skillIndex;
+
+        public SkillSwitchPacket(int skillIndex) { this.skillIndex = skillIndex; }
+
+        public SkillSwitchPacket(FriendlyByteBuf buf) { this.skillIndex = buf.readVarInt(); }
+
+        public static void encode(SkillSwitchPacket msg, FriendlyByteBuf buf) {
+            buf.writeVarInt(msg.skillIndex);
+        }
+
+        public static SkillSwitchPacket decode(FriendlyByteBuf buf) {
+            return new SkillSwitchPacket(buf);
+        }
+
+        public static void handle(SkillSwitchPacket msg, Supplier<NetworkEvent.Context> ctx) {
+            if (ctx.get().getDirection() != NetworkDirection.PLAY_TO_SERVER) {
+                ctx.get().setPacketHandled(true);
+                return;
+            }
+            runOnServer(ctx, player -> {
+                if (AdventureProgressCapability.isAdventurer(player)
+                    || AdventureProgressCapability.isFullyUnlocked(player)) {
+                    AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
+                        if (progress.isAbilityEnabled(AbilityIds.ACTIVE_SKILL)) {
+                            progress.setActiveSkillIndex(msg.skillIndex == 0 ? 0 : 1);
+                        }
+                    });
+                }
+                // 总是回发同步：接受时持久化确认，拒绝时（两端数据短暂不一致）
+                // 让客户端乐观更新回滚到服务端真实状态，避免 HUD 索引永久偏离
+                SyncUtil.syncToClient(player);
+            });
         }
     }
 }

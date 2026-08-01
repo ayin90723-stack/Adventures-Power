@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.handler;
 
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
@@ -32,8 +33,8 @@ public class FortuneFavorHandler {
         if (!(event.getDamageSource().getEntity() instanceof Player player)) return;
         if (player.level().isClientSide()) return;
 
-        AbilityGate.getActiveProgress(player, "fortune_favor").ifPresent(progress -> {
-            Ability ability = AbilityRegistry.get("fortune_favor");
+        AbilityGate.getActiveProgress(player, AbilityIds.FORTUNE_FAVOR).ifPresent(progress -> {
+            Ability ability = AbilityRegistry.get(AbilityIds.FORTUNE_FAVOR);
             if (ability == null) return;
 
             int bonus = (int) ability.value(progress.getUnlockedMilestoneCount());
@@ -56,7 +57,7 @@ public class FortuneFavorHandler {
         // 清理旧上下文，防止无能力的玩家继承上一位有能力的玩家的时运加成
         FortuneContext.clear();
 
-        AbilityGate.getActiveProgress(player, "fortune_favor").ifPresent(progress -> {
+        AbilityGate.getActiveProgress(player, AbilityIds.FORTUNE_FAVOR).ifPresent(progress -> {
             FortuneContext.setBreaker(player);
             if (progress.isFullyUnlocked()) {
                 FortuneContext.setAwakened(true);

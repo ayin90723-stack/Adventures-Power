@@ -26,7 +26,8 @@ public abstract class StepGrowthAbility extends AbstractAbility {
 
     @Override
     public float value(int count) {
-        int steps = (count - countAtUnlock) / divisor;
+        // 下限保护：乱序解锁里程碑时 count - countAtUnlock 可能为负，产生反向效果
+        int steps = Math.max(0, count - countAtUnlock) / divisor;
         return base() + step() * steps;
     }
 }

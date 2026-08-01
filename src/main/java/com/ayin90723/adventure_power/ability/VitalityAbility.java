@@ -4,9 +4,9 @@ import com.ayin90723.adventure_power.config.ModConfig;
 
 /**
  * 坚韧之躯 — 提高最大生命值。
- * 解锁条件：7 里程碑
+ * 解锁条件：7 里程碑（凋零之陨）
  * 成长公式：base + per_milestone × (count - required)
- * 默认范围：+4 → +12（+2心 → +6心）
+ * 默认范围：+4 → +10（+2心 → +5心）
  */
 public class VitalityAbility extends LinearGrowthAbility {
 

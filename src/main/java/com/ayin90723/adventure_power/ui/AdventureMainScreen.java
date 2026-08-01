@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.ui;
 
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
@@ -49,6 +50,9 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
     private final Set<String> excludedEffects = new HashSet<>();
     private final List<MobEffectInstance> displayEffects = new ArrayList<>();
     private final List<String> displayEffectNames = new ArrayList<>();
+    /** 预计算的剩余时间/状态文本（refreshDisplayEffects 时更新，避免每帧 String.format 与对象创建） */
+    private final List<String> displayEffectTimes = new ArrayList<>();
+    private final List<String> displayEffectStatuses = new ArrayList<>();
     private boolean ready = false;
     private boolean buffExtendEnabled = true;
     private int refreshTick = 0;
@@ -58,6 +62,10 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
     private static List<List<Component>> milestoneAbilityNames = List.of();
     /** 标签 Component，init 时构建（语言切换重开即更新） */
     private Component[] tabLabels = new Component[0];
+
+    /** 里程碑 tab 的 progress 快照（每 20 tick 刷新一次，避免每帧 capability resolve） */
+    private Optional<com.ayin90723.adventure_power.capability.IAdventureProgress> milestoneProgress = Optional.empty();
+    private long milestoneProgressRefreshTick = -1;
 
     // ===== 布局 =====
     private int leftX;
@@ -105,7 +113,7 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player != null) {
             mc.player.getCapability(AdventureProgressCapability.CAPABILITY).ifPresent(p -> {
-                this.buffExtendEnabled = p.isAbilityEnabled("perpetual_blessing");
+                this.buffExtendEnabled = p.isAbilityEnabled(AbilityIds.PERPETUAL_BLESSING);
             });
         }
         refreshCurrentTabData();
@@ -153,6 +161,8 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
     private void refreshDisplayEffects() {
         displayEffects.clear();
         displayEffectNames.clear();
+        displayEffectTimes.clear();
+        displayEffectStatuses.clear();
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
         for (MobEffectInstance effect : mc.player.getActiveEffects()) {
@@ -161,14 +171,29 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
             }
         }
         displayEffects.sort((a, b) -> Integer.compare(b.getDuration(), a.getDuration()));
-        // 预计算显示名（含罗马数字），避免每帧 getDisplayName().getString()
+        // 预计算显示名（含罗马数字）、剩余时间与状态文本，避免每帧格式化与对象创建
         for (MobEffectInstance effect : displayEffects) {
             String name = effect.getEffect().getDisplayName().getString();
             if (effect.getAmplifier() > 0) {
                 name += " " + toRoman(effect.getAmplifier() + 1);
             }
             displayEffectNames.add(name);
+            displayEffectTimes.add(formatDuration(effect.getDuration()));
+            String effectId = ForgeRegistries.MOB_EFFECTS.getKey(effect.getEffect()).toString();
+            boolean excluded = excludedEffects.contains(effectId);
+            displayEffectStatuses.add(excluded
+                ? Component.translatable("screen.adventure_power.status_expire").getString()
+                : Component.translatable("screen.adventure_power.status_perpetual").getString());
         }
+    }
+
+    /** 格式化效果剩余时间；无限时长（-1）显示 ∞ */
+    private static String formatDuration(int duration) {
+        if (duration < 0) return "∞";
+        int seconds = duration / 20;
+        return seconds >= 60
+            ? String.format("%d:%02d", seconds / 60, seconds % 60)
+            : String.format("0:%02d", seconds);
     }
 
     /** 重建里程碑能力名缓存（按 version 失效，/reload 或客户端同步后惰性重建） */
@@ -248,12 +273,12 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
     private void renderAbilityTab(GuiGraphics graphics, int mouseX, int mouseY) {
         if (abilityEntries.isEmpty()) {
             graphics.drawCenteredString(this.font,
-                Component.literal("§7暂无可用能力"), this.width / 2, this.height / 2, COLOR_GRAY);
+                Component.translatable("screen.adventure_power.no_abilities"), this.width / 2, this.height / 2, COLOR_GRAY);
             return;
         }
         graphics.drawString(this.font, "●/○", leftX, TOP_Y - 14, COLOR_GRAY);
-        graphics.drawString(this.font, Component.literal("能力"), leftX + 22, TOP_Y - 14, COLOR_GRAY);
-        graphics.drawString(this.font, Component.literal("状态"), leftX + 155, TOP_Y - 14, COLOR_GRAY);
+        graphics.drawString(this.font, Component.translatable("screen.adventure_power.header_ability"), leftX + 22, TOP_Y - 14, COLOR_GRAY);
+        graphics.drawString(this.font, Component.translatable("screen.adventure_power.header_status"), leftX + 155, TOP_Y - 14, COLOR_GRAY);
 
         int visibleRows = visibleHeight() / ROW_HEIGHT;
         int startRow = Math.max(0, scrollOffset / ROW_HEIGHT);
@@ -279,31 +304,31 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         }
         renderScrollBar(graphics, getScrollBarX(), TOP_Y);
         graphics.drawCenteredString(this.font,
-            Component.literal("§7单击切换能力开关"), this.width / 2, this.height - 22, COLOR_GRAY);
+            Component.translatable("screen.adventure_power.toggle_ability_hint"), this.width / 2, this.height - 22, COLOR_GRAY);
     }
 
     // ===== Buff tab =====
     private void renderBuffTab(GuiGraphics graphics, int mouseX, int mouseY) {
         if (!buffExtendEnabled) {
             graphics.drawCenteredString(this.font,
-                Component.literal("§c⚠ Buff延长已在能力配置中关闭 - 以下设置不生效")
+                Component.translatable("screen.adventure_power.buff_disabled_warn")
                     .withStyle(ChatFormatting.RED),
                 this.width / 2, TOP_Y - 18, 0xFF5555);
         }
         if (!ready) {
             graphics.drawCenteredString(this.font,
-                Component.literal("§7正在加载排除列表..."), this.width / 2, TOP_Y + 20, COLOR_GRAY);
+                Component.translatable("screen.adventure_power.loading"), this.width / 2, TOP_Y + 20, COLOR_GRAY);
             return;
         }
         if (displayEffects.isEmpty()) {
             graphics.drawCenteredString(this.font,
-                Component.literal("§7暂无正面效果可管理"), this.width / 2, this.height / 2, COLOR_GRAY);
+                Component.translatable("screen.adventure_power.no_buffs"), this.width / 2, this.height / 2, COLOR_GRAY);
             return;
         }
         graphics.drawString(this.font, "●/○", leftX, TOP_Y - 14, COLOR_GRAY);
-        graphics.drawString(this.font, "效果", leftX + 22, TOP_Y - 14, COLOR_GRAY);
-        graphics.drawString(this.font, "剩余", leftX + 100, TOP_Y - 14, COLOR_GRAY);
-        graphics.drawString(this.font, "状态", leftX + 155, TOP_Y - 14, COLOR_GRAY);
+        graphics.drawString(this.font, Component.translatable("screen.adventure_power.header_effect"), leftX + 22, TOP_Y - 14, COLOR_GRAY);
+        graphics.drawString(this.font, Component.translatable("screen.adventure_power.header_remaining"), leftX + 100, TOP_Y - 14, COLOR_GRAY);
+        graphics.drawString(this.font, Component.translatable("screen.adventure_power.header_status"), leftX + 155, TOP_Y - 14, COLOR_GRAY);
 
         int visibleRows = visibleHeight() / ROW_HEIGHT;
         int startRow = Math.max(0, scrollOffset / ROW_HEIGHT);
@@ -321,36 +346,32 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
             graphics.drawString(this.font, dot, leftX + 5, y, isExcluded ? COLOR_GRAY : COLOR_GREEN);
             String name = displayEffectNames.get(i);
             graphics.drawString(this.font, name, leftX + 22, y, COLOR_WHITE);
-            int seconds = effect.getDuration() / 20;
-            String timeStr = seconds >= 60
-                ? String.format("%d:%02d", seconds / 60, seconds % 60)
-                : String.format("0:%02d", seconds);
+            String timeStr = displayEffectTimes.get(i);
             graphics.drawString(this.font, timeStr, leftX + 100, y,
                 effect.getDuration() < 60 ? COLOR_YELLOW : COLOR_WHITE);
-            String status = isExcluded
-                ? Component.literal("正常到期").getString()
-                : Component.literal("永续").getString();
+            String status = displayEffectStatuses.get(i);
             graphics.drawString(this.font, status, leftX + 140, y,
                 isExcluded ? COLOR_GRAY : COLOR_GREEN);
         }
         renderScrollBar(graphics, getScrollBarX(), TOP_Y);
         graphics.drawCenteredString(this.font,
-            Component.literal("§7单击切换效果排除状态"), this.width / 2, this.height - 22, COLOR_GRAY);
+            Component.translatable("screen.adventure_power.toggle_buff_hint"), this.width / 2, this.height - 22, COLOR_GRAY);
     }
 
     // ===== 里程碑 tab =====
     private void renderMilestoneTab(GuiGraphics graphics, int mouseX, int mouseY) {
-        final int LEFT_X = 30;
-        final int RIGHT_X = 220;
+        // 与面板同坐标系（面板居中），右列为解锁条件
+        final int LEFT_X = leftX;
+        final int RIGHT_X = leftX + 110;
         int total = MilestoneRegistry.getMilestoneCount();
         ensureMilestoneAbilityCache();
-        graphics.drawString(this.font, Component.literal("进度").withStyle(s -> s.withColor(COLOR_GRAY)),
+        graphics.drawString(this.font, Component.translatable("screen.adventure_power.header_progress").withStyle(s -> s.withColor(COLOR_GRAY)),
             LEFT_X, TOP_Y - 14, COLOR_GRAY);
-        graphics.drawString(this.font, Component.literal("解锁条件").withStyle(s -> s.withColor(COLOR_GRAY)),
+        graphics.drawString(this.font, Component.translatable("screen.adventure_power.header_condition").withStyle(s -> s.withColor(COLOR_GRAY)),
             RIGHT_X, TOP_Y - 14, COLOR_GRAY);
 
         if (total == 0) {
-            graphics.drawCenteredString(this.font, Component.literal("§7暂无里程碑"),
+            graphics.drawCenteredString(this.font, Component.translatable("screen.adventure_power.no_milestones"),
                 this.width / 2, this.height / 2, COLOR_GRAY);
             return;
         }
@@ -359,16 +380,24 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         int startRow = Math.max(0, scrollOffset / MILESTONE_ROW_HEIGHT);
         int endRow = Math.min(total, startRow + visibleRows + 1);
 
+        // progress 快照每 20 tick 刷新一次，避免每帧 capability resolve
         Minecraft mc = Minecraft.getInstance();
-        Optional<com.ayin90723.adventure_power.capability.IAdventureProgress> progressOpt =
-            mc.player != null ? AdventureProgressCapability.getAdventureProgress(mc.player) : Optional.empty();
-        var progress = progressOpt.orElse(null);
+        if (mc.player == null) {
+            milestoneProgress = Optional.empty();
+        } else {
+            long tick = mc.level.getGameTime() / 20;
+            if (milestoneProgressRefreshTick != tick) {
+                milestoneProgressRefreshTick = tick;
+                milestoneProgress = AdventureProgressCapability.getAdventureProgress(mc.player);
+            }
+        }
+        var progress = milestoneProgress.orElse(null);
 
         for (int i = startRow; i < endRow; i++) {
             Milestone m = MilestoneRegistry.getAll().get(i);
             int y = TOP_Y + i * MILESTONE_ROW_HEIGHT - scrollOffset;
             boolean unlocked = progress != null && progress.isMilestoneUnlocked(m.id());
-            graphics.fill(LEFT_X - 4, y - 1, this.width - LEFT_X + 4, y + MILESTONE_ROW_HEIGHT - 1, COLOR_BG);
+            graphics.fill(LEFT_X - 4, y - 1, leftX + PANEL_WIDTH + 4, y + MILESTONE_ROW_HEIGHT - 1, COLOR_BG);
             MutableComponent left = Component.literal(unlocked ? "✓ " : "✗ ")
                 .withStyle(s -> s.withColor(unlocked ? COLOR_GREEN : COLOR_DARK));
             left.append(Component.literal(m.name())
@@ -382,37 +411,37 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
                 }
             }
             graphics.drawString(this.font, left, LEFT_X, y + 4, COLOR_WHITE);
-            String hint = getUnlockHint(m);
-            graphics.drawString(this.font, Component.literal(hint).withStyle(s -> s.withColor(COLOR_GRAY)),
-                RIGHT_X, y + 4, COLOR_GRAY);
+            graphics.drawString(this.font, getUnlockHint(m), RIGHT_X, y + 4, COLOR_GRAY);
         }
+        renderScrollBar(graphics, getScrollBarX(), TOP_Y);
 
         if (progress != null) {
             int unlockedCount = progress.getUnlockedMilestoneCount();
             graphics.drawCenteredString(this.font,
-                Component.literal("已解锁: " + unlockedCount + " / " + total).withStyle(s -> s.withColor(COLOR_GOLD)),
+                Component.translatable("screen.adventure_power.unlocked_count", unlockedCount, total).withStyle(s -> s.withColor(COLOR_GOLD)),
                 this.width / 2, this.height - 16, COLOR_GOLD);
         }
     }
 
-    private static String getUnlockHint(Milestone m) {
+    private static Component getUnlockHint(Milestone m) {
         if (m.trigger() != null) {
-            String hint = triggerHint(m.trigger());
+            Component hint = triggerHint(m.trigger());
             if (hint != null) return hint;
         }
         if (m.advancement() != null) {
-            return "完成成就: " + m.advancement().toString();
+            return Component.translatable("screen.adventure_power.advancement_hint", m.advancement().toString());
         }
-        return "未知条件";
+        return Component.translatable("screen.adventure_power.unknown_condition");
     }
 
-    private static String triggerHint(TriggerDef t) {
+    private static Component triggerHint(TriggerDef t) {
         return switch (t.type()) {
-            case "survive_night" -> "度过第一个夜晚";
-            case "first_death" -> "首次死亡";
-            case "first_trade" -> "与村民交易";
-            case "y_below" -> "深入地下 (Y<" + (t.y() != null ? t.y() : 0) + ")";
-            case "first_kill" -> "击杀 " + (t.entity() != null ? t.entity().getPath() : "目标生物");
+            case "survive_night" -> Component.translatable("screen.adventure_power.trigger.survive_night");
+            case "first_death" -> Component.translatable("screen.adventure_power.trigger.first_death");
+            case "first_trade" -> Component.translatable("screen.adventure_power.trigger.first_trade");
+            case "y_below" -> Component.translatable("screen.adventure_power.trigger.y_below", t.y() != null ? t.y() : 0);
+            case "first_kill" -> Component.translatable("screen.adventure_power.trigger.first_kill",
+                t.entity() != null ? t.entity().getPath() : "?");
             default -> null;
         };
     }

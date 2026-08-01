@@ -2,7 +2,6 @@ package com.ayin90723.adventure_power.util;
 
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
-import com.ayin90723.adventure_power.util.SyncUtil;
 import com.ayin90723.adventure_power.item.ModItems;
 import com.ayin90723.adventure_power.milestone.Milestone;
 import net.minecraft.core.NonNullList;
@@ -24,8 +23,8 @@ import java.util.List;
  *   <li>旧版 AdventureStage NBT 迁移到新里程碑格式</li>
  * </ul>
  * <p>
- * 从 AdventureProgressCapability 拆出。syncCapabilityToPersistent/syncToClient/getAdventureProgress
- * 暂回调 AdventureProgressCapability（阶段2 提取 SyncUtil 后改调，消除循环依赖）。
+ * 从 AdventureProgressCapability 拆出。Capability 查询走 AdventureProgressCapability，
+ * 持久化与客户端同步由调用方经 {@link SyncUtil} 完成。
  */
 public final class AdventureItemNbtUtil {
 

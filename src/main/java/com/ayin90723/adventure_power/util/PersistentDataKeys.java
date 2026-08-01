@@ -74,11 +74,6 @@ public final class PersistentDataKeys {
     /** 禁疗之触觉醒易伤到期时间（long, gameTime） */
     public static final String HEALING_BLOCK_VULN_END = "AP_HealingBlock_Vuln_End";
 
-    // ==================== 破敌之眼觉醒 — 目标 persistentData ====================
-
-    /** 破敌之眼觉醒禁无敌帧到期时间（long, gameTime） */
-    public static final String PIERCING_GAZE_NO_IFRAME_END = "AP_PiercingGaze_NoIframe_End";
-
     // ==================== 灵魂绑定 — 玩家 persistentData ====================
 
     /** 灵魂绑定保存的 Buff 列表（CompoundTag） */

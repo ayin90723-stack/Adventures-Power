@@ -1,6 +1,6 @@
 package com.ayin90723.adventure_power.mixin;
 
-import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import com.ayin90723.adventure_power.util.RejectHealthManipUtil;
@@ -31,12 +31,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * 服务端主线程执行，ThreadLocal 天然隔离调用链，无锁、无 UUID 查表、
  * 无需 tick 级扫描清理过期条目。
  *
- * <h3>已知限制</h3>
+ * <h3>已知限制与兜底</h3>
  * {@code HURT_DEPTH} 由 {@code hurt()} 的 HEAD/RETURN 注入维护。若 {@code hurt()}
- * 内部抛出未捕获异常，RETURN 不执行，depth 残留 +1，导致同线程后续
- * {@code setHealth} 保护误判为"合法 hurt 路径"而放行外部篡改。Mixin 无异常
- * 回调，彻底修复需重构 hurt 拦截；现实触发条件罕见（需他人在 hurt 内抛
- * 异常），暂以已知限制接受。
+ * 内部抛出未捕获异常、或外部模组以低优先级 Mixin 对 {@code hurt()} HEAD
+ * cancellable cancel，RETURN 不执行，depth 残留 +1，导致同线程后续
+ * {@code setHealth} 保护误判为"合法 hurt 路径"而放行外部篡改。兜底：
+ * {@link HealthUtil#resetHurtDepthPerTick()} 在 ServerTickEnd 无条件归零
+ * （hurt 不跨 tick，tick 末深度必为 0 是不变量），泄漏窗口仅为 cancel 发生的
+ * 同 tick 内。
  *
  * @see RejectHealthManipAttributeMixin
  * @see RejectHealthManipUtil
@@ -88,21 +90,20 @@ public abstract class RejectHealthManipMixin {
         // 合法 hurt() 调用链内的 setHealth 放行
         if (HealthUtil.HURT_DEPTH.get() > 0) return;
 
-        // 外部直接 setHealth 降血 → 检查能力
-        AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if ((progress.isAdventurer() || progress.isFullyUnlocked())
-                  && progress.isAbilityEnabled("reject_manip")) {
-                ci.cancel();
-                // 觉醒：反弹 30% 被拒绝的伤害给攻击来源
-                if (progress.isFullyUnlocked()) {
-                    float reflected = (currentHealth - newHealth) * ModConfig.AWAKEN_REJECT_MANIP_REFLECT_RATIO.get().floatValue();
-                    net.minecraft.world.entity.Entity lastAttacker = player.getLastHurtByMob();
-                    if (lastAttacker != null && reflected > 0.0F && lastAttacker.isAlive()) {
-                        lastAttacker.hurt(player.damageSources().magic(), reflected);
-                    }
+        // 外部直接 setHealth 降血 → 检查能力（ProgressCache 按 tick 缓存引用，避免每次 resolve）
+        var progress = com.ayin90723.adventure_power.util.ProgressCache.get(player);
+        if (progress != null && (progress.isAdventurer() || progress.isFullyUnlocked())
+              && progress.isAbilityEnabled(AbilityIds.REJECT_MANIP)) {
+            ci.cancel();
+            // 觉醒：反弹 30% 被拒绝的伤害给攻击来源
+            if (progress.isFullyUnlocked()) {
+                float reflected = (currentHealth - newHealth) * ModConfig.AWAKEN_REJECT_MANIP_REFLECT_RATIO.get().floatValue();
+                net.minecraft.world.entity.Entity lastAttacker = player.getLastHurtByMob();
+                if (lastAttacker != null && reflected > 0.0F && lastAttacker.isAlive()) {
+                    lastAttacker.hurt(player.damageSources().magic(), reflected);
                 }
             }
-        });
+        }
     }
 
     // ===== 移除时清理 ATTR_OWNER（防泄漏，不 cancel remove）=====
@@ -130,8 +131,9 @@ public abstract class RejectHealthManipMixin {
         // 门禁前置：reject_manip 只对冒险者生效，非冒险者玩家与所有非玩家实体直接跳过，
         // 避免对绝大多数 getAttribute(MAX_HEALTH) 调用做无意义的 map 操作
         if (!(self instanceof Player player)) return;
-        if (!AdventureProgressCapability.isAdventurer(player)
-            && !AdventureProgressCapability.isFullyUnlocked(player)) return;
+        var progress = com.ayin90723.adventure_power.util.ProgressCache.get(player);
+        if (progress == null) return;
+        if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
         // putIfAbsent：同一 instance 首次追踪后跳过，避免重复 put 开销
         RejectHealthManipUtil.ATTR_OWNER.putIfAbsent(instance, player);
     }

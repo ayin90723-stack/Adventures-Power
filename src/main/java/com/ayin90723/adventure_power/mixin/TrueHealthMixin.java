@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.mixin;
 
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
@@ -67,15 +68,18 @@ public abstract class TrueHealthMixin {
     /**
      * 能力门禁辅助：返回通过 true_health 门禁的 IAdventureProgress，未通过返回 null。
      * 统一 5 个注入点重复的"取进度->冒险者/觉醒->能力启用"检查。
+     * <p>
+     * 性能：通过 {@link com.ayin90723.adventure_power.util.ProgressCache} 按 tick 缓存
+     * progress 引用——getHealth 是 MC 极高频调用（每 tick 每玩家数十次），
+     * 每次调用都做 LazyOptional.resolve() 代价昂贵，缓存后每玩家每 tick 至多 resolve 一次。
      */
     private static IAdventureProgress gatedProgress(LivingEntity self) {
         if (!(self instanceof Player player)) return null;
         if (player.level().isClientSide()) return null;
-        var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
-        if (progressOpt.isEmpty()) return null;
-        var progress = progressOpt.get();
+        var progress = com.ayin90723.adventure_power.util.ProgressCache.get(player);
+        if (progress == null) return null;
         if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return null;
-        if (!progress.isAbilityEnabled("true_health")) return null;
+        if (!progress.isAbilityEnabled(AbilityIds.TRUE_HEALTH)) return null;
         return progress;
     }
 

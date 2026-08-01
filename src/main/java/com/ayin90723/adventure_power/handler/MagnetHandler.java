@@ -1,7 +1,7 @@
 package com.ayin90723.adventure_power.handler;
 
-import com.ayin90723.adventure_power.ability.Ability;
-import com.ayin90723.adventure_power.ability.AbilityRegistry;
+import com.ayin90723.adventure_power.util.AbilityGate;
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
 import net.minecraft.server.level.ServerLevel;
@@ -32,7 +32,7 @@ public class MagnetHandler {
 
     /** 门禁后业务（由 PlayerTickDispatcher 调用） */
     public static void onTick(Player player, IAdventureProgress progress) {
-        if (!progress.isAbilityEnabled("magnet")) return;
+        if (!progress.isAbilityEnabled(AbilityIds.MAGNET)) return;
 
         long currentTime = player.level().getGameTime();
         int interval = ModConfig.MAGNET_SCAN_INTERVAL.get();
@@ -42,11 +42,8 @@ public class MagnetHandler {
 
         if (!(player.level() instanceof ServerLevel serverLevel)) return;
 
-        Ability ability = AbilityRegistry.get("magnet");
-        if (ability == null) return;
-
-        int milestones = progress.getUnlockedMilestoneCount();
-        float radius = ability.value(milestones);
+        Float radius = AbilityGate.value(progress, AbilityIds.MAGNET).orElse(null);
+        if (radius == null) return;
         boolean awakened = progress.isFullyUnlocked();
         if (awakened) {
             radius *= ModConfig.AWAKEN_MAGNET_RADIUS_MULT.get().floatValue();
@@ -91,8 +88,8 @@ public class MagnetHandler {
             return;
         }
 
-        // 每 scan 朝玩家移动 30% 距离（穿墙，磁吸特性）
-        double factor = 0.3;
+        // 每 scan 朝玩家移动配置比例的距离（默认 30%，穿墙，磁吸特性）
+        double factor = ModConfig.MAGNET_PULL_FACTOR.get();
         entity.setPos(entity.getX() + dx * factor,
                       entity.getY() + dy * factor,
                       entity.getZ() + dz * factor);

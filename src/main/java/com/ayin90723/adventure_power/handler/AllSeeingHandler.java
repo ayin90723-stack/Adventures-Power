@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.handler;
 
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -19,7 +20,7 @@ import net.minecraft.world.entity.player.Player;
 public class AllSeeingHandler {
 
     public static void onTick(Player player, IAdventureProgress progress) {
-        if (!progress.isAbilityEnabled("all_seeing")) return;
+        if (!progress.isAbilityEnabled(AbilityIds.ALL_SEEING)) return;
 
         // 夜视：余量低于一半时刷新（避免每 tick addEffect 的同步开销）
         int duration = ModConfig.ALL_SEEING_NIGHT_VISION_DURATION.get();

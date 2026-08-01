@@ -28,8 +28,9 @@ logs/
 # Maven local repo (用于发布)
 mcmodsrepo/
 
-# Claude Code（CLAUDE.md 是本地指令文件，含项目约定与个人偏好，不随仓库发布）
+# Claude Code（CLAUDE.md/AGENTS.md 是本地指令文件，含项目约定与个人偏好，不随仓库发布）
 CLAUDE.md
+AGENTS.md
 .claude/
 
 # 本地依赖（不应提交二进制 JAR）

@@ -1,11 +1,13 @@
 package com.ayin90723.adventure_power.ability;
 
 import net.minecraft.network.chat.Component;
-import net.minecraft.world.entity.player.Player;
 
 /**
  * 冒险能力接口。
  * 所有能力实现此接口。countAtUnlock 由 MilestoneRegistry 在加载 JSON 后设置。
+ * <p>
+ * 注意：能力效果统一走 handler 事件层（PlayerTickDispatcher 分发 onTick），
+ * 接口不再提供生命周期回调——避免「覆写了但无人调用」的静默失效陷阱。
  */
 public interface Ability {
 
@@ -29,13 +31,4 @@ public interface Ability {
      * 默认实现为空。
      */
     default void setCountAtUnlock(int n) {}
-
-    /** 启用时回调（服务端） */
-    default void onEnable(Player player) {}
-
-    /** 禁用时回调（服务端） */
-    default void onDisable(Player player) {}
-
-    /** 每 tick 回调（服务端），默认空 */
-    default void onTick(Player player) {}
 }

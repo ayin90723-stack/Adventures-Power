@@ -1,11 +1,11 @@
 package com.ayin90723.adventure_power.handler;
 
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
-import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
@@ -29,7 +29,7 @@ public class SwiftHandler {
     private static final Map<UUID, Long> lastPush = new HashMap<>();
 
     public static void onTick(Player player, IAdventureProgress progress) {
-        if (!progress.isAbilityEnabled("swift")) return;
+        if (!progress.isAbilityEnabled(AbilityIds.SWIFT)) return;
 
         // 水下额外加速（海豚祝福，无图标无粒子）- 常驻，不限疾跑
         if (player.isInWater()) {
@@ -63,10 +63,10 @@ public class SwiftHandler {
         double strength = ModConfig.AWAKEN_SWIFT_PUSH_STRENGTH.get();
         double px = player.getX(), py = player.getY(), pz = player.getZ();
         AABB box = new AABB(px - radius, py - radius, pz - radius, px + radius, py + radius, pz + radius);
-        List<Mob> mobs = serverLevel.getEntitiesOfClass(Mob.class, box);
-        for (Mob m : mobs) {
-            if (m.isRemoved()) continue; // Mob 列表不含 Player，无需排除自身
-            if (!(m instanceof Monster)) continue; // 仅推敌对怪物
+        // 直接查 Monster 子类，避免把中立/被动生物也拉进 AABB 查询再过滤
+        List<Monster> mobs = serverLevel.getEntitiesOfClass(Monster.class, box);
+        for (Monster m : mobs) {
+            if (m.isRemoved()) continue;
             double dx = m.getX() - px;
             double dz = m.getZ() - pz;
             double dist = Math.sqrt(dx * dx + dz * dz);

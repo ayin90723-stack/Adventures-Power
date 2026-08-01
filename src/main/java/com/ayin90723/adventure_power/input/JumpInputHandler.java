@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.input;
 
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.network.NetworkHandler;
 import net.minecraft.world.entity.player.Player;
@@ -60,7 +61,7 @@ public class JumpInputHandler {
 
         // 门禁：必须已激活冒险者 + 已解锁虚空踏步能力
         var progress = AdventureProgressCapability.getAdventureProgress(player);
-        boolean abilityReady = progress.map(p -> p.isAdventurer() && p.isAbilityEnabled("void_step")).orElse(false);
+        boolean abilityReady = progress.map(p -> p.isAdventurer() && p.isAbilityEnabled(AbilityIds.VOID_STEP)).orElse(false);
         // 觉醒状态（御风）
         boolean awakened = progress.map(p -> p.isFullyUnlocked()).orElse(false);
 
@@ -71,6 +72,8 @@ public class JumpInputHandler {
             && !player.getAbilities().flying
             && !player.isPassenger()
             && !player.isInWater()
+            && !player.isFallFlying()   // 鞘翅滑翔不触发二段跳，避免干扰滑翔物理
+            && !player.onClimbable()    // 攀爬（梯子/藤蔓）不触发二段跳
             && clientJumpsUsed < 1) {
 
             // 客户端预测：Y 直接覆盖（与服务端同公式），御风在觉醒+疾跑时附加冲刺

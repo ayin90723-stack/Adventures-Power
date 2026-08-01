@@ -57,6 +57,7 @@ public class ModConfig {
     public static final IntValue RAPID_RECOVERY_AMPLIFIER_STEP;
     public static final IntValue RAPID_RECOVERY_DELAY_TICKS;
     public static final IntValue RAPID_RECOVERY_CHECK_INTERVAL;
+    public static final DoubleValue RAPID_RECOVERY_HEAL_PER_AMPLIFIER;
 
     // --- 不动如山 ---
     public static final IntValue KNOCKBACK_RESIST_BASE;
@@ -106,6 +107,7 @@ public class ModConfig {
     public static final DoubleValue MAGNET_RADIUS_PER_MILESTONE;
     public static final DoubleValue MAGNET_PICKUP_RADIUS;
     public static final IntValue MAGNET_SCAN_INTERVAL;
+    public static final DoubleValue MAGNET_PULL_FACTOR;
 
     // --- 经验加成 ---
     public static final DoubleValue XP_BOOST_BASE;
@@ -122,15 +124,19 @@ public class ModConfig {
 
     // ==================== 觉醒强化 ====================
     public static final DoubleValue AWAKEN_MULTIPLIER;
+    public static final DoubleValue AWAKEN_PERCENT_CAP;
     public static final DoubleValue AWAKEN_VOID_STEP_DASH;
     public static final DoubleValue AWAKEN_SOAR_SPEED;
     public static final DoubleValue AWAKEN_SOUL_QUENCH_EXECUTE_THRESHOLD;
+    public static final DoubleValue AWAKEN_SOUL_QUENCH_EXECUTE_MULTIPLIER;
     public static final DoubleValue AWAKEN_SHADOW_KILL_AOE_RADIUS;
     public static final DoubleValue AWAKEN_SHADOW_KILL_AOE_RATIO;
     public static final IntValue AWAKEN_SHADOW_KILL_AOE_MAX_TARGETS;
     public static final DoubleValue AWAKEN_LIFESTEAL_SHIELD_CAP;
     public static final IntValue AWAKEN_PURIFIED_SOUL_RADIUS;
     public static final IntValue AWAKEN_PURIFIED_SOUL_AURA_INTERVAL;
+    public static final IntValue AWAKEN_PURIFIED_SOUL_WEAKNESS_AMPLIFIER;
+    public static final IntValue AWAKEN_PURIFIED_SOUL_WEAKNESS_DURATION;
     public static final DoubleValue AWAKEN_JUDGMENT_RANGE_MULT;
     public static final DoubleValue AWAKEN_SANCTUARY_SPEED;
     public static final DoubleValue AWAKEN_UNDYING_ARMOR_BONUS;
@@ -146,11 +152,10 @@ public class ModConfig {
     public static final DoubleValue AWAKEN_MAGNET_RADIUS_MULT;
     public static final BooleanValue AWAKEN_MAGNET_INCLUDE_XP;
     public static final DoubleValue AWAKEN_XP_BOOST_MULT;
-    public static final IntValue AWAKEN_ALL_SEING_RADIUS;
-    public static final IntValue AWAKEN_ALL_SEING_INTERVAL;
-    public static final IntValue AWAKEN_ALL_SEING_DURATION;
-    public static final IntValue AWAKEN_ALL_SEING_RADAR_MAX;
-    public static final IntValue AWAKEN_ALL_SEING_RADAR_SCAN_INTERVAL;
+    // 注意：TOML 键名统一 SEEING 拼写（v1.3.1 起；旧键 awaken_all_seing_* 会失效重置为默认值）
+    public static final IntValue AWAKEN_ALL_SEEING_RADIUS;
+    public static final IntValue AWAKEN_ALL_SEEING_RADAR_MAX;
+    public static final IntValue AWAKEN_ALL_SEEING_RADAR_SCAN_INTERVAL;
     public static final DoubleValue AWAKEN_SWIFT_PUSH_RADIUS;
     public static final DoubleValue AWAKEN_SWIFT_PUSH_STRENGTH;
 
@@ -246,6 +251,8 @@ public class ModConfig {
             .defineInRange("rapid_recovery_delay_ticks", 100, 20, 1200);
         RAPID_RECOVERY_CHECK_INTERVAL = BUILDER.comment("脱战再生检查间隔（tick），默认60=3秒")
             .defineInRange("rapid_recovery_check_interval", 60, 10, 200);
+        RAPID_RECOVERY_HEAL_PER_AMPLIFIER = BUILDER.comment("每级 amplifier 折算的回血量（HP/周期），默认1.0")
+            .defineInRange("rapid_recovery_heal_per_amplifier", 1.0, 0.1, 10.0);
         BUILDER.pop();
 
         BUILDER.push("不动如山");
@@ -334,6 +341,8 @@ public class ModConfig {
             .defineInRange("magnet_pickup_radius", 1.5, 0.5, 6.0);
         MAGNET_SCAN_INTERVAL = BUILDER.comment("吸取扫描间隔（tick，默认5=每0.25秒，降低性能开销）")
             .defineInRange("magnet_scan_interval", 5, 1, 40);
+        MAGNET_PULL_FACTOR = BUILDER.comment("每次扫描朝玩家拉近的距离比例（默认0.3=30%）")
+            .defineInRange("magnet_pull_factor", 0.3, 0.05, 1.0);
         BUILDER.pop();
 
         BUILDER.push("经验加成");
@@ -362,12 +371,16 @@ public class ModConfig {
         BUILDER.push("觉醒强化");
         AWAKEN_MULTIPLIER = BUILDER.comment("觉醒数值强化倍率")
             .defineInRange("awaken_multiplier", 1.5, 0.5, 10.0);
+        AWAKEN_PERCENT_CAP = BUILDER.comment("觉醒百分比能力硬上限（灵巧/伤害抗性等，默认0.95=95%）")
+            .defineInRange("awaken_percent_cap", 0.95, 0.5, 1.0);
         AWAKEN_VOID_STEP_DASH = BUILDER.comment("觉醒虚空踏步·御风 - 二段跳时朝视角方向的水平冲刺冲量")
             .defineInRange("awaken_void_step_dash", 0.6, 0.0, 2.0);
         AWAKEN_SOAR_SPEED = BUILDER.comment("觉醒翱翔 - 飞行速度倍率")
             .defineInRange("awaken_soar_speed", 1.5, 1.0, 5.0);
         AWAKEN_SOUL_QUENCH_EXECUTE_THRESHOLD = BUILDER.comment("觉醒淬魂之力 - 斩杀线阈值（生命比例）")
             .defineInRange("awaken_soul_quench_execute_threshold", 0.2, 0.0, 1.0);
+        AWAKEN_SOUL_QUENCH_EXECUTE_MULTIPLIER = BUILDER.comment("觉醒淬魂之力 - 斩杀线触发时的伤害倍率（默认2.0=翻倍）")
+            .defineInRange("awaken_soul_quench_execute_multiplier", 2.0, 1.0, 10.0);
         AWAKEN_SHADOW_KILL_AOE_RADIUS = BUILDER.comment("觉醒影杀 - AOE 半径（格）")
             .defineInRange("awaken_shadow_kill_aoe_radius", 8.0, 1.0, 64.0);
         AWAKEN_SHADOW_KILL_AOE_RATIO = BUILDER.comment("觉醒影杀 - AOE 影子血量削减比例")
@@ -380,6 +393,10 @@ public class ModConfig {
             .defineInRange("awaken_purified_soul_radius", 16, 1, 128);
         AWAKEN_PURIFIED_SOUL_AURA_INTERVAL = BUILDER.comment("觉醒净魂 - 虚弱光环施加间隔（tick，默认40=2秒）")
             .defineInRange("awaken_purified_soul_aura_interval", 40, 1, 200);
+        AWAKEN_PURIFIED_SOUL_WEAKNESS_AMPLIFIER = BUILDER.comment("觉醒净魂 - 虚弱光环等级（amplifier，默认1=虚弱II）")
+            .defineInRange("awaken_purified_soul_weakness_amplifier", 1, 0, 4);
+        AWAKEN_PURIFIED_SOUL_WEAKNESS_DURATION = BUILDER.comment("觉醒净魂 - 虚弱持续时间（tick，默认100=5秒）")
+            .defineInRange("awaken_purified_soul_weakness_duration", 100, 20, 600);
         AWAKEN_JUDGMENT_RANGE_MULT = BUILDER.comment("觉醒旅者审判 - 范围倍率")
             .defineInRange("awaken_judgment_range_mult", 1.5, 1.0, 10.0);
         AWAKEN_SANCTUARY_SPEED = BUILDER.comment("觉醒旅者庇护 - 可移动速度倍率")
@@ -410,15 +427,12 @@ public class ModConfig {
             .define("awaken_magnet_include_xp", true);
         AWAKEN_XP_BOOST_MULT = BUILDER.comment("觉醒经验加成 - 倍率再乘此值")
             .defineInRange("awaken_xp_boost_mult", 1.5, 1.0, 5.0);
-        AWAKEN_ALL_SEING_RADIUS = BUILDER.comment("觉醒全视之眼 - 实体高亮半径（格）")
+        // 觉醒全视之眼 = 威胁雷达（原「实体发光」旧方案已废弃，不再提供高亮相关配置）
+        AWAKEN_ALL_SEEING_RADIUS = BUILDER.comment("觉醒全视之眼 - 威胁雷达扫描半径（格）")
             .defineInRange("awaken_all_seeing_radius", 24, 1, 128);
-        AWAKEN_ALL_SEING_INTERVAL = BUILDER.comment("觉醒全视之眼 - 高亮刷新间隔（tick，默认20=1秒）")
-            .defineInRange("awaken_all_seing_interval", 20, 1, 200);
-        AWAKEN_ALL_SEING_DURATION = BUILDER.comment("觉醒全视之眼 - 高亮持续时间（tick）")
-            .defineInRange("awaken_all_seing_duration", 40, 20, 600);
-        AWAKEN_ALL_SEING_RADAR_MAX = BUILDER.comment("觉醒全视之眼 - 威胁雷达最多显示目标数（防堵屏）")
+        AWAKEN_ALL_SEEING_RADAR_MAX = BUILDER.comment("觉醒全视之眼 - 威胁雷达最多显示目标数（防堵屏）")
             .defineInRange("awaken_all_seeing_radar_max", 6, 1, 16);
-        AWAKEN_ALL_SEING_RADAR_SCAN_INTERVAL = BUILDER.comment("觉醒全视之眼 - 雷达扫描间隔（tick，默认10=0.5秒）")
+        AWAKEN_ALL_SEEING_RADAR_SCAN_INTERVAL = BUILDER.comment("觉醒全视之眼 - 雷达扫描间隔（tick，默认10=0.5秒）")
             .defineInRange("awaken_all_seeing_radar_scan_interval", 10, 1, 100);
         AWAKEN_SWIFT_PUSH_RADIUS = BUILDER.comment("觉醒加速 - 疾跑推开半径（格）")
             .defineInRange("awaken_swift_push_radius", 3.0, 0.0, 16.0);

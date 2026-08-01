@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.handler;
 
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
@@ -9,6 +10,8 @@ import com.ayin90723.adventure_power.util.AbilityGate;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
@@ -35,14 +38,16 @@ public class ExplorationAbilityHandler {
 
     /**
      * 大地之力：提升玩家挖掘速度。公式：originalSpeed × multiplier
+     * <p>
+     * 双端处理：BreakSpeed 是双端事件。服务端决定实际破坏进度，客户端若不应用
+     * 同样的倍率，进度条按原速增长而破坏按加速完成，表现为「进度条突然跳满」。
      */
     @SubscribeEvent
     public static void onBreakSpeed(PlayerEvent.BreakSpeed event) {
         Player player = event.getEntity();
-        if (player.level().isClientSide()) return;
 
-        AbilityGate.getActiveProgress(player, "digging_power").ifPresent(progress -> {
-            Ability ability = AbilityRegistry.get("digging_power");
+        AbilityGate.getActiveProgress(player, AbilityIds.DIGGING_POWER).ifPresent(progress -> {
+            Ability ability = AbilityRegistry.get(AbilityIds.DIGGING_POWER);
             if (ability == null) return;
 
             float multiplier = ability.value(progress.getUnlockedMilestoneCount());
@@ -74,22 +79,26 @@ public class ExplorationAbilityHandler {
      */
     /** 门禁后业务（由 PlayerTickDispatcher 调用）：无形之手 / 坚韧之躯属性同步 */
     public static void onTick(Player player, IAdventureProgress progress) {
+        // 全能力关闭时快速短路，避免每 tick 三次 AttributeRegistry.get + getAttribute
+        if (!progress.isAbilityEnabled(AbilityIds.EXTENDED_REACH)
+            && !progress.isAbilityEnabled(AbilityIds.VITALITY)
+            && !progress.isAbilityEnabled(AbilityIds.SWIFT)) return;
 
         // ---- 无形之手 ----
-        syncReachAttribute(player, progress.isAbilityEnabled("extended_reach"),
+        syncReachAttribute(player, progress.isAbilityEnabled(AbilityIds.EXTENDED_REACH),
             progress.getUnlockedMilestoneCount(), progress.isFullyUnlocked());
 
         // ---- 坚韧之躯 ----
-        syncVitalityAttribute(player, progress.isAbilityEnabled("vitality"),
+        syncVitalityAttribute(player, progress.isAbilityEnabled(AbilityIds.VITALITY),
             progress.getUnlockedMilestoneCount(), progress.isFullyUnlocked());
 
         // ---- 加速 ----
-        syncSpeedAttribute(player, progress.isAbilityEnabled("swift"),
+        syncSpeedAttribute(player, progress.isAbilityEnabled(AbilityIds.SWIFT),
             progress.getUnlockedMilestoneCount(), progress.isFullyUnlocked());
     }
 
     private static void syncReachAttribute(Player player, boolean enabled, int milestones, boolean fullyUnlocked) {
-        Ability ability = AbilityRegistry.get("extended_reach");
+        Ability ability = AbilityRegistry.get(AbilityIds.EXTENDED_REACH);
         float bonus = 0.0F;
         if (enabled && ability != null) {
             bonus = ability.value(milestones);
@@ -102,6 +111,13 @@ public class ExplorationAbilityHandler {
         applyReachAttr(player, ForgeMod.ENTITY_REACH.get(), bonus);
     }
 
+    /**
+     * 触及属性首次写入前的原始 baseValue（登出恢复用）。
+     * 其他模组可能以 baseValue 形式持久化触及距离，登出无条件恢复默认值会覆盖其数据。
+     * BLOCK_REACH 与 ENTITY_REACH 同步写入，仅记录 BLOCK_REACH（entity 侧默认恢复）。
+     */
+    private static final Map<UUID, Double> ORIGINAL_REACH = new HashMap<>();
+
     /** 设置触及属性 baseValue = 默认 + bonus（bonus=0 时恢复默认） */
     private static void applyReachAttr(Player player,
                                        net.minecraft.world.entity.ai.attributes.Attribute attr, float bonus) {
@@ -111,9 +127,19 @@ public class ExplorationAbilityHandler {
         double def = attr.getDefaultValue();
         double expected = def + bonus;
         if (Math.abs(inst.getBaseValue() - expected) > 0.001) {
+            if (attr == ForgeMod.BLOCK_REACH.get()) {
+                ORIGINAL_REACH.putIfAbsent(player.getUUID(), inst.getBaseValue());
+            }
             inst.setBaseValue(expected);
         }
     }
+
+    /**
+     * 最大生命首次写入前的原始 baseValue（登出/关闭能力恢复用）。
+     * 其他模组（耐力/体质类）常以 baseValue 形式持久化 maxHealth，
+     * 登出无条件重置为 20 会覆盖其存档数据且无法回滚。
+     */
+    private static final Map<UUID, Double> ORIGINAL_MAX_HEALTH = new HashMap<>();
 
     private static void syncVitalityAttribute(Player player, boolean enabled, int milestones, boolean fullyUnlocked) {
         var attr = player.getAttribute(Attributes.MAX_HEALTH);
@@ -122,7 +148,7 @@ public class ExplorationAbilityHandler {
         double currentVal = attr.getBaseValue();
 
         if (enabled) {
-            Ability ability = AbilityRegistry.get("vitality");
+            Ability ability = AbilityRegistry.get(AbilityIds.VITALITY);
             if (ability == null) return;
             float bonus = ability.value(milestones);
             if (fullyUnlocked) {
@@ -130,6 +156,7 @@ public class ExplorationAbilityHandler {
             }
             double expected = 20.0 + bonus;
             if (Math.abs(currentVal - expected) > 0.001) {
+                ORIGINAL_MAX_HEALTH.putIfAbsent(player.getUUID(), currentVal);
                 attr.setBaseValue(expected);
                 // 如果当前血量超过新上限，裁剪到新上限
                 if (player.getHealth() > expected) {
@@ -137,12 +164,17 @@ public class ExplorationAbilityHandler {
                 }
             }
         } else {
-            if (Math.abs(currentVal - 20.0) > 0.001) {
-                // 裁剪血量到 20 以下再调低上限，防止血量卡在异常值
-                if (player.getHealth() > 20.0F) {
-                    player.setHealth(20.0F);
+            // 关闭能力：恢复到本模组记录的原值（其他模组的 baseValue 修改不被覆盖）。
+            // 注意：玩家可能从未解锁 vitality（putIfAbsent 从未触发），此时 baseValue 可能
+            // 已被其他模组修改——首次执行恢复前先记录当前值为原值，避免每 tick 踩回 20。
+            ORIGINAL_MAX_HEALTH.putIfAbsent(player.getUUID(), currentVal);
+            double restore = ORIGINAL_MAX_HEALTH.get(player.getUUID());
+            if (Math.abs(currentVal - restore) > 0.001) {
+                // 裁剪血量到目标上限以下再调低上限，防止血量卡在异常值
+                if (player.getHealth() > restore) {
+                    player.setHealth((float) restore);
                 }
-                attr.setBaseValue(20.0);
+                attr.setBaseValue(restore);
             }
         }
     }
@@ -156,7 +188,7 @@ public class ExplorationAbilityHandler {
         if (attr == null) return;
         float bonus = 0.0F;
         if (enabled) {
-            Ability ability = AbilityRegistry.get("swift");
+            Ability ability = AbilityRegistry.get(AbilityIds.SWIFT);
             if (ability != null) {
                 bonus = ability.value(milestones);  // 移速加成比例（类似迅捷药水）
                 if (fullyUnlocked) {
@@ -193,13 +225,13 @@ public class ExplorationAbilityHandler {
             int milestones = progress.getUnlockedMilestoneCount();
 
             boolean fullyUnlocked = progress.isFullyUnlocked();
-            if (progress.isAbilityEnabled("extended_reach")) {
+            if (progress.isAbilityEnabled(AbilityIds.EXTENDED_REACH)) {
                 syncReachAttribute(player, true, milestones, fullyUnlocked);
             }
-            if (progress.isAbilityEnabled("vitality")) {
+            if (progress.isAbilityEnabled(AbilityIds.VITALITY)) {
                 syncVitalityAttribute(player, true, milestones, fullyUnlocked);
             }
-            if (progress.isAbilityEnabled("swift")) {
+            if (progress.isAbilityEnabled(AbilityIds.SWIFT)) {
                 syncSpeedAttribute(player, true, milestones, fullyUnlocked);
             }
         });
@@ -208,17 +240,24 @@ public class ExplorationAbilityHandler {
     // ==================== 登出清理 ====================
 
     /**
-     * 登出时重置属性为默认值，防止残留影响。
+     * 登出时恢复属性为原始值（本模组写入前的值），防止残留影响且不覆盖其他模组的持久化数据。
      */
     @SubscribeEvent
     public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         Player player = event.getEntity();
         if (player.level().isClientSide()) return;
+        UUID uuid = player.getUUID();
 
         var reachAttr = player.getAttribute(ForgeMod.BLOCK_REACH.get());
-        if (reachAttr != null && Math.abs(reachAttr.getBaseValue() - ForgeMod.BLOCK_REACH.get().getDefaultValue()) > 0.001) {
-            reachAttr.setBaseValue(ForgeMod.BLOCK_REACH.get().getDefaultValue());
+        if (reachAttr != null) {
+            // 仅当本模组实际写入过才恢复原值——从未解锁无形之手的玩家跳过，
+            // 避免覆盖其他模组对触及距离 baseValue 的持久化修改
+            Double restore = ORIGINAL_REACH.get(uuid);
+            if (restore != null && Math.abs(reachAttr.getBaseValue() - restore) > 0.001) {
+                reachAttr.setBaseValue(restore);
+            }
         }
+        ORIGINAL_REACH.remove(uuid);
         if (ForgeMod.ENTITY_REACH.get() != null) {
             var entityReachAttr = player.getAttribute(ForgeMod.ENTITY_REACH.get());
             double erDef = ForgeMod.ENTITY_REACH.get().getDefaultValue();
@@ -228,9 +267,13 @@ public class ExplorationAbilityHandler {
         }
 
         var healthAttr = player.getAttribute(Attributes.MAX_HEALTH);
-        if (healthAttr != null && Math.abs(healthAttr.getBaseValue() - 20.0) > 0.001) {
-            healthAttr.setBaseValue(20.0);
+        if (healthAttr != null) {
+            double restore = ORIGINAL_MAX_HEALTH.getOrDefault(uuid, 20.0);
+            if (Math.abs(healthAttr.getBaseValue() - restore) > 0.001) {
+                healthAttr.setBaseValue(restore);
+            }
         }
+        ORIGINAL_MAX_HEALTH.remove(uuid);
 
         var speedAttr = player.getAttribute(Attributes.MOVEMENT_SPEED);
         if (speedAttr != null) {

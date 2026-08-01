@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.mixin;
 
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
@@ -36,10 +37,10 @@ public class FortuneFavorMixin {
         if (player == null) return;
 
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (!progress.isAbilityEnabled("fortune_favor")) return;
+            if (!progress.isAbilityEnabled(AbilityIds.FORTUNE_FAVOR)) return;
             if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
 
-            Ability ability = AbilityRegistry.get("fortune_favor");
+            Ability ability = AbilityRegistry.get(AbilityIds.FORTUNE_FAVOR);
             if (ability == null) return;
 
             int bonus = (int) ability.value(progress.getUnlockedMilestoneCount());

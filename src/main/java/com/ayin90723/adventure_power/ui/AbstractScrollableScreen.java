@@ -49,6 +49,14 @@ public abstract class AbstractScrollableScreen extends Screen {
     }
 
     @Override
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        // 每帧钳制滚动偏移：列表变短（Buff 到期/效果移除）时防止 scrollOffset 越界，
+        // 否则滚动条滑块会被画到可视区域外
+        clampScroll();
+        super.render(graphics, mouseX, mouseY, partialTick);
+    }
+
+    @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollDelta) {
         // 无内容可滚动时返回 false，交父类处理，避免吞掉子容器滚动事件
         if (maxScroll() <= 0) return false;

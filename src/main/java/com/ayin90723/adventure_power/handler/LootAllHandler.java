@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.handler;
 
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.AbilityGate;
@@ -60,7 +61,7 @@ public class LootAllHandler {
         if (!(event.getSource().getEntity() instanceof ServerPlayer player)) return;
 
         // 服务端门禁
-        var progress = AbilityGate.getActiveProgress(player, "loot_all").orElse(null);
+        var progress = AbilityGate.getActiveProgress(player, AbilityIds.LOOT_ALL).orElse(null);
         if (progress == null) return;
 
         // 友伤保护：不对玩家自己驯服的生物生效

@@ -1,6 +1,7 @@
 package com.ayin90723.adventure_power.util;
 
 import com.ayin90723.adventure_power.ability.Ability;
+import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
@@ -38,17 +39,39 @@ public final class AbilityGate {
      */
     public static Optional<IAdventureProgress> getActiveProgress(Player player, String abilityId) {
         return AdventureProgressCapability.getAdventureProgress(player)
-            .filter(p -> (p.isAdventurer() || p.isFullyUnlocked()) && p.isAbilityEnabled(abilityId));
+            .filter(p -> isActive(p, abilityId));
     }
 
     /**
-     * 百分比能力觉醒倍率（value/100 形式，cap 0.95）。
-     * 用于灵巧/伤害抗性等：value 是 0-100 的百分比，结果为 0-0.95 的比率。
+     * 门禁断言（已有 progress 对象时）：冒险者/觉醒 且 指定能力已启用。
+     * 收敛各 handler 重复的「{@code if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;}
+     * + {@code if (!progress.isAbilityEnabled(x)) return;}」双行样板。
+     */
+    public static boolean isActive(IAdventureProgress progress, String abilityId) {
+        return (progress.isAdventurer() || progress.isFullyUnlocked())
+            && progress.isAbilityEnabled(abilityId);
+    }
+
+    /**
+     * 取能力当前数值（能力未注册返回 empty）。
+     * 与「{@code Ability ability = AbilityRegistry.get(id); if (ability == null) return;}」样板
+     * 完全等价——empty 即「不处理」。
+     */
+    public static Optional<Float> value(IAdventureProgress progress, String abilityId) {
+        Ability ability = AbilityRegistry.get(abilityId);
+        if (ability == null) return Optional.empty();
+        return Optional.of(ability.value(progress.getUnlockedMilestoneCount()));
+    }
+
+    /**
+     * 百分比能力觉醒倍率（value/100 形式，cap 由配置 `awaken_percent_cap` 控制，默认 0.95）。
+     * 用于灵巧/伤害抗性等：value 是 0-100 的百分比，结果为 0-cap 的比率。
      */
     public static float awakenedRatio(Ability ability, int milestones, boolean fullyUnlocked) {
         float v = ability.value(milestones) / 100.0f;
         if (fullyUnlocked) {
-            v = Math.min(v * ModConfig.AWAKEN_MULTIPLIER.get().floatValue(), 0.95f);
+            v = Math.min(v * ModConfig.AWAKEN_MULTIPLIER.get().floatValue(),
+                ModConfig.AWAKEN_PERCENT_CAP.get().floatValue());
         }
         return v;
     }

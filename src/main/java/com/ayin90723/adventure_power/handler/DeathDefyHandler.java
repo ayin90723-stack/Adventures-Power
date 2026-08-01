@@ -1,5 +1,7 @@
 package com.ayin90723.adventure_power.handler;
 
+import com.ayin90723.adventure_power.util.AbilityGate;
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.config.ModConfig;
@@ -24,8 +26,7 @@ import java.util.stream.Collectors;
 /**
  * 死亡抗拒 - 监听玩家死亡事件（HIGHEST 优先级），能力启用且冷却结束时取消死亡、回满血、进入无敌。
  * <p>
- * 从 AdventureProgressCapability 拆出。syncCapabilityToPersistent/syncToClient 暂回调
- * AdventureProgressCapability（阶段2 提取 SyncUtil 后改调）。
+ * 从 AdventureProgressCapability 拆出。持久化与客户端同步统一走 {@link com.ayin90723.adventure_power.util.SyncUtil}。
  */
 @EventBusSubscriber(modid = AdventurePower.MODID, bus = Bus.FORGE)
 public class DeathDefyHandler {
@@ -36,8 +37,7 @@ public class DeathDefyHandler {
         if (player.level().isClientSide()) return;
 
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
-            if (!progress.isAbilityEnabled("death_defy")) return;
+            if (!AbilityGate.isActive(progress, AbilityIds.DEATH_DEFY)) return;
 
             long currentTime = player.level().getGameTime();
             if (progress.getDeathDefyCooldownEnd() > currentTime) return; // 冷却中
@@ -70,7 +70,7 @@ public class DeathDefyHandler {
             SyncUtil.syncToClient(player);
 
             // 觉醒：触发死亡抗拒时自动释放一次免费旅者审判
-            if (progress.isFullyUnlocked() && progress.isAbilityEnabled("active_skill")) {
+            if (progress.isFullyUnlocked() && progress.isAbilityEnabled(AbilityIds.ACTIVE_SKILL)) {
                 com.ayin90723.adventure_power.skill.ActiveSkillHandler.executeJudgment(
                     (ServerPlayer) player);
             }

@@ -89,8 +89,18 @@ public abstract class PiercingGazeLivingEntityMixin {
 
     @Inject(method = "m_6469_", at = @At("HEAD"))
     private void onHurtEnter(DamageSource source, float amount, CallbackInfoReturnable<Boolean> cir) {
+        // 泄漏哨兵：外部模组对 hurt() HEAD cancellable cancel 时 RETURN 不执行、栈帧残留，
+        // 残留帧（inPiercing=true）会使风暴守卫永久跳过穿透。递归穿透深度正常远小于 64，
+        // 栈深异常必是泄漏——清空恢复，穿透链在下次攻击时自愈。
+        Deque<PiercingStackFrame> stack = PIERCING_STACK.get();
+        if (stack.size() > 64) {
+            stack.clear();
+            IN_PIERCING.set(false);
+            PIERCING_EVENT_POSTED.set(false);
+            PIERCING_EFFECTIVE_AMOUNT.remove();
+        }
         // 压栈保存外层状态，重置本层（递归 hurt 不污染外层）
-        PIERCING_STACK.get().push(new PiercingStackFrame(
+        stack.push(new PiercingStackFrame(
             IN_PIERCING.get(), PIERCING_EVENT_POSTED.get(), PIERCING_EFFECTIVE_AMOUNT.get()
         ));
         IN_PIERCING.set(false);

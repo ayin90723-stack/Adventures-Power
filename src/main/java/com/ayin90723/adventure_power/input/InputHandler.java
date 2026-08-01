@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.input;
 
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.network.NetworkHandler;
 import com.ayin90723.adventure_power.ui.ActiveSkillHudOverlay;
@@ -33,8 +34,12 @@ public class InputHandler {
                lastPlayer = mc.player;
                abilityMgmt.reset();
             }
-            // P 键：冒险统一面板（默认显示"能力配置"，顶部标签切换 Buff永驻/冒险进度）
+            // P 键：冒险统一面板（开关式：已打开则关闭，避免重建面板跳回能力 tab）
             if (abilityMgmt.consumePress(ClientModEvents.ABILITY_MANAGEMENT.isDown())) {
+               if (mc.screen instanceof AdventureMainScreen) {
+                  mc.setScreen(null);
+                  return;
+               }
                if (AdventureProgressCapability.isAdventurer(mc.player)
                    || AdventureProgressCapability.isFullyUnlocked(mc.player)) {
                   mc.setScreen(new AdventureMainScreen());
@@ -53,20 +58,21 @@ public class InputHandler {
                   skillSwitch.reset();
                   skillActivate.reset();
                }
-               // Y 键：切换技能
+               // Y 键：切换技能（本地乐观更新 + 发包由服务端持久化，避免被后续 sync 覆盖）
                if (skillSwitch.consumePress(ClientModEvents.SKILL_SWITCH.isDown())) {
                   mc.player.getCapability(AdventureProgressCapability.CAPABILITY).ifPresent(progress -> {
-                     if (progress.isAbilityEnabled("active_skill")) {
-                        int current = progress.getActiveSkillIndex();
-                        progress.setActiveSkillIndex(current == 0 ? 1 : 0); // 0↔1 切换
+                     if (progress.isAbilityEnabled(AbilityIds.ACTIVE_SKILL)) {
+                        int next = progress.getActiveSkillIndex() == 0 ? 1 : 0;
+                        progress.setActiveSkillIndex(next); // 0↔1 切换（本地即时反馈）
                         ActiveSkillHudOverlay.onSkillSwitched(mc.level.getGameTime());
+                        NetworkHandler.sendSkillSwitch(next); // 服务端持久化 + 回同步
                      }
                   });
                }
                // G 键：释放技能
                if (skillActivate.consumePress(ClientModEvents.SKILL_ACTIVATE.isDown())) {
                   mc.player.getCapability(AdventureProgressCapability.CAPABILITY).ifPresent(progress -> {
-                     if (progress.isAbilityEnabled("active_skill")) {
+                     if (progress.isAbilityEnabled(AbilityIds.ACTIVE_SKILL)) {
                         long currentTime = mc.level.getGameTime();
                         // 客户端预检：GCD
                         long gcdEnd = progress.getActiveSkillGcdEnd();

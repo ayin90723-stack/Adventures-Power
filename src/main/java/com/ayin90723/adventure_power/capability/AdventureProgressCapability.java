@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.capability;
 
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.milestone.Milestone;
@@ -125,14 +126,16 @@ public class AdventureProgressCapability {
         return getAdventureProgress(player).map(IAdventureProgress::isFullyUnlocked).orElse(false);
     }
 
-    /** 服务端切换能力开关，返回新状态（true=启用）。仅允许注册表中的能力 ID */
+    /** 服务端切换能力开关，返回新状态（true=启用）。仅允许注册表中的能力 ID，且必须是已解锁能力 */
     public static boolean toggleAbility(Player player, String id) {
         if (!KNOWN_ABILITIES.containsKey(id)) return false;
         return getAdventureProgress(player).map(p -> {
+            // 门禁：未解锁的能力不允许切换（恶意客户端可写入任意 ID，否则解锁后默认禁用）
+            if (!p.isAbilityUnlocked(id)) return false;
             boolean enabled = p.toggleAbility(id);
             // true_health 关闭时重置备份血量，防止重新激活时过时备份
             // 被误判为"非法降血"导致血量恢复（如关闭期间玩家受伤，备份冻结在旧值）
-            if ("true_health".equals(id) && !enabled) {
+            if (AbilityIds.TRUE_HEALTH.equals(id) && !enabled) {
                 p.setBackupHealth(0.0F);
             }
             return enabled;
@@ -185,7 +188,7 @@ public class AdventureProgressCapability {
             progress.unlockMilestone(milestoneId);
             // 翱翔飞行立即同步：不等 PlayerStateHandler 下一 tick，
             // 避免两处 TickEvent.Phase.END handler 执行顺序不确定导致的竞态
-            if (progress.isAbilityEnabled("soar") && !player.getAbilities().mayfly
+            if (progress.isAbilityEnabled(AbilityIds.SOAR) && !player.getAbilities().mayfly
                 && !player.getAbilities().instabuild && !player.isSpectator()) {
                 player.getAbilities().mayfly = true;
                 player.onUpdateAbilities();
@@ -203,16 +206,26 @@ public class AdventureProgressCapability {
             player.displayClientMessage(
                 Component.translatable("milestone.adventure_power." + milestoneId).withStyle(ChatFormatting.GREEN), true);
 
-            // ★ 全部里程碑达成 -> 冒险的开始 自动替换为 冒险的终点 + 终极成就
+            // ★ 全部里程碑达成 -> 冒险的开始 自动替换为 冒险的终点 + 觉醒级联
             // 不限制最后一个里程碑必须是 ELYTRA，适应任意解锁顺序
-            if (progress.areAllMilestonesUnlocked() && !progress.isFullyUnlocked()) {
-                AdventureItemNbtUtil.replaceBeginWithEnd(player);
-                progress.activateFullyUnlocked();
-                ScoreboardUtil.updateScoreboard(player, true);
-                SyncUtil.syncCapabilityToPersistent(player, progress);
-                SyncUtil.syncToClient(player);
-            }
+            activateFinalStageIfReady(player, progress);
         });
+    }
+
+    /**
+     * 全部里程碑达成时的第 11 阶段「冒险者的觉醒」级联（幂等）。
+     * <p>
+     * 所有解锁路径（grantMilestone / catchUpMissedMilestones）必须走此方法，
+     * 否则 10/10 里程碑但觉醒永不激活、终点饰品永不替换，且无自愈路径。
+     */
+    public static void activateFinalStageIfReady(ServerPlayer player, IAdventureProgress progress) {
+        if (progress.areAllMilestonesUnlocked() && !progress.isFullyUnlocked()) {
+            AdventureItemNbtUtil.replaceBeginWithEnd(player);
+            progress.activateFullyUnlocked();
+            ScoreboardUtil.updateScoreboard(player, true);
+            SyncUtil.syncCapabilityToPersistent(player, progress);
+            SyncUtil.syncToClient(player);
+        }
     }
 
     // ===== 恩赐永驻觉醒：正面效果无法被驱散 =====
@@ -229,7 +242,7 @@ public class AdventureProgressCapability {
         if (!(entity instanceof Player player)) return;
         getAdventureProgress(player).ifPresent(progress -> {
             if (!progress.isFullyUnlocked()) return;
-            if (!progress.isAbilityEnabled("perpetual_blessing")) return;
+            if (!progress.isAbilityEnabled(AbilityIds.PERPETUAL_BLESSING)) return;
             MobEffect effect = event.getEffect();
             if (effect != null && effect.getCategory() == MobEffectCategory.BENEFICIAL) {
                 event.setCanceled(true);

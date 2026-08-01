@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.handler;
 
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
@@ -92,7 +93,7 @@ public class PlayerStateHandler {
         if (!(event.getEntity() instanceof Player player)) return;
         if (player.level().isClientSide()) return;
 
-        AbilityGate.getActiveProgress(player, "soul_bind").ifPresent(progress -> {
+        AbilityGate.getActiveProgress(player, AbilityIds.SOUL_BIND).ifPresent(progress -> {
             // 只保存正面效果（与能力描述"保留正面效果"一致），负面效果随死亡清除
             CompoundTag buffsTag = new CompoundTag();
             ListTag effectList = new ListTag();
@@ -107,9 +108,9 @@ public class PlayerStateHandler {
             // 觉醒：额外保留经验（非觉醒掉经验，原版行为）
             if (progress.isFullyUnlocked()) {
                 CompoundTag expTag = new CompoundTag();
-                expTag.putInt("level", player.experienceLevel);
-                expTag.putFloat("progress", player.experienceProgress);
-                expTag.putInt("total", player.totalExperience);
+                expTag.putInt(PersistentDataKeys.SOUL_BIND_EXP_LEVEL, player.experienceLevel);
+                expTag.putFloat(PersistentDataKeys.SOUL_BIND_EXP_PROGRESS, player.experienceProgress);
+                expTag.putInt(PersistentDataKeys.SOUL_BIND_EXP_TOTAL, player.totalExperience);
                 player.getPersistentData().put(SOUL_BIND_EXP_KEY, expTag);
 
                 // 清零经验等级防止死亡掉落经验球（否则重生恢复 + 捡经验球 = 双倍）。
@@ -153,9 +154,9 @@ public class PlayerStateHandler {
             // 精确恢复经验三字段（直接赋值，避免 giveExperiencePoints 的 increaseScore 副作用与 level 重算偏差）
             if (original.getPersistentData().contains(SOUL_BIND_EXP_KEY, Tag.TAG_COMPOUND)) {
                 CompoundTag expTag = original.getPersistentData().getCompound(SOUL_BIND_EXP_KEY);
-                player.experienceLevel = expTag.getInt("level");
-                player.experienceProgress = expTag.getFloat("progress");
-                player.totalExperience = expTag.getInt("total");
+                player.experienceLevel = expTag.getInt(PersistentDataKeys.SOUL_BIND_EXP_LEVEL);
+                player.experienceProgress = expTag.getFloat(PersistentDataKeys.SOUL_BIND_EXP_PROGRESS);
+                player.totalExperience = expTag.getInt(PersistentDataKeys.SOUL_BIND_EXP_TOTAL);
                 original.getPersistentData().remove(SOUL_BIND_EXP_KEY);
 
                 // 防御性同步：显式发包确保客户端立即显示正确经验，
@@ -217,7 +218,7 @@ public class PlayerStateHandler {
         if (progressOpt.isEmpty()) return;
         var progress = progressOpt.get();
 
-        if (progress.isAbilityEnabled("soar") && !player.getAbilities().mayfly
+        if (progress.isAbilityEnabled(AbilityIds.SOAR) && !player.getAbilities().mayfly
             && !player.getAbilities().instabuild && !player.isSpectator()) {
             player.getAbilities().mayfly = true;
             progress.setSoarGrantedFlight(true);
@@ -233,7 +234,7 @@ public class PlayerStateHandler {
      *  @param restoreFlying 是否同时恢复 flying 标志（维度切换时保留飞行中状态） */
     private static void restoreSoarFlight(Player player, boolean restoreFlying) {
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (progress.isAbilityEnabled("soar")) {
+            if (progress.isAbilityEnabled(AbilityIds.SOAR)) {
                 boolean changed = false;
                 if (!player.getAbilities().mayfly) {
                     player.getAbilities().mayfly = true;
@@ -289,7 +290,7 @@ public class PlayerStateHandler {
         if (!(event.getEntity() instanceof Player player)) return;
         if (player.level().isClientSide()) return;
 
-        AbilityGate.getActiveProgress(player, "env_immunity").ifPresent(progress -> {
+        AbilityGate.getActiveProgress(player, AbilityIds.ENV_IMMUNITY).ifPresent(progress -> {
             DamageSource source = event.getSource();
 
             // 觉醒：免疫所有无源伤害（不仅是标签覆盖的环境伤害）
@@ -344,7 +345,7 @@ public class PlayerStateHandler {
         if (!(event.getEntity() instanceof Player player)) return;
         if (player.level().isClientSide()) return;
 
-        AbilityGate.getActiveProgress(player, "active_skill").ifPresent(progress -> {
+        AbilityGate.getActiveProgress(player, AbilityIds.ACTIVE_SKILL).ifPresent(progress -> {
             if (!progress.isSanctuaryInvulnerable(player.level().getGameTime())) return;
             if (event.getSource().is(DamageTypeTags.BYPASSES_INVULNERABILITY)) return;
             event.setCanceled(true);
@@ -382,7 +383,7 @@ public class PlayerStateHandler {
     public static void onTick(Player player, IAdventureProgress progress) {
 
         // ---- 净魂兜底 + 觉醒虚弱光环 ----
-        if (progress.isAbilityEnabled("purified_soul")) {
+        if (progress.isAbilityEnabled(AbilityIds.PURIFIED_SOUL)) {
             // 先快速判断有无有害效果，无则跳过（大多数 tick 玩家无负面效果），
             // 有则收集到独立 list 再 remove（避免遍历 activeEffects 视图时修改触发 CME）
             List<MobEffect> toRemove = null;
@@ -398,21 +399,26 @@ public class PlayerStateHandler {
                 }
             }
 
-            // 觉醒：周期性给周围敌对生物施加虚弱II
+            // 觉醒：周期性给周围敌对生物施加虚弱光环（等级/时长由配置控制）
             if (progress.isFullyUnlocked()
                 && (player.level().getGameTime() + player.getId()) % com.ayin90723.adventure_power.config.ModConfig.AWAKEN_PURIFIED_SOUL_AURA_INTERVAL.get() == 0) {
                 int radius = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_PURIFIED_SOUL_RADIUS.get();
+                int weaknessAmp = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_PURIFIED_SOUL_WEAKNESS_AMPLIFIER.get();
+                int weaknessDur = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_PURIFIED_SOUL_WEAKNESS_DURATION.get();
                 AABB aabb = player.getBoundingBox().inflate(radius);
                 List<net.minecraft.world.entity.LivingEntity> targets = player.level()
                     .getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class, aabb,
                         e -> e != player && e.isAlive()
                             && e instanceof net.minecraft.world.entity.monster.Monster);
+                // 刷新余量：时长的 60%，且至少覆盖到下一次施加（避免配置短时长时断档）
+                int refreshThreshold = Math.min(weaknessDur * 3 / 5,
+                    com.ayin90723.adventure_power.config.ModConfig.AWAKEN_PURIFIED_SOUL_AURA_INTERVAL.get());
                 for (net.minecraft.world.entity.LivingEntity target : targets) {
                     net.minecraft.world.effect.MobEffectInstance existing = target.getEffect(MobEffects.WEAKNESS);
-                    if (existing == null || existing.getAmplifier() < 1
-                        || existing.getDuration() < 60) {
+                    if (existing == null || existing.getAmplifier() < weaknessAmp
+                        || existing.getDuration() < refreshThreshold) {
                         target.addEffect(new net.minecraft.world.effect.MobEffectInstance(
-                            MobEffects.WEAKNESS, 100, 1,
+                            MobEffects.WEAKNESS, weaknessDur, weaknessAmp,
                             false, false, true));
                     }
                 }
@@ -420,7 +426,7 @@ public class PlayerStateHandler {
         }
 
         // ---- 翱翔 ----
-        if (progress.isAbilityEnabled("soar")) {
+        if (progress.isAbilityEnabled(AbilityIds.SOAR)) {
             if (!player.getAbilities().mayfly) {
                 player.getAbilities().mayfly = true;
                 // 不自动开启 flying，让玩家自己双击空格
@@ -448,7 +454,7 @@ public class PlayerStateHandler {
         }
 
         // ---- 不朽装备觉醒：属性加成 ----
-        if (progress.isAbilityEnabled("undying_gear") && progress.isFullyUnlocked()) {
+        if (progress.isAbilityEnabled(AbilityIds.UNDYING_GEAR) && progress.isFullyUnlocked()) {
             applyUndyingGearAwakened(player);
         } else {
             removeUndyingGearAwakened(player);
@@ -457,7 +463,7 @@ public class PlayerStateHandler {
         // ---- 旅者庇护：非觉醒锁定移动，觉醒减速移动 ----
         long sanctuaryNow = player.level().getGameTime();
         boolean inSanctuary = progress.getSanctuaryInvulEnd() > sanctuaryNow
-            && progress.isAbilityEnabled("active_skill");
+            && progress.isAbilityEnabled(AbilityIds.ACTIVE_SKILL);
         var sanctuarySpeedAttr = player.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED);
         if (inSanctuary && sanctuarySpeedAttr != null) {
             double target = progress.isFullyUnlocked()
@@ -495,7 +501,7 @@ public class PlayerStateHandler {
         if (!(event.getEntity() instanceof Player player)) return;
         if (player.level().isClientSide()) return;
 
-        AbilityGate.getActiveProgress(player, "resilience").ifPresent(progress -> {
+        AbilityGate.getActiveProgress(player, AbilityIds.RESILIENCE).ifPresent(progress -> {
             long currentTime = player.level().getGameTime();
 
             // 基于已有层数减伤
@@ -508,7 +514,7 @@ public class PlayerStateHandler {
 
             // 叠层（上限由能力里程碑配置决定，觉醒 +6）
             int maxStacks = (int) ((com.ayin90723.adventure_power.ability.ResilienceAbility)
-                com.ayin90723.adventure_power.ability.AbilityRegistry.get("resilience"))
+                com.ayin90723.adventure_power.ability.AbilityRegistry.get(AbilityIds.RESILIENCE))
                 .value(progress.getUnlockedMilestoneCount(), progress.isFullyUnlocked());
             if (stacks < maxStacks) {
                 progress.setResilienceStacks(stacks + 1);

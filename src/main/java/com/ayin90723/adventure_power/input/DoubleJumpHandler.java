@@ -1,11 +1,13 @@
 package com.ayin90723.adventure_power.input;
 
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.event.TickEvent;
+import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
@@ -22,7 +24,7 @@ import java.util.UUID;
  * 服务端用 {@link #AIR_JUMPED} 集合记录「本周期已跳」的玩家，落地时清除。
  * </p>
  * <ul>
- *   <li>落地清零由 {@link #onPlayerTick} 检测 onGround 完成</li>
+ *   <li>落地清零由 {@link PlayerTickDispatcher} 分发的 {@link #onTick} 检测 onGround 完成</li>
  *   <li>玩家登出 / 死亡重生 / 跨维度（Clone）时清理残留</li>
  *   <li>施力 Y 公式由 {@link VoidStepMovement} 统一提供，客户端预测与服务端权威共用</li>
  *   <li><b>服务端只设 Y，不施加御风冲刺</b>（对齐云朵瓶）：水平冲刺由客户端预测，位置客户端权威，服务端不重复施加避免两端 sprint 状态不同步导致水平跳变</li>
@@ -62,6 +64,8 @@ public class DoubleJumpHandler {
         if (player.isPassenger()) return false;
         if (player.isInWater()) return false;
         if (player.getAbilities().flying) return false;
+        if (player.isFallFlying()) return false; // 鞘翅滑翔不触发二段跳（与客户端 JumpInputHandler 一致）
+        if (player.onClimbable()) return false;  // 攀爬（梯子/藤蔓）不触发二段跳（与客户端一致）
         // 不校验 onGround：客户端已在 !onGround 时才发包，服务端再校会因网络延迟误杀
 
         if (AIR_JUMPED.contains(player.getUUID())) return false;
@@ -76,7 +80,7 @@ public class DoubleJumpHandler {
 
     private static boolean isDoubleJumpEnabled(ServerPlayer player) {
         return AdventureProgressCapability.getAdventureProgress(player)
-            .map(p -> p.isAdventurer() && p.isAbilityEnabled("void_step"))
+            .map(p -> p.isAdventurer() && p.isAbilityEnabled(AbilityIds.VOID_STEP))
             .orElse(false);
     }
 
@@ -91,11 +95,14 @@ public class DoubleJumpHandler {
 
     // ==================== 生命周期事件 ====================
 
-    /** 每 tick 检测落地 -> 清除「本周期已跳」标记 */
-    @SubscribeEvent
-    public static void onPlayerTick(TickEvent.PlayerTickEvent event) {
-        if (event.player.onGround()) {
-            AIR_JUMPED.remove(event.player.getUUID());
+    /**
+     * 每 tick 检测落地 -> 清除「本周期已跳」标记。
+     * 由 PlayerTickDispatcher 分发（END phase，仅冒险者玩家调用；
+     * 非冒险者不可能进入 AIR_JUMPED，无条目需要清理）。
+     */
+    public static void onTick(Player player) {
+        if (player.onGround()) {
+            AIR_JUMPED.remove(player.getUUID());
         }
     }
 

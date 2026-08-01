@@ -3,6 +3,8 @@ package com.ayin90723.adventure_power.handler;
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
+import com.ayin90723.adventure_power.input.DoubleJumpHandler;
+import com.ayin90723.adventure_power.util.MilestoneTriggerManager;
 import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -48,5 +50,10 @@ public class PlayerTickDispatcher {
         MagnetHandler.onTick(player, progress);
         AllSeeingHandler.onTick(player, progress);
         SwiftHandler.onTick(player, progress);
+        // 里程碑触发器检测（原独立 PlayerTickEvent 订阅并入，消除每 tick 重复 resolve）
+        MilestoneTriggerManager.onTickSurviveNight(player, progress);
+        MilestoneTriggerManager.onTickYBelow(player, progress);
+        // 二段跳落地清零（无 capability 依赖，仅需 END phase 每 tick 一次）
+        DoubleJumpHandler.onTick(player);
     }
 }

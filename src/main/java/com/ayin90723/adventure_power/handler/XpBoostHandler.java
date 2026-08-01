@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.handler;
 
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
@@ -28,9 +29,11 @@ public class XpBoostHandler {
     public static void onPickupXp(PlayerXpEvent.PickupXp event) {
         Player player = event.getEntity();
         if (player.level().isClientSide()) return;
+        // 其他模组已取消本次拾取时不再补发经验，尊重事件取消语义
+        if (event.isCanceled()) return;
 
-        AbilityGate.getActiveProgress(player, "xp_boost").ifPresent(progress -> {
-            Ability ability = AbilityRegistry.get("xp_boost");
+        AbilityGate.getActiveProgress(player, AbilityIds.XP_BOOST).ifPresent(progress -> {
+            Ability ability = AbilityRegistry.get(AbilityIds.XP_BOOST);
             if (ability == null) return;
 
             float mult = ability.value(progress.getUnlockedMilestoneCount());

@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.handler;
 
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
@@ -15,6 +16,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
@@ -52,8 +54,7 @@ public class RecoveryHandler {
         if (player.level().isClientSide()) return;
 
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
-            if (!progress.isAbilityEnabled("rapid_recovery")) return;
+            if (!AbilityGate.isActive(progress, AbilityIds.RAPID_RECOVERY)) return;
             lastHurtTimestamps.put(player.getUUID(), player.level().getGameTime());
         });
     }
@@ -67,7 +68,7 @@ public class RecoveryHandler {
     public static void onTick(Player player, IAdventureProgress progress) {
 
         // ---- 休养生息 ----
-        if (progress.isAbilityEnabled("rapid_recovery")) {
+        if (progress.isAbilityEnabled(AbilityIds.RAPID_RECOVERY)) {
             long currentTime = player.level().getGameTime();
 
             // 初始化上次受伤时间（防止启用/登录时误判为"已脱战"而立即回血）
@@ -85,7 +86,7 @@ public class RecoveryHandler {
 
                 // 脱战超过延迟阈值 → 直写血量 + 恢复饱食度（避免药水效果被拦截）
                 if (timeSinceHurt >= delayTicks) {
-                    Ability ability = AbilityRegistry.get("rapid_recovery");
+                    Ability ability = AbilityRegistry.get(AbilityIds.RAPID_RECOVERY);
                     if (ability != null) {
                         int amplifier = (int) ability.value(progress.getUnlockedMilestoneCount());
                         // 觉醒：额外直写回血量（HP/周期）
@@ -97,7 +98,8 @@ public class RecoveryHandler {
                         float maxHealth = player.getMaxHealth();
                         float currentHealth = HealthUtil.getHealthDirect(player);
                         if (currentHealth < maxHealth) {
-                            float healAmount = (amplifier + 1) * 1.0F; // HP per 3s cycle
+                            // 每级 amplifier 折算回血量由配置控制（默认 1.0 HP/周期）
+                            float healAmount = (amplifier + 1) * ModConfig.RAPID_RECOVERY_HEAL_PER_AMPLIFIER.get().floatValue();
                             float newHealth = Math.min(maxHealth, currentHealth + healAmount);
                             HealthUtil.setAllHealthLikeRaw(player, newHealth);
                         }
@@ -125,10 +127,13 @@ public class RecoveryHandler {
     /**
      * 嗜血：攻击造成伤害时按比例回复自身生命值。
      * <p>
-     * 跳过内部穿透伤害（soul_strike / judgment），防止递归吸血。
+     * 跳过内部穿透伤害（soul_strike / judgment / shadow_kill），防止递归吸血。
      * 吸血量上限为最大生命值的 {@link ModConfig#LIFESTEAL_CAP_RATIO} 倍。
+     * <p>
+     * LOW 优先级：在伤害抗性等 NORMAL 监听器之后执行，
+     * 基于减伤后的最终 amount 吸血，避免同优先级执行顺序不确定。
      */
-    @SubscribeEvent
+    @SubscribeEvent(priority = EventPriority.LOW)
     public static void onLivingHurtLifesteal(LivingHurtEvent event) {
         if (event.isCanceled()) return;
         LivingEntity target = event.getEntity();
@@ -141,8 +146,8 @@ public class RecoveryHandler {
 
         if (FriendlyFireProtection.isOwnerTarget(attacker, target)) return;
 
-        AbilityGate.getActiveProgress(attacker, "lifesteal").ifPresent(progress -> {
-            Ability ability = AbilityRegistry.get("lifesteal");
+        AbilityGate.getActiveProgress(attacker, AbilityIds.LIFESTEAL).ifPresent(progress -> {
+            Ability ability = AbilityRegistry.get(AbilityIds.LIFESTEAL);
             if (ability == null) return;
 
             float percentage = ability.value(progress.getUnlockedMilestoneCount()) / 100.0f;

@@ -37,6 +37,9 @@ public class MilestoneRegistry {
     private static Map<String, List<Milestone>> byTriggerType = Map.of();
     private static boolean initialized = false;
 
+    /** 内置兜底递归保护：内置 JSON 自身损坏时避免无限递归 */
+    private static boolean inBuiltinFallback = false;
+
     /** 版本计数器，里程碑列表每次变更时递增。
      *  用于 AdventureCurioItem 的 tooltip 缓存失效判断。
      *  volatile 确保客户端渲染线程能读到最新值。 */
@@ -106,48 +109,67 @@ public class MilestoneRegistry {
         Set<String> seenIds = new HashSet<>();
         for (int i = 0; i < arr.size(); i++) {
             JsonObject obj = arr.get(i).getAsJsonObject();
-            String id = obj.get("id").getAsString();
+            try {
+                String id = obj.get("id").getAsString();
 
-            if (seenIds.contains(id)) {
-                LOGGER.warn("[MilestoneRegistry] 重复的 milestone ID: {}，使用最后一个", id);
-            }
-            seenIds.add(id);
+                if (seenIds.contains(id)) {
+                    LOGGER.warn("[MilestoneRegistry] 重复的 milestone ID: {}，使用最后一个", id);
+                }
+                seenIds.add(id);
 
-            String name = obj.get("name").getAsString();
+                String name = obj.get("name").getAsString();
 
-            List<String> abilities = new ArrayList<>();
-            JsonArray abilityArr = obj.getAsJsonArray("abilities");
-            if (abilityArr != null) {
-                for (JsonElement e : abilityArr) {
-                    String abilityId = e.getAsString();
-                    if (AbilityRegistry.get(abilityId) == null) {
-                        LOGGER.warn("[MilestoneRegistry] 未知的 ability ID: {}，跳过", abilityId);
-                    } else {
-                        abilities.add(abilityId);
+                List<String> abilities = new ArrayList<>();
+                JsonArray abilityArr = obj.getAsJsonArray("abilities");
+                if (abilityArr != null) {
+                    for (JsonElement e : abilityArr) {
+                        String abilityId = e.getAsString();
+                        if (AbilityRegistry.get(abilityId) == null) {
+                            LOGGER.warn("[MilestoneRegistry] 未知的 ability ID: {}，跳过", abilityId);
+                        } else {
+                            abilities.add(abilityId);
+                        }
                     }
                 }
+
+                String advStr = obj.has("advancement") && !obj.get("advancement").isJsonNull()
+                    ? obj.get("advancement").getAsString() : null;
+                ResourceLocation advancement = advStr != null ? new ResourceLocation(advStr) : null;
+
+                TriggerDef trigger = null;
+                if (obj.has("trigger") && !obj.get("trigger").isJsonNull()) {
+                    JsonObject trigObj = obj.getAsJsonObject("trigger");
+                    String type = trigObj.get("type").getAsString();
+                    Integer y = trigObj.has("y") ? trigObj.get("y").getAsInt() : null;
+                    ResourceLocation entity = trigObj.has("entity")
+                        ? new ResourceLocation(trigObj.get("entity").getAsString()) : null;
+                    trigger = new TriggerDef(type, y, entity);
+                }
+
+                if (advancement == null && trigger == null) {
+                    LOGGER.warn("[MilestoneRegistry] milestone {} 无 advancement 且无 trigger，永远无法达成", id);
+                }
+
+                Milestone m = new Milestone(id, name, List.copyOf(abilities), advancement, trigger);
+                loaded.add(m);
+            } catch (Exception e) {
+                // 逐条目容错：数据包中单条定义损坏（缺字段/类型错误）时跳过该条，不影响其余
+                LOGGER.warn("[MilestoneRegistry] milestone #{} 解析失败，跳过: {}", i, e.toString());
             }
+        }
 
-            String advStr = obj.has("advancement") && !obj.get("advancement").isJsonNull()
-                ? obj.get("advancement").getAsString() : null;
-            ResourceLocation advancement = advStr != null ? new ResourceLocation(advStr) : null;
-
-            TriggerDef trigger = null;
-            if (obj.has("trigger") && !obj.get("trigger").isJsonNull()) {
-                JsonObject trigObj = obj.getAsJsonObject("trigger");
-                String type = trigObj.get("type").getAsString();
-                Integer y = trigObj.has("y") ? trigObj.get("y").getAsInt() : null;
-                ResourceLocation entity = trigObj.has("entity")
-                    ? new ResourceLocation(trigObj.get("entity").getAsString()) : null;
-                trigger = new TriggerDef(type, y, entity);
+        if (loaded.isEmpty()) {
+            // 全部条目损坏 -> 回退内置默认，避免注册表为空引发全能力失效/误全解锁级联
+            LOGGER.error("[MilestoneRegistry] 所有里程碑解析失败，回退到内置默认");
+            if (!inBuiltinFallback) {
+                inBuiltinFallback = true;
+                try {
+                    loadBuiltinDefaults();
+                } finally {
+                    inBuiltinFallback = false;
+                }
             }
-
-            if (advancement == null && trigger == null) {
-                LOGGER.warn("[MilestoneRegistry] milestone {} 无 advancement 且无 trigger，永远无法达成", id);
-            }
-
-            Milestone m = new Milestone(id, name, List.copyOf(abilities), advancement, trigger);
-            loaded.add(m);
+            return;
         }
 
         applyMilestones(loaded);
@@ -190,6 +212,10 @@ public class MilestoneRegistry {
      */
     public static void clientInitFromNbt(CompoundTag registryMeta) {
         int count = registryMeta.getInt("count");
+        if (count <= 0) {
+            LOGGER.warn("[MilestoneRegistry] 客户端收到的里程碑元数据为空，保持现有注册表");
+            return;
+        }
         List<Milestone> loaded = new ArrayList<>();
         for (int i = 0; i < count; i++) {
             CompoundTag mTag = registryMeta.getCompound("m_" + i);
@@ -257,10 +283,16 @@ public class MilestoneRegistry {
             @Override
             protected void apply(JsonElement element, ResourceManager resourceManager, ProfilerFiller profiler) {
                 MilestoneRegistry.clear();
-                if (element != null && element.isJsonObject()) {
-                    MilestoneRegistry.loadFromJson(AdventurePower.MODID, element.getAsJsonObject());
-                } else {
-                    LOGGER.warn("[MilestoneRegistry] 未找到 milestones.json，使用内置默认");
+                try {
+                    if (element != null && element.isJsonObject()) {
+                        MilestoneRegistry.loadFromJson(AdventurePower.MODID, element.getAsJsonObject());
+                    } else {
+                        LOGGER.warn("[MilestoneRegistry] 未找到 milestones.json，使用内置默认");
+                        loadBuiltinDefaults();
+                    }
+                } catch (Exception e) {
+                    // 顶层防护：任何解析异常都不允许留下空注册表
+                    LOGGER.error("[MilestoneRegistry] 数据包 milestones.json 解析失败，回退内置默认", e);
                     loadBuiltinDefaults();
                 }
             }

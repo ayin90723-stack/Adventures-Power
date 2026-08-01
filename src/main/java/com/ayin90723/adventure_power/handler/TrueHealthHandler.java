@@ -1,5 +1,7 @@
 package com.ayin90723.adventure_power.handler;
 
+import com.ayin90723.adventure_power.util.AbilityGate;
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import net.minecraft.world.entity.player.Player;
@@ -29,7 +31,7 @@ import net.minecraftforge.fml.common.Mod.EventBusSubscriber.Bus;
  * </ul>
  * <p>
  * 门禁与 TrueHealthMixin 各注入点保持一致：
- * {@code (isAdventurer || isFullyUnlocked) && isAbilityEnabled("true_health") && backup > 0}。
+ * {@code (isAdventurer || isFullyUnlocked) && isAbilityEnabled(AbilityIds.TRUE_HEALTH) && backup > 0}。
  *
  * @see com.ayin90723.adventure_power.mixin.TrueHealthMixin
  * @see DeathDefyHandler
@@ -43,8 +45,7 @@ public class TrueHealthHandler {
         if (player.level().isClientSide()) return;
 
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
-            if (!progress.isAbilityEnabled("true_health")) return;
+            if (!AbilityGate.isActive(progress, AbilityIds.TRUE_HEALTH)) return;
             // 备份血量 <= 0 表示玩家确实该死（合法 hurt 路径已将备份归零），不干预
             if (progress.getBackupHealth() <= 0.0F) return;
 

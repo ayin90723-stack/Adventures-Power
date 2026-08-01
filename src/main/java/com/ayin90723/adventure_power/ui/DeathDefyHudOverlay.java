@@ -44,7 +44,8 @@ public class DeathDefyHudOverlay {
         renderGoldBorder(graphics, screenW, screenH);
 
         // 中上方倒计时
-        graphics.drawCenteredString(mc.font, "死亡抗拒 " + remainingSeconds + "s",
+        graphics.drawCenteredString(mc.font,
+            net.minecraft.network.chat.Component.translatable("hud.adventure_power.death_defy", remainingSeconds),
             screenW / 2, screenH / 6, TEXT_COLOR);
     }
 

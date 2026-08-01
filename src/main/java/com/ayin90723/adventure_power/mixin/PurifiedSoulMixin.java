@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.mixin;
 
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import net.minecraft.world.effect.MobEffectCategory;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -32,7 +33,7 @@ public class PurifiedSoulMixin {
         if (effectInstance.getEffect().getCategory() != MobEffectCategory.HARMFUL) return;
 
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (progress.isAbilityEnabled("purified_soul")) {
+            if (progress.isAbilityEnabled(AbilityIds.PURIFIED_SOUL)) {
                 cir.setReturnValue(false);
             }
         });
