@@ -82,7 +82,16 @@ public class ExplorationAbilityHandler {
         // 全能力关闭时快速短路，避免每 tick 三次 AttributeRegistry.get + getAttribute
         if (!progress.isAbilityEnabled(AbilityIds.EXTENDED_REACH)
             && !progress.isAbilityEnabled(AbilityIds.VITALITY)
-            && !progress.isAbilityEnabled(AbilityIds.SWIFT)) return;
+            && !progress.isAbilityEnabled(AbilityIds.SWIFT)) {
+            // 但关闭的触及属性仍需补一次恢复（"关闭即恢复原值"语义，v1.3.1 起）。
+            // 仅 ORIGINAL_* 有记录才执行——从未写入过的玩家不做无用对账。
+            if (ORIGINAL_REACH.containsKey(player.getUUID())
+                || ORIGINAL_ENTITY_REACH.containsKey(player.getUUID())) {
+                syncReachAttribute(player, false, progress.getUnlockedMilestoneCount(),
+                    progress.isFullyUnlocked());
+            }
+            return;
+        }
 
         // ---- 无形之手 ----
         syncReachAttribute(player, progress.isAbilityEnabled(AbilityIds.EXTENDED_REACH),
@@ -112,8 +121,8 @@ public class ExplorationAbilityHandler {
     }
 
     /**
-     * 触及属性首次写入前的原始 baseValue（登出恢复用）。
-     * 其他模组可能以 baseValue 形式持久化触及距离，登出无条件恢复默认值会覆盖其数据。
+     * 触及属性首次写入前的原始 baseValue（登出/关闭能力恢复用，与 ORIGINAL_MAX_HEALTH 同模式）。
+     * 其他模组可能以 baseValue 形式持久化触及距离，无条件恢复默认值会覆盖其数据。
      * BLOCK_REACH 与 ENTITY_REACH 分别记录原值（v1.3.1 起 entity 侧同样恢复原值而非默认值）。
      */
     private static final Map<UUID, Double> ORIGINAL_REACH = new HashMap<>();
@@ -121,37 +130,32 @@ public class ExplorationAbilityHandler {
 
     /**
      * 设置触及属性 baseValue：
-     * bonus &gt; 0（能力启用）时 = 默认 + bonus，首次真正写入前记录原值；
-     * bonus = 0（关闭/未解锁）时恢复首次写入前的原值而非默认值——从未写入过（restore 为 null）则跳过，
-     * 不覆盖其他模组对触及距离 baseValue 的持久化修改。
+     * bonus &gt; 0（能力启用）时 = 默认 + bonus，首次真正写入前记录原值（putIfAbsent，多次启用只保留第一次）；
+     * bonus = 0（关闭/未解锁）时恢复首次写入前的原值而非默认值——从未写入过则先记录当前值为原值
+     * （与坚韧之躯 disable 分支同模式，防"从未解锁 + 其他模组改过 baseValue"被每 tick 踩回；
+     * 当前值即原值时自然不写），不覆盖其他模组对触及距离 baseValue 的持久化修改。
      */
     private static void applyReachAttr(Player player,
                                        net.minecraft.world.entity.ai.attributes.Attribute attr, float bonus) {
         if (attr == null) return;
         var inst = player.getAttribute(attr);
         if (inst == null) return;
-        double expected;
-        boolean recordOriginal;
+        boolean block = attr == ForgeMod.BLOCK_REACH.get();
+        Map<UUID, Double> originals = block ? ORIGINAL_REACH : ORIGINAL_ENTITY_REACH;
+        UUID uuid = player.getUUID();
+
         if (bonus > 0) {
-            expected = attr.getDefaultValue() + bonus;
-            recordOriginal = true;
-        } else {
-            Double restore = (attr == ForgeMod.BLOCK_REACH.get())
-                ? ORIGINAL_REACH.get(player.getUUID())
-                : ORIGINAL_ENTITY_REACH.get(player.getUUID());
-            if (restore == null) return;
-            expected = restore;
-            recordOriginal = false;
-        }
-        if (Math.abs(inst.getBaseValue() - expected) > 0.001) {
-            if (recordOriginal) {
-                if (attr == ForgeMod.BLOCK_REACH.get()) {
-                    ORIGINAL_REACH.putIfAbsent(player.getUUID(), inst.getBaseValue());
-                } else if (attr == ForgeMod.ENTITY_REACH.get()) {
-                    ORIGINAL_ENTITY_REACH.putIfAbsent(player.getUUID(), inst.getBaseValue());
-                }
+            double expected = attr.getDefaultValue() + bonus;
+            if (Math.abs(inst.getBaseValue() - expected) > 0.001) {
+                originals.putIfAbsent(uuid, inst.getBaseValue());
+                inst.setBaseValue(expected);
             }
-            inst.setBaseValue(expected);
+        } else {
+            originals.putIfAbsent(uuid, inst.getBaseValue());
+            double restore = originals.get(uuid);
+            if (Math.abs(inst.getBaseValue() - restore) > 0.001) {
+                inst.setBaseValue(restore);
+            }
         }
     }
 

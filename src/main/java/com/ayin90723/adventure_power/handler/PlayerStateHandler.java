@@ -259,25 +259,28 @@ public class PlayerStateHandler {
      */
     public static void applySoarState(Player player, boolean enabled) {
         if (player.level().isClientSide()) return;
-        if (enabled) {
-            if (!player.getAbilities().mayfly && !player.getAbilities().instabuild
-                && !player.isSpectator()) {
-                player.getAbilities().mayfly = true;
-                player.onUpdateAbilities();
-            }
-        } else {
-            // 与 tick 对账路径一致的精准回收：仅回收翱翔自己授予的飞行
-            // （soarGrantedFlight 标记），不没收装备鞘翅环/其他模组提供的飞行
-            AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
+        AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
+            if (enabled) {
+                if (!player.getAbilities().mayfly && !player.getAbilities().instabuild
+                    && !player.isSpectator()) {
+                    player.getAbilities().mayfly = true;
+                    // 同步标记：与 tick 对账授予一致，防同 tick 连点 toggle（off→on→off）时回收判断失真
+                    progress.setSoarGrantedFlight(true);
+                    player.onUpdateAbilities();
+                }
+            } else {
+                // 与 tick 对账路径一致的精准回收：仅回收翱翔自己授予的飞行
+                // （soarGrantedFlight 标记），不没收装备鞘翅环/其他模组提供的飞行
                 if (player.getAbilities().mayfly && progress.isSoarGrantedFlight()
                     && !player.getAbilities().instabuild && !player.isSpectator()) {
                     player.getAbilities().mayfly = false;
                     player.getAbilities().flying = false;
+                    player.getAbilities().setFlyingSpeed(0.05F);  // 与 tick 回收路径一致，重置飞行速度
                     progress.setSoarGrantedFlight(false);
                     player.onUpdateAbilities();
                 }
-            });
-        }
+            }
+        });
     }
 
     // ========================================================================
