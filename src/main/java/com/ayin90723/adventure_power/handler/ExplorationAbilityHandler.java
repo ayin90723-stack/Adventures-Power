@@ -114,21 +114,42 @@ public class ExplorationAbilityHandler {
     /**
      * 触及属性首次写入前的原始 baseValue（登出恢复用）。
      * 其他模组可能以 baseValue 形式持久化触及距离，登出无条件恢复默认值会覆盖其数据。
-     * BLOCK_REACH 与 ENTITY_REACH 同步写入，仅记录 BLOCK_REACH（entity 侧默认恢复）。
+     * BLOCK_REACH 与 ENTITY_REACH 分别记录原值（v1.3.1 起 entity 侧同样恢复原值而非默认值）。
      */
     private static final Map<UUID, Double> ORIGINAL_REACH = new HashMap<>();
+    private static final Map<UUID, Double> ORIGINAL_ENTITY_REACH = new HashMap<>();
 
-    /** 设置触及属性 baseValue = 默认 + bonus（bonus=0 时恢复默认） */
+    /**
+     * 设置触及属性 baseValue：
+     * bonus &gt; 0（能力启用）时 = 默认 + bonus，首次真正写入前记录原值；
+     * bonus = 0（关闭/未解锁）时恢复首次写入前的原值而非默认值——从未写入过（restore 为 null）则跳过，
+     * 不覆盖其他模组对触及距离 baseValue 的持久化修改。
+     */
     private static void applyReachAttr(Player player,
                                        net.minecraft.world.entity.ai.attributes.Attribute attr, float bonus) {
         if (attr == null) return;
         var inst = player.getAttribute(attr);
         if (inst == null) return;
-        double def = attr.getDefaultValue();
-        double expected = def + bonus;
+        double expected;
+        boolean recordOriginal;
+        if (bonus > 0) {
+            expected = attr.getDefaultValue() + bonus;
+            recordOriginal = true;
+        } else {
+            Double restore = (attr == ForgeMod.BLOCK_REACH.get())
+                ? ORIGINAL_REACH.get(player.getUUID())
+                : ORIGINAL_ENTITY_REACH.get(player.getUUID());
+            if (restore == null) return;
+            expected = restore;
+            recordOriginal = false;
+        }
         if (Math.abs(inst.getBaseValue() - expected) > 0.001) {
-            if (attr == ForgeMod.BLOCK_REACH.get()) {
-                ORIGINAL_REACH.putIfAbsent(player.getUUID(), inst.getBaseValue());
+            if (recordOriginal) {
+                if (attr == ForgeMod.BLOCK_REACH.get()) {
+                    ORIGINAL_REACH.putIfAbsent(player.getUUID(), inst.getBaseValue());
+                } else if (attr == ForgeMod.ENTITY_REACH.get()) {
+                    ORIGINAL_ENTITY_REACH.putIfAbsent(player.getUUID(), inst.getBaseValue());
+                }
             }
             inst.setBaseValue(expected);
         }
@@ -260,11 +281,15 @@ public class ExplorationAbilityHandler {
         ORIGINAL_REACH.remove(uuid);
         if (ForgeMod.ENTITY_REACH.get() != null) {
             var entityReachAttr = player.getAttribute(ForgeMod.ENTITY_REACH.get());
-            double erDef = ForgeMod.ENTITY_REACH.get().getDefaultValue();
-            if (entityReachAttr != null && Math.abs(entityReachAttr.getBaseValue() - erDef) > 0.001) {
-                entityReachAttr.setBaseValue(erDef);
+            if (entityReachAttr != null) {
+                // 与 BLOCK_REACH 一致：仅本模组实际写入过才恢复原值，从未解锁无形之手的玩家跳过
+                Double restore = ORIGINAL_ENTITY_REACH.get(uuid);
+                if (restore != null && Math.abs(entityReachAttr.getBaseValue() - restore) > 0.001) {
+                    entityReachAttr.setBaseValue(restore);
+                }
             }
         }
+        ORIGINAL_ENTITY_REACH.remove(uuid);
 
         var healthAttr = player.getAttribute(Attributes.MAX_HEALTH);
         if (healthAttr != null) {

@@ -1,7 +1,7 @@
 package com.ayin90723.adventure_power.mixin;
 
 import com.ayin90723.adventure_power.util.AbilityIds;
-import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.util.ProgressCache;
 import net.minecraft.world.effect.MobEffectCategory;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.LivingEntity;
@@ -32,10 +32,12 @@ public class PurifiedSoulMixin {
 
         if (effectInstance.getEffect().getCategory() != MobEffectCategory.HARMFUL) return;
 
-        AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (progress.isAbilityEnabled(AbilityIds.PURIFIED_SOUL)) {
-                cir.setReturnValue(false);
-            }
-        });
+        // 与其他能力 Mixin（DeathDefyMixin 等）统一门禁：
+        // ProgressCache 按 tick 缓存 progress 引用 + 冒险者/觉醒身份检查
+        var progress = ProgressCache.get(player);
+        if (progress != null && (progress.isAdventurer() || progress.isFullyUnlocked())
+              && progress.isAbilityEnabled(AbilityIds.PURIFIED_SOUL)) {
+            cir.setReturnValue(false);
+        }
     }
 }

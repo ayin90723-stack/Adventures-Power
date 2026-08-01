@@ -266,12 +266,17 @@ public class PlayerStateHandler {
                 player.onUpdateAbilities();
             }
         } else {
-            if (player.getAbilities().mayfly && !player.getAbilities().instabuild
-                && !player.isSpectator()) {
-                player.getAbilities().mayfly = false;
-                player.getAbilities().flying = false;
-                player.onUpdateAbilities();
-            }
+            // 与 tick 对账路径一致的精准回收：仅回收翱翔自己授予的飞行
+            // （soarGrantedFlight 标记），不没收装备鞘翅环/其他模组提供的飞行
+            AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
+                if (player.getAbilities().mayfly && progress.isSoarGrantedFlight()
+                    && !player.getAbilities().instabuild && !player.isSpectator()) {
+                    player.getAbilities().mayfly = false;
+                    player.getAbilities().flying = false;
+                    progress.setSoarGrantedFlight(false);
+                    player.onUpdateAbilities();
+                }
+            });
         }
     }
 
