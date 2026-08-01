@@ -108,16 +108,18 @@ public class ExplorationAbilityHandler {
 
     private static void syncReachAttribute(Player player, boolean enabled, int milestones, boolean fullyUnlocked) {
         Ability ability = AbilityRegistry.get(AbilityIds.EXTENDED_REACH);
-        float bonus = 0.0F;
-        if (enabled && ability != null) {
-            bonus = ability.value(milestones);
+        // activeBonus = 能力开启时会写入的加成（与 enabled 无关，供残留判定用）
+        float activeBonus = 0.0F;
+        if (ability != null) {
+            activeBonus = ability.value(milestones);
             if (fullyUnlocked) {
-                bonus *= com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get().floatValue();
+                activeBonus *= com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get().floatValue();
             }
         }
+        float bonus = enabled ? activeBonus : 0.0F;
         // 方块触及 + 实体触及（攻击距离）
-        applyReachAttr(player, ForgeMod.BLOCK_REACH.get(), bonus);
-        applyReachAttr(player, ForgeMod.ENTITY_REACH.get(), bonus);
+        applyReachAttr(player, ForgeMod.BLOCK_REACH.get(), bonus, activeBonus);
+        applyReachAttr(player, ForgeMod.ENTITY_REACH.get(), bonus, activeBonus);
     }
 
     /**
@@ -130,13 +132,18 @@ public class ExplorationAbilityHandler {
 
     /**
      * 设置触及属性 baseValue：
-     * bonus &gt; 0（能力启用）时 = 默认 + bonus，首次真正写入前记录原值（putIfAbsent，多次启用只保留第一次）；
-     * bonus = 0（关闭/未解锁）时恢复首次写入前的原值而非默认值——从未写入过则先记录当前值为原值
-     * （与坚韧之躯 disable 分支同模式，防"从未解锁 + 其他模组改过 baseValue"被每 tick 踩回；
-     * 当前值即原值时自然不写），不覆盖其他模组对触及距离 baseValue 的持久化修改。
+     * targetBonus &gt; 0（能力启用）时 = 默认 + targetBonus，首次真正写入前记录原值（putIfAbsent，多次启用只保留第一次）；
+     * targetBonus = 0（关闭/未解锁）时恢复首次写入前的原值而非默认值——从未记录过原值（从未写入过，
+     * 或崩溃/强杀重启 Map 清空）时做<b>残留判定</b>：当前值 ≈ 本模组开启时会写的值（默认 + activeBonus）
+     * 则判定为本模组残留，回归默认值；否则视为其他模组的修改，记录当前值为原值不覆盖
+     * （v1.3.1 起承诺：不覆盖其他模组对触及距离 baseValue 的持久化修改）。
+     *
+     * @param targetBonus 本次要写入的加成（关闭/未解锁时为 0）
+     * @param activeBonus 能力开启时会写入的加成（与 targetBonus 无关，仅用于残留判定）
      */
     private static void applyReachAttr(Player player,
-                                       net.minecraft.world.entity.ai.attributes.Attribute attr, float bonus) {
+                                       net.minecraft.world.entity.ai.attributes.Attribute attr,
+                                       float targetBonus, float activeBonus) {
         if (attr == null) return;
         var inst = player.getAttribute(attr);
         if (inst == null) return;
@@ -144,15 +151,21 @@ public class ExplorationAbilityHandler {
         Map<UUID, Double> originals = block ? ORIGINAL_REACH : ORIGINAL_ENTITY_REACH;
         UUID uuid = player.getUUID();
 
-        if (bonus > 0) {
-            double expected = attr.getDefaultValue() + bonus;
+        if (targetBonus > 0) {
+            double expected = attr.getDefaultValue() + targetBonus;
             if (Math.abs(inst.getBaseValue() - expected) > 0.001) {
                 originals.putIfAbsent(uuid, inst.getBaseValue());
                 inst.setBaseValue(expected);
             }
         } else {
-            originals.putIfAbsent(uuid, inst.getBaseValue());
-            double restore = originals.get(uuid);
+            Double restore = originals.get(uuid);
+            if (restore == null) {
+                double own = attr.getDefaultValue() + activeBonus;
+                restore = Math.abs(inst.getBaseValue() - own) <= 0.001
+                    ? attr.getDefaultValue()
+                    : inst.getBaseValue();
+                originals.putIfAbsent(uuid, restore);
+            }
             if (Math.abs(inst.getBaseValue() - restore) > 0.001) {
                 inst.setBaseValue(restore);
             }
