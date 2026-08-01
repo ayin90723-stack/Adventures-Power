@@ -28,6 +28,11 @@ public abstract class AbstractAbility implements Ability {
         this.countAtUnlock = n;
     }
 
+    @Override
+    public int getCountAtUnlock() {
+        return countAtUnlock;
+    }
+
     /** 默认基于 id() 拼翻译键 ability.adventure_power.<id>，子类可覆写自定义 */
     @Override
     public Component name() {

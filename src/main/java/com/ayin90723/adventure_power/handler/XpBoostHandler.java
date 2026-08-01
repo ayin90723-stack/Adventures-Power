@@ -36,7 +36,7 @@ public class XpBoostHandler {
             Ability ability = AbilityRegistry.get(AbilityIds.XP_BOOST);
             if (ability == null) return;
 
-            float mult = ability.value(progress.getUnlockedMilestoneCount());
+            float mult = ability.value(AbilityGate.effectiveCount(progress, AbilityIds.XP_BOOST));
             if (progress.isFullyUnlocked()) {
                 mult *= ModConfig.AWAKEN_XP_BOOST_MULT.get().floatValue();
             }

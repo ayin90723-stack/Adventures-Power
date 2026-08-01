@@ -1,19 +1,15 @@
 package com.ayin90723.adventure_power.ability;
 
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
  * 能力注册表 — 30 种冒险能力，按面板显示顺序排列。
- * countAtUnlock 映射由 MilestoneRegistry 在加载 JSON 后填充。
+ * countAtUnlock 由 MilestoneRegistry 在加载 JSON 后写入各 Ability 实例（驱动成长公式）。
  */
 public class AbilityRegistry {
 
     public static final Map<String, Ability> ALL = new LinkedHashMap<>();
-
-    /** 能力 ID → 动态 countAtUnlock 覆盖值（由 MilestoneRegistry 加载后设置） */
-    private static final Map<String, Integer> COUNT_AT_UNLOCK_OVERRIDES = new HashMap<>();
 
     static {
         register(new AgilityAbility());
@@ -57,11 +53,10 @@ public class AbilityRegistry {
     }
 
     /**
-     * MilestoneRegistry 加载 JSON 后调用，为指定能力设置动态 countAtUnlock。
-     * 同时更新 Ability 实例内部的 countAtUnlock 字段。
+     * MilestoneRegistry 加载 JSON 后调用，为指定能力设置 countAtUnlock。
+     * 该值写入 Ability 实例，驱动成长公式 value(count) = base + perMilestone × (count - countAtUnlock)。
      */
     public static void setCountAtUnlock(String id, int count) {
-        COUNT_AT_UNLOCK_OVERRIDES.put(id, count);
         Ability ability = ALL.get(id);
         if (ability != null) {
             ability.setCountAtUnlock(count);
@@ -69,16 +64,12 @@ public class AbilityRegistry {
     }
 
     /**
-     * 查询某能力的 countAtUnlock（优先用覆盖值）。
-     * 正常情况下 MilestoneRegistry 加载后一定被设置，未设置时返回 0 作为安全回退。
+     * 重置所有能力实例的 countAtUnlock（数据包重载前清空，之后由新 JSON 重新填充）。
+     * 注意：被新 JSON 移除的能力其 countAtUnlock 回 0，避免残留旧值。
      */
-    public static int getCountAtUnlock(String id) {
-        Integer override = COUNT_AT_UNLOCK_OVERRIDES.get(id);
-        return override != null ? override : 0;
-    }
-
-    /** 清除所有动态设置（用于数据包重载前重置） */
     public static void clearCountAtUnlockOverrides() {
-        COUNT_AT_UNLOCK_OVERRIDES.clear();
+        for (Ability ability : ALL.values()) {
+            ability.setCountAtUnlock(0);
+        }
     }
 }

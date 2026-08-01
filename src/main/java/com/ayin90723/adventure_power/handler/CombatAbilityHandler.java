@@ -65,11 +65,11 @@ public class CombatAbilityHandler {
         if (receiver.level().isClientSide()) return;
 
         AbilityGate.getActiveProgress(player, AbilityIds.AGILITY).ifPresent(progress -> {
-            int milestones = progress.getUnlockedMilestoneCount();
             Ability ability = AbilityRegistry.get(AbilityIds.AGILITY);
             if (ability == null) return;
 
-            float chance = AbilityGate.awakenedRatio(ability, milestones, progress.isFullyUnlocked());
+            float chance = AbilityGate.awakenedRatio(ability,
+                AbilityGate.effectiveCount(progress, AbilityIds.AGILITY), progress.isFullyUnlocked());
             if (player.getRandom().nextFloat() < chance) {
                 event.setCanceled(true);
                 if (player.level() instanceof ServerLevel serverLevel) {
@@ -128,11 +128,11 @@ public class CombatAbilityHandler {
     private static void handleDamageResist(LivingHurtEvent event, LivingEntity target) {
         if (!(target instanceof Player player)) return;
         AbilityGate.getActiveProgress(player, AbilityIds.DAMAGE_RESIST).ifPresent(progress -> {
-            int milestones = progress.getUnlockedMilestoneCount();
             Ability ability = AbilityRegistry.get(AbilityIds.DAMAGE_RESIST);
             if (ability == null) return;
 
-            float ratio = AbilityGate.awakenedRatio(ability, milestones, progress.isFullyUnlocked());
+            float ratio = AbilityGate.awakenedRatio(ability,
+                AbilityGate.effectiveCount(progress, AbilityIds.DAMAGE_RESIST), progress.isFullyUnlocked());
             event.setAmount(event.getAmount() * (1.0f - ratio));
         });
     }
@@ -148,7 +148,7 @@ public class CombatAbilityHandler {
      * mod 拦截则通过 HealthUtil 直写血量兜底。
      */
     private static void handleSoulQuench(LivingHurtEvent event, LivingEntity target, Player attacker, IAdventureProgress progress) {
-        int milestones = progress.getUnlockedMilestoneCount();
+        int milestones = AbilityGate.effectiveCount(progress, AbilityIds.SOUL_QUENCH);
         Ability raw = AbilityRegistry.get(AbilityIds.SOUL_QUENCH);
         if (!(raw instanceof SoulQuenchAbility ability)) return;
 
@@ -251,7 +251,7 @@ public class CombatAbilityHandler {
     // ==================== 5. 禁疗之触 — 攻击施加禁疗 ====================
 
     private static void handleHealingBlock(LivingHurtEvent event, LivingEntity target, Player attacker, IAdventureProgress progress) {
-        int milestones = progress.getUnlockedMilestoneCount();
+        int milestones = AbilityGate.effectiveCount(progress, AbilityIds.HEALING_BLOCK);
         Ability ability = AbilityRegistry.get(AbilityIds.HEALING_BLOCK);
         if (ability == null) return;
 

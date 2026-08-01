@@ -1,9 +1,12 @@
 package com.ayin90723.adventure_power.ui;
 
+import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
+import com.ayin90723.adventure_power.ability.SoulQuenchAbility;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.milestone.Milestone;
 import com.ayin90723.adventure_power.network.NetworkHandler;
 import com.ayin90723.adventure_power.util.MilestoneRegistry;
@@ -11,6 +14,7 @@ import com.ayin90723.adventure_power.util.TriggerDef;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.effect.MobEffectCategory;
@@ -66,6 +70,10 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
     /** 里程碑 tab 的 progress 快照（每 20 tick 刷新一次，避免每帧 capability resolve） */
     private Optional<com.ayin90723.adventure_power.capability.IAdventureProgress> milestoneProgress = Optional.empty();
     private long milestoneProgressRefreshTick = -1;
+
+    /** 能力 tab hover 信息框的 progress 快照（每 20 tick 刷新，避免每帧 capability resolve） */
+    private Optional<IAdventureProgress> abilityHoverProgress = Optional.empty();
+    private long abilityHoverProgressTick = -1;
 
     // ===== 布局 =====
     private int leftX;
@@ -283,6 +291,7 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         int visibleRows = visibleHeight() / ROW_HEIGHT;
         int startRow = Math.max(0, scrollOffset / ROW_HEIGHT);
         int endRow = Math.min(abilityEntries.size(), startRow + visibleRows + 1);
+        String hoveredAbilityId = null;
         for (int i = startRow; i < endRow; i++) {
             var entry = abilityEntries.get(i);
             String id = entry.getKey();
@@ -292,6 +301,7 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
             if (mouseX >= leftX && mouseX <= leftX + PANEL_WIDTH
                 && mouseY >= y - 1 && mouseY < y + ROW_HEIGHT - 1) {
                 graphics.fill(leftX, y - 1, leftX + PANEL_WIDTH, y + ROW_HEIGHT - 1, 0x22FFFFFF);
+                hoveredAbilityId = id;
             }
             String dot = isDisabled ? "§7○" : "§a●";
             graphics.drawString(this.font, dot, leftX + 5, y, isDisabled ? COLOR_GRAY : COLOR_GREEN);
@@ -303,8 +313,190 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
                 isDisabled ? COLOR_GRAY : COLOR_GREEN);
         }
         renderScrollBar(graphics, getScrollBarX(), TOP_Y);
+        // 悬停能力条目 -> 侧边显示效果 / 当前数值 / 觉醒效果
+        if (hoveredAbilityId != null) {
+            renderAbilityInfoBox(graphics, hoveredAbilityId);
+        }
         graphics.drawCenteredString(this.font,
             Component.translatable("screen.adventure_power.toggle_ability_hint"), this.width / 2, this.height - 22, COLOR_GRAY);
+    }
+
+    // ===== 能力 hover 侧边信息框 =====
+
+    private static final int INFO_BOX_MAX_WIDTH = 200;
+    /** 侧边可用空间低于此值时不放侧边（右不足移左侧，左也不足则缩窄贴右） */
+    private static final int MIN_INFO_BOX_SIDE = 140;
+    private static final int INFO_BOX_PADDING = 6;
+    /** 行间距 = 字体行高 + 1 */
+    private static final int INFO_BOX_LINE_SPACING = 10;
+
+    /** 渲染能力悬停信息框（面板右侧固定位置）：能力名/描述/当前数值/觉醒效果 */
+    private void renderAbilityInfoBox(GuiGraphics graphics, String abilityId) {
+        Ability ability = AbilityRegistry.get(abilityId);
+        if (ability == null) return;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level != null) {
+            long tick = mc.level.getGameTime() / 20;
+            if (abilityHoverProgressTick != tick) {
+                abilityHoverProgressTick = tick;
+                abilityHoverProgress = mc.player != null
+                    ? AdventureProgressCapability.getAdventureProgress(mc.player) : Optional.empty();
+            }
+        }
+        var progress = abilityHoverProgress.orElse(null);
+
+        // ---- 预构建内容行（先收集纯文本，再按实际宽度算框宽） ----
+        List<String> headerParts = new ArrayList<>();
+        boolean isDisabled = disabledAbilities.contains(abilityId);
+        String dot = isDisabled ? "§7○ " : "§a● ";
+        String headerName = "§f" + ability.name().getString();
+        headerParts.add(dot + headerName);
+
+        List<String> descLines = new ArrayList<>();
+        List<String> valueParts = new ArrayList<>();
+        List<String> awakenedLines = new ArrayList<>();
+
+        String desc = ability.description().getString();
+        String valueText = buildValueText(ability, progress);
+        if (valueText != null) valueParts.add(valueText);
+        String awakenedKey = "ability.adventure_power." + abilityId + ".awakened";
+        boolean hasAwakened = progress != null && progress.isFullyUnlocked() && I18n.exists(awakenedKey);
+
+        // ---- 位置与宽度：先按最大宽度测出内容自然宽度，再决定框宽（自适应不撑满） ----
+        int rightSpace = this.width - (leftX + PANEL_WIDTH + 10) - 8;
+        int leftSpace = leftX - 10 - 8;
+        int candidateMaxWidth = Math.min(INFO_BOX_MAX_WIDTH, Math.max(rightSpace, leftSpace));
+        int textMaxWidth = candidateMaxWidth - INFO_BOX_PADDING * 2;
+
+        for (String l : wrapText(desc, textMaxWidth)) descLines.add("§7" + l);
+        if (hasAwakened) {
+            for (String l : wrapText(I18n.get(awakenedKey), textMaxWidth)) {
+                awakenedLines.add("§a" + l);
+            }
+        }
+
+        // 内容自然宽度（取各行实际像素宽度最大值）
+        int naturalWidth = 0;
+        for (String s : headerParts) naturalWidth = Math.max(naturalWidth, this.font.width(s));
+        for (String s : descLines) naturalWidth = Math.max(naturalWidth, this.font.width(s));
+        for (String s : valueParts) naturalWidth = Math.max(naturalWidth, this.font.width(s));
+        if (hasAwakened) naturalWidth = Math.max(naturalWidth, this.font.width("§6" + I18n.get("screen.adventure_power.awakened_title")));
+        for (String s : awakenedLines) naturalWidth = Math.max(naturalWidth, this.font.width(s));
+        naturalWidth += INFO_BOX_PADDING * 2;
+
+        int sideX;
+        int boxWidth;
+        if (rightSpace >= MIN_INFO_BOX_SIDE) {
+            sideX = leftX + PANEL_WIDTH + 10;
+            boxWidth = Math.min(naturalWidth, rightSpace);
+        } else if (leftSpace >= MIN_INFO_BOX_SIDE) {
+            boxWidth = Math.min(naturalWidth, leftSpace);
+            sideX = leftX - 10 - boxWidth;
+        } else {
+            boxWidth = Math.min(naturalWidth, Math.max(60, rightSpace));
+            sideX = this.width - boxWidth - 8;
+        }
+        boxWidth = Math.max(boxWidth, 80); // 下限保证不塌成一条
+
+        // 组装最终行（带颜色码）
+        List<String> lines = new ArrayList<>(headerParts);
+        lines.addAll(descLines);
+        lines.addAll(valueParts);
+        if (hasAwakened) {
+            lines.add("§6" + I18n.get("screen.adventure_power.awakened_title"));
+            lines.addAll(awakenedLines);
+        }
+
+        int boxHeight = lines.size() * INFO_BOX_LINE_SPACING + INFO_BOX_PADDING * 2 - 1;
+        // 高度：顶部对齐；内容超高时底部锚定；极端超高时贴顶 + 绘制裁剪，保证不溢出屏幕
+        int boxY = Math.max(4, Math.min(TOP_Y, this.height - boxHeight - 4));
+
+        graphics.fill(sideX, boxY, sideX + boxWidth, boxY + boxHeight, 0xBB000000);
+        graphics.fill(sideX, boxY, sideX + boxWidth, boxY + 1, 0x66FFFFFF);
+        graphics.fill(sideX, boxY + boxHeight - 1, sideX + boxWidth, boxY + boxHeight, 0x66FFFFFF);
+        graphics.fill(sideX, boxY, sideX + 1, boxY + boxHeight, 0x66FFFFFF);
+        graphics.fill(sideX + boxWidth - 1, boxY, sideX + boxWidth, boxY + boxHeight, 0x66FFFFFF);
+
+        int lineY = boxY + INFO_BOX_PADDING;
+        for (String line : lines) {
+            if (lineY + INFO_BOX_LINE_SPACING > this.height - 4) break; // 底部裁剪，防溢出
+            graphics.drawString(this.font, line, sideX + INFO_BOX_PADDING, lineY, COLOR_WHITE);
+            lineY += INFO_BOX_LINE_SPACING;
+        }
+    }
+
+    /**
+     * 当前数值行文本（不含颜色码）：无成长能力显示固定效果；soul_quench 特例；
+     * 其余按 lang 值模板格式化。不走 Component.translatable 嵌套（避免 %s 二次解析失败），
+     * 直接用 I18n.get 拼字符串。
+     */
+    private String buildValueText(Ability ability, IAdventureProgress progress) {
+        String id = ability.id();
+        String label = progress != null && progress.isFullyUnlocked()
+            ? I18n.get("screen.adventure_power.base_value_label")
+            : I18n.get("screen.adventure_power.value_label");
+        if (AbilityIds.SOUL_QUENCH.equals(id)) {
+            if (progress != null && ability instanceof SoulQuenchAbility sq) {
+                int count = AbilityGate.effectiveCount(progress, id);
+                String text = String.format(I18n.get("screen.adventure_power.soul_quench_value"),
+                    formatFloat(sq.flatDamage(count)), formatFloat(sq.hpRatio(count) * 100.0f));
+                return "§e" + label + text;
+            }
+            return null;
+        }
+        float value = progress != null
+            ? AbilityGate.value(progress, id).orElse(-1.0f) : -1.0f;
+        if (value < 0) {
+            return "§e" + I18n.get("screen.adventure_power.value_fixed");
+        }
+        String key = "ability.adventure_power." + id + ".value";
+        if (I18n.exists(key)) {
+            float display = value;
+            if (AbilityIds.SWIFT.equals(id)) display = value * 100.0f;
+            else if (AbilityIds.DEATH_DEFY.equals(id)) display = value / 20.0f;
+            String text;
+            try {
+                text = String.format(I18n.get(key), display);
+            } catch (java.util.IllegalFormatException e) {
+                text = formatFloat(value);
+            }
+            return "§e" + label + text;
+        }
+        return "§e" + label + formatFloat(value);
+    }
+
+    /** 数字格式化：整数值不带小数点，否则保留一位 */
+    private static String formatFloat(float v) {
+        if (Math.abs(v - Math.round(v)) < 0.0001f) {
+            return String.valueOf((long) Math.round(v));
+        }
+        return String.format("%.1f", v);
+    }
+
+    /** 按像素宽度换行（逐字符累积；遇 \n 强制换行），供侧边信息框使用 */
+    private List<String> wrapText(String text, int maxWidth) {
+        List<String> lines = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        int currentWidth = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\n') {
+                lines.add(current.toString());
+                current.setLength(0);
+                currentWidth = 0;
+                continue;
+            }
+            int w = this.font.width(String.valueOf(c));
+            if (currentWidth + w > maxWidth && current.length() > 0) {
+                lines.add(current.toString());
+                current.setLength(0);
+                currentWidth = 0;
+            }
+            current.append(c);
+            currentWidth += w;
+        }
+        if (current.length() > 0) lines.add(current.toString());
+        return lines;
     }
 
     // ===== Buff tab =====
@@ -442,6 +634,11 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
             case "y_below" -> Component.translatable("screen.adventure_power.trigger.y_below", t.y() != null ? t.y() : 0);
             case "first_kill" -> Component.translatable("screen.adventure_power.trigger.first_kill",
                 t.entity() != null ? t.entity().getPath() : "?");
+            case "enter_dimension" -> Component.translatable("screen.adventure_power.trigger.enter_dimension",
+                t.dimension() != null ? t.dimension().toString() : "?");
+            case "reach_y" -> Component.translatable("screen.adventure_power.trigger.reach_y", t.y() != null ? t.y() : 0);
+            case "obtain_item" -> Component.translatable("screen.adventure_power.trigger.obtain_item",
+                t.item() != null ? t.item().getPath() : "?");
             default -> null;
         };
     }

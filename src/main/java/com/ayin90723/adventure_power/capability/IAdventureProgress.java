@@ -35,6 +35,16 @@ public interface IAdventureProgress {
     boolean isAbilityUnlocked(String id);
     boolean toggleAbility(String id);
 
+    // ===== 指令后门解锁的被禁用能力（/ap unlock ability） =====
+
+    /** 通过指令解锁的被禁用能力 ID 集合（NBT 持久化，per-player） */
+    Set<String> getCommandGrantedAbilities();
+    boolean isCommandGranted(String id);
+    /** 指令解锁一个被禁用能力，返回是否新增 */
+    boolean grantAbilityByCommand(String id);
+    /** 指令解锁该能力时的已解锁里程碑数（成长基准：解锁后数值=基础值，之后随进度正常成长） */
+    int getCommandGrantedAtCount(String id);
+
     // ===== 死亡抗拒 =====
 
     long getDeathDefyInvulEnd();

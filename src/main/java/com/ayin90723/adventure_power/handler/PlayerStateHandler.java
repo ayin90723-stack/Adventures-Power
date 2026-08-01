@@ -531,7 +531,7 @@ public class PlayerStateHandler {
             // 叠层（上限由能力里程碑配置决定，觉醒 +6）
             int maxStacks = (int) ((com.ayin90723.adventure_power.ability.ResilienceAbility)
                 com.ayin90723.adventure_power.ability.AbilityRegistry.get(AbilityIds.RESILIENCE))
-                .value(progress.getUnlockedMilestoneCount(), progress.isFullyUnlocked());
+                .value(AbilityGate.effectiveCount(progress, AbilityIds.RESILIENCE), progress.isFullyUnlocked());
             if (stacks < maxStacks) {
                 progress.setResilienceStacks(stacks + 1);
             }

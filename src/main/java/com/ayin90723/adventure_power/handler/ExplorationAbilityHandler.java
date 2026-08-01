@@ -50,7 +50,7 @@ public class ExplorationAbilityHandler {
             Ability ability = AbilityRegistry.get(AbilityIds.DIGGING_POWER);
             if (ability == null) return;
 
-            float multiplier = ability.value(progress.getUnlockedMilestoneCount());
+            float multiplier = ability.value(AbilityGate.effectiveCount(progress, AbilityIds.DIGGING_POWER));
             boolean awakened = progress.isFullyUnlocked();
             if (awakened) {
                 multiplier *= com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get().floatValue();
@@ -87,7 +87,8 @@ public class ExplorationAbilityHandler {
             // 仅 ORIGINAL_* 有记录才执行——从未写入过的玩家不做无用对账。
             if (ORIGINAL_REACH.containsKey(player.getUUID())
                 || ORIGINAL_ENTITY_REACH.containsKey(player.getUUID())) {
-                syncReachAttribute(player, false, progress.getUnlockedMilestoneCount(),
+                syncReachAttribute(player, false,
+                    AbilityGate.effectiveCount(progress, AbilityIds.EXTENDED_REACH),
                     progress.isFullyUnlocked());
             }
             return;
@@ -95,15 +96,15 @@ public class ExplorationAbilityHandler {
 
         // ---- 无形之手 ----
         syncReachAttribute(player, progress.isAbilityEnabled(AbilityIds.EXTENDED_REACH),
-            progress.getUnlockedMilestoneCount(), progress.isFullyUnlocked());
+            AbilityGate.effectiveCount(progress, AbilityIds.EXTENDED_REACH), progress.isFullyUnlocked());
 
         // ---- 坚韧之躯 ----
         syncVitalityAttribute(player, progress.isAbilityEnabled(AbilityIds.VITALITY),
-            progress.getUnlockedMilestoneCount(), progress.isFullyUnlocked());
+            AbilityGate.effectiveCount(progress, AbilityIds.VITALITY), progress.isFullyUnlocked());
 
         // ---- 加速 ----
         syncSpeedAttribute(player, progress.isAbilityEnabled(AbilityIds.SWIFT),
-            progress.getUnlockedMilestoneCount(), progress.isFullyUnlocked());
+            AbilityGate.effectiveCount(progress, AbilityIds.SWIFT), progress.isFullyUnlocked());
     }
 
     private static void syncReachAttribute(Player player, boolean enabled, int milestones, boolean fullyUnlocked) {
@@ -260,17 +261,20 @@ public class ExplorationAbilityHandler {
 
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
             if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
-            int milestones = progress.getUnlockedMilestoneCount();
 
             boolean fullyUnlocked = progress.isFullyUnlocked();
+            // 与 onTick 一致：每个能力取各自 effectiveCount（指令后门解锁的能力按平移后计数恢复）
             if (progress.isAbilityEnabled(AbilityIds.EXTENDED_REACH)) {
-                syncReachAttribute(player, true, milestones, fullyUnlocked);
+                syncReachAttribute(player, true,
+                    AbilityGate.effectiveCount(progress, AbilityIds.EXTENDED_REACH), fullyUnlocked);
             }
             if (progress.isAbilityEnabled(AbilityIds.VITALITY)) {
-                syncVitalityAttribute(player, true, milestones, fullyUnlocked);
+                syncVitalityAttribute(player, true,
+                    AbilityGate.effectiveCount(progress, AbilityIds.VITALITY), fullyUnlocked);
             }
             if (progress.isAbilityEnabled(AbilityIds.SWIFT)) {
-                syncSpeedAttribute(player, true, milestones, fullyUnlocked);
+                syncSpeedAttribute(player, true,
+                    AbilityGate.effectiveCount(progress, AbilityIds.SWIFT), fullyUnlocked);
             }
         });
     }

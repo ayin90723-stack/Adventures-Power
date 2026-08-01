@@ -43,7 +43,8 @@ public class FortuneFavorMixin {
             Ability ability = AbilityRegistry.get(AbilityIds.FORTUNE_FAVOR);
             if (ability == null) return;
 
-            int bonus = (int) ability.value(progress.getUnlockedMilestoneCount());
+            int bonus = (int) ability.value(
+                com.ayin90723.adventure_power.util.AbilityGate.effectiveCount(progress, AbilityIds.FORTUNE_FAVOR));
             if (FortuneContext.isAwakened()) {
                 bonus += com.ayin90723.adventure_power.config.ModConfig.AWAKEN_FORTUNE_FAVOR_BONUS.get();
             }

@@ -49,7 +49,9 @@ public class KnockbackResistHandler {
         if (shouldHave) {
             Ability ability = AbilityRegistry.get(AbilityIds.KNOCKBACK_RESIST);
             if (ability != null) {
-                float percent = AbilityGate.awakenedPercent(ability, progress.getUnlockedMilestoneCount(), progress.isFullyUnlocked(), ModConfig.KNOCKBACK_RESIST_HARD_CAP.get().floatValue());
+                float percent = AbilityGate.awakenedPercent(ability,
+                    AbilityGate.effectiveCount(progress, AbilityIds.KNOCKBACK_RESIST),
+                    progress.isFullyUnlocked(), ModConfig.KNOCKBACK_RESIST_HARD_CAP.get().floatValue());
                 expected = percent / 100.0;
             }
         }
@@ -74,7 +76,9 @@ public class KnockbackResistHandler {
             var attr = player.getAttribute(Attributes.KNOCKBACK_RESISTANCE);
             if (attr == null) return;
 
-            float percent = AbilityGate.awakenedPercent(ability, progress.getUnlockedMilestoneCount(), progress.isFullyUnlocked(), ModConfig.KNOCKBACK_RESIST_HARD_CAP.get().floatValue());
+            float percent = AbilityGate.awakenedPercent(ability,
+                AbilityGate.effectiveCount(progress, AbilityIds.KNOCKBACK_RESIST),
+                progress.isFullyUnlocked(), ModConfig.KNOCKBACK_RESIST_HARD_CAP.get().floatValue());
             attr.setBaseValue(percent / 100.0);
         });
     }

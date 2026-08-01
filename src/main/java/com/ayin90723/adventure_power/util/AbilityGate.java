@@ -53,6 +53,29 @@ public final class AbilityGate {
     }
 
     /**
+     * 有效里程碑数：指令后门解锁的被禁用能力按解锁时刻快照平移，其余能力原样返回。
+     * <p>
+     * 平移公式 {@code count' = count - grantedAt + countAtUnlock}：
+     * 解锁瞬间（count == grantedAt）数值 = 基础值 base，之后每解锁一个里程碑
+     * {@code count - grantedAt} +1 → 正常吃成长，不受原归属里程碑位置限制。
+     * 对线性/阶梯/档位公式均成立（档位判断等价于「解锁后第 N 个里程碑」）。
+     * 所有能力数值调用点必须经此方法取 count（或调用 {@link #value}），
+     * 否则指令解锁的能力会按错误基准计算。
+     */
+    public static int effectiveCount(IAdventureProgress progress, String abilityId) {
+        int count = progress.getUnlockedMilestoneCount();
+        if (progress.isCommandGranted(abilityId)) {
+            Ability ability = AbilityRegistry.get(abilityId);
+            int global = ability != null ? ability.getCountAtUnlock() : 0;
+            int grantedAt = progress.getCommandGrantedAtCount(abilityId);
+            // 下限防护：/reload 删除里程碑后 count 可能小于 grantedAt，平移可为负，
+            // 消费方（ActiveSkillHandler 等）只防护 ==0，负值会削掉技能伤害
+            return Math.max(0, count - grantedAt + global);
+        }
+        return count;
+    }
+
+    /**
      * 取能力当前数值（能力未注册返回 empty）。
      * 与「{@code Ability ability = AbilityRegistry.get(id); if (ability == null) return;}」样板
      * 完全等价——empty 即「不处理」。
@@ -60,7 +83,7 @@ public final class AbilityGate {
     public static Optional<Float> value(IAdventureProgress progress, String abilityId) {
         Ability ability = AbilityRegistry.get(abilityId);
         if (ability == null) return Optional.empty();
-        return Optional.of(ability.value(progress.getUnlockedMilestoneCount()));
+        return Optional.of(ability.value(effectiveCount(progress, abilityId)));
     }
 
     /**

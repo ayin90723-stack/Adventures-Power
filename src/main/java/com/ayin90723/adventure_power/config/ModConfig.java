@@ -353,8 +353,10 @@ public class ModConfig {
         BUILDER.pop();
 
         BUILDER.push("全视之眼");
-        ALL_SEEING_NIGHT_VISION_DURATION = BUILDER.comment("夜视刷新时长（tick，循环刷新保持常驻，默认220=11秒留余量）")
-            .defineInRange("all_seeing_night_vision_duration", 220, 60, 1200);
+        ALL_SEEING_NIGHT_VISION_DURATION = BUILDER.comment("夜视刷新时长（tick，循环刷新保持常驻；默认2400=2分钟。"
+            + "注意：原版夜视剩余<200tick（10秒）时画面会闪烁，刷新阈值固定在剩余400tick，"
+            + "因此本值低于400会导致每tick刷新（功能正常但略有同步开销））")
+            .defineInRange("all_seeing_night_vision_duration", 2400, 60, 24000);
         BUILDER.pop();
 
         BUILDER.push("加速");

@@ -5,7 +5,9 @@ import com.ayin90723.adventure_power.milestone.Milestone;
 import com.ayin90723.adventure_power.util.MilestoneRegistry;
 import net.minecraft.nbt.CompoundTag;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -30,11 +32,15 @@ public class AdventureProgress implements IAdventureProgress {
     private static final String TAG_ACTIVE_SKILL_GCD_END = "activeSkillGcdEnd";
     private static final String TAG_BACKUP_HEALTH = "backupHealth";
     private static final String TAG_DISABLED_ABILITIES = "disabledAbilities";
+    private static final String TAG_COMMAND_GRANTED = "commandGrantedAbilities";
 
     private boolean adventurer;
     private boolean fullyUnlocked;
     private final Set<String> unlockedMilestones = new HashSet<>();
     private final Set<String> disabledAbilities = new HashSet<>();
+    /** 指令后门（/ap unlock ability）解锁的被禁用能力 → 解锁时刻的已解锁里程碑数（per-player，持久化）。
+     *  数值成长按「解锁后每解锁一个里程碑 +1 档」计算（count 平移），不受原归属位置限制。 */
+    private final Map<String, Integer> commandGrantedAt = new HashMap<>();
 
     /**
      * 缓存当前已解锁里程碑对应的所有可用能力 ID。
@@ -49,6 +55,11 @@ public class AdventureProgress implements IAdventureProgress {
      * 若不一致则触发惰性重建，保证缓存不因数据包重载而变脏。
      */
     private int cachedRegistryHash;
+    /**
+     * 已解锁且仍存在于注册表的里程碑数（rebuildAbilityCache 维护）。
+     * 数据包 /reload 删除里程碑后，死 ID 不计入，避免成长公式计数虚高。
+     */
+    private int validUnlockedCount;
     /** getDisabledAbilities 的不可变缓存视图，toggle/deserialize 时失效 */
     private Set<String> cachedDisabledView;
     private long deathDefyInvulEnd;
@@ -105,12 +116,14 @@ public class AdventureProgress implements IAdventureProgress {
     @Override
     public int getUnlockedMilestoneCount() {
         if (fullyUnlocked) return MilestoneRegistry.getMilestoneCount();
-        return unlockedMilestones.size();
+        return validUnlockedCount;
     }
 
     @Override
     public boolean areAllMilestonesUnlocked() {
-        return fullyUnlocked || unlockedMilestones.size() >= MilestoneRegistry.getMilestoneCount();
+        int total = MilestoneRegistry.getMilestoneCount();
+        if (total <= 0) return false; // 里程碑系统被禁用或尚未加载：不允许空注册表误判全解锁级联
+        return fullyUnlocked || validUnlockedCount >= total;
     }
 
     // ===== 能力开关 =====
@@ -136,18 +149,22 @@ public class AdventureProgress implements IAdventureProgress {
     private void rebuildAbilityCache() {
         enabledAbilityCache.clear();
         cachedRegistryHash = System.identityHashCode(MilestoneRegistry.getAll());
+        int valid = 0;
         if (fullyUnlocked) {
             for (Milestone m : MilestoneRegistry.getAll()) {
                 enabledAbilityCache.addAll(m.abilities());
             }
+            valid = MilestoneRegistry.getMilestoneCount();
         } else {
             for (String milestoneId : unlockedMilestones) {
                 Milestone m = MilestoneRegistry.getById(milestoneId);
                 if (m != null) {
                     enabledAbilityCache.addAll(m.abilities());
+                    valid++;
                 }
             }
         }
+        validUnlockedCount = valid;
     }
 
     /**
@@ -164,7 +181,8 @@ public class AdventureProgress implements IAdventureProgress {
         if (cachedRegistryHash != System.identityHashCode(MilestoneRegistry.getAll())) {
             rebuildAbilityCache();
         }
-        return enabledAbilityCache.contains(id);
+        // 指令后门解锁的被禁用能力不依赖里程碑缓存
+        return enabledAbilityCache.contains(id) || commandGrantedAt.containsKey(id);
     }
 
     /** 该能力是否属于某已解锁里程碑（仅里程碑归属，不检查手动开关）。复用 enabledAbilityCache O(1) 查询。 */
@@ -173,7 +191,7 @@ public class AdventureProgress implements IAdventureProgress {
         if (cachedRegistryHash != System.identityHashCode(MilestoneRegistry.getAll())) {
             rebuildAbilityCache();
         }
-        return enabledAbilityCache.contains(id);
+        return enabledAbilityCache.contains(id) || commandGrantedAt.containsKey(id);
     }
 
     @Override
@@ -188,6 +206,31 @@ public class AdventureProgress implements IAdventureProgress {
         }
         cachedDisabledView = null;
         return enabled;
+    }
+
+    // ===== 指令后门解锁的被禁用能力 =====
+
+    @Override
+    public Set<String> getCommandGrantedAbilities() {
+        return Collections.unmodifiableSet(new HashSet<>(commandGrantedAt.keySet()));
+    }
+
+    @Override
+    public boolean isCommandGranted(String id) {
+        return commandGrantedAt.containsKey(id);
+    }
+
+    @Override
+    public boolean grantAbilityByCommand(String id) {
+        if (commandGrantedAt.containsKey(id)) return false;
+        // 记录解锁时刻的已解锁里程碑数作为成长基准（数值=基础值，之后随进度成长）
+        commandGrantedAt.put(id, getUnlockedMilestoneCount());
+        return true;
+    }
+
+    @Override
+    public int getCommandGrantedAtCount(String id) {
+        return commandGrantedAt.getOrDefault(id, 0);
     }
 
     // ===== 死亡抗拒 =====
@@ -306,6 +349,12 @@ public class AdventureProgress implements IAdventureProgress {
         }
         tag.put(TAG_DISABLED_ABILITIES, disabledTag);
 
+        CompoundTag grantedTag = new CompoundTag();
+        for (Map.Entry<String, Integer> e : commandGrantedAt.entrySet()) {
+            grantedTag.putInt(e.getKey(), e.getValue());
+        }
+        tag.put(TAG_COMMAND_GRANTED, grantedTag);
+
         tag.putLong(TAG_DEATH_DEFY_INVUL_END, deathDefyInvulEnd);
         tag.putLong(TAG_DEATH_DEFY_COOLDOWN_END, deathDefyCooldownEnd);
         tag.putInt(TAG_RESILIENCE_STACKS, resilienceStacks);
@@ -340,6 +389,12 @@ public class AdventureProgress implements IAdventureProgress {
             if (disabledTag.getBoolean(key)) {
                 this.disabledAbilities.add(key);
             }
+        }
+
+        this.commandGrantedAt.clear();
+        CompoundTag grantedTag = nbt.getCompound(TAG_COMMAND_GRANTED);
+        for (String key : grantedTag.getAllKeys()) {
+            this.commandGrantedAt.put(key, grantedTag.getInt(key));
         }
 
         this.deathDefyInvulEnd = nbt.getLong(TAG_DEATH_DEFY_INVUL_END);

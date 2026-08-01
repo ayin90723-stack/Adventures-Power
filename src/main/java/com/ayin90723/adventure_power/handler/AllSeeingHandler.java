@@ -19,13 +19,19 @@ import net.minecraft.world.entity.player.Player;
  */
 public class AllSeeingHandler {
 
+    /** 夜视剩余时间低于此值（tick）时刷新。原版闪烁线为 200 tick（10 秒），
+     *  400 tick 留足余量，保证剩余永远 > 200，画面永不闪烁。 */
+    private static final int NIGHT_VISION_REFRESH_AT = 400;
+
     public static void onTick(Player player, IAdventureProgress progress) {
         if (!progress.isAbilityEnabled(AbilityIds.ALL_SEEING)) return;
 
-        // 夜视：余量低于一半时刷新（避免每 tick addEffect 的同步开销）
+        // 夜视：剩余低于安全余量时刷新（避免每 tick addEffect 的同步开销）。
+        // 原版夜视剩余 < 200 tick 会进入强度摆动（画面闪烁），刷新点固定在 400 tick，
+        // 只要配置时长 > 400，剩余时间就永远远离闪烁线
         int duration = ModConfig.ALL_SEEING_NIGHT_VISION_DURATION.get();
         MobEffectInstance existing = player.getEffect(MobEffects.NIGHT_VISION);
-        if (existing == null || existing.getDuration() < duration / 2) {
+        if (existing == null || existing.getDuration() < NIGHT_VISION_REFRESH_AT) {
             // ambient=false, visible=false(无粒子), showIcon=false(无图标)
             player.addEffect(new MobEffectInstance(MobEffects.NIGHT_VISION, duration,
                 0, false, false, false));

@@ -31,4 +31,7 @@ public interface Ability {
      * 默认实现为空。
      */
     default void setCountAtUnlock(int n) {}
+
+    /** 当前 countAtUnlock（指令后门解锁的被禁用能力做 count 平移时使用） */
+    default int getCountAtUnlock() { return 0; }
 }

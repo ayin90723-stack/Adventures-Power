@@ -80,6 +80,8 @@ public final class SyncUtil {
                 trigTag.putString("type", m.trigger().type());
                 if (m.trigger().y() != null) trigTag.putInt("y", m.trigger().y());
                 if (m.trigger().entity() != null) trigTag.putString("entity", m.trigger().entity().toString());
+                if (m.trigger().dimension() != null) trigTag.putString("dimension", m.trigger().dimension().toString());
+                if (m.trigger().item() != null) trigTag.putString("item", m.trigger().item().toString());
                 mTag.put("trigger", trigTag);
             }
             registryMeta.put("m_" + i, mTag);

@@ -92,7 +92,8 @@ public class ActiveSkillHandler {
         if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return 0;
         if (!progress.isAbilityEnabled(AbilityIds.ACTIVE_SKILL)) return 0;
 
-        int milestones = progress.getUnlockedMilestoneCount();
+        // 指令后门解锁的 active_skill 按解锁时刻快照平移，之后随里程碑正常成长
+        int milestones = com.ayin90723.adventure_power.util.AbilityGate.effectiveCount(progress, AbilityIds.ACTIVE_SKILL);
         if (milestones == 0) milestones = 1;
 
         float baseDamage = (float) (double) ModConfig.ACTIVE_SKILL_JUDGMENT_BASE_DAMAGE.get();

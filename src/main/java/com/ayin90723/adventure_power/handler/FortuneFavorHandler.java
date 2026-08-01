@@ -37,7 +37,7 @@ public class FortuneFavorHandler {
             Ability ability = AbilityRegistry.get(AbilityIds.FORTUNE_FAVOR);
             if (ability == null) return;
 
-            int bonus = (int) ability.value(progress.getUnlockedMilestoneCount());
+            int bonus = (int) ability.value(AbilityGate.effectiveCount(progress, AbilityIds.FORTUNE_FAVOR));
             if (progress.isFullyUnlocked()) {
                 bonus += com.ayin90723.adventure_power.config.ModConfig.AWAKEN_FORTUNE_FAVOR_BONUS.get();
             }

@@ -53,6 +53,7 @@ public class PlayerTickDispatcher {
         // 里程碑触发器检测（原独立 PlayerTickEvent 订阅并入，消除每 tick 重复 resolve）
         MilestoneTriggerManager.onTickSurviveNight(player, progress);
         MilestoneTriggerManager.onTickYBelow(player, progress);
+        MilestoneTriggerManager.onTickReachY(player, progress);
         // 二段跳落地清零（无 capability 依赖，仅需 END phase 每 tick 一次）
         DoubleJumpHandler.onTick(player);
     }

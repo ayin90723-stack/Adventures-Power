@@ -106,10 +106,10 @@ public class ShadowKillHelper {
         // （复合 key：同 attacker 同 target 才去重，不影响多人各削各的）
         if (!SHADOW_KILL_TICKED.add(attacker.getUUID() + ":" + target.getUUID())) return;
 
-        int milestones = progress.getUnlockedMilestoneCount();
         Ability raw = AbilityRegistry.get(AbilityIds.SHADOW_KILL);
         if (!(raw instanceof ShadowKillAbility ability)) return;
 
+        // 影杀为固定值能力（无成长），指令解锁后数值天然一致，无需 count 平移
         float flatDamage = ability.flatDamage();
         float hpRatio = ability.hpRatio();
 

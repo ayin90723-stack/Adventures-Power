@@ -88,7 +88,7 @@ public class RecoveryHandler {
                 if (timeSinceHurt >= delayTicks) {
                     Ability ability = AbilityRegistry.get(AbilityIds.RAPID_RECOVERY);
                     if (ability != null) {
-                        int amplifier = (int) ability.value(progress.getUnlockedMilestoneCount());
+                        int amplifier = (int) ability.value(AbilityGate.effectiveCount(progress, AbilityIds.RAPID_RECOVERY));
                         // 觉醒：额外直写回血量（HP/周期）
                         if (progress.isFullyUnlocked()) {
                             amplifier += ModConfig.AWAKEN_RAPID_RECOVERY_BONUS.get();
@@ -150,7 +150,7 @@ public class RecoveryHandler {
             Ability ability = AbilityRegistry.get(AbilityIds.LIFESTEAL);
             if (ability == null) return;
 
-            float percentage = ability.value(progress.getUnlockedMilestoneCount()) / 100.0f;
+            float percentage = ability.value(AbilityGate.effectiveCount(progress, AbilityIds.LIFESTEAL)) / 100.0f;
             float healAmount = event.getAmount() * percentage;
             float cap = attacker.getMaxHealth() * ModConfig.LIFESTEAL_CAP_RATIO.get().floatValue();
             healAmount = Math.min(healAmount, cap);
