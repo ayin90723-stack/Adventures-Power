@@ -85,6 +85,12 @@ public class CombatAbilityHandler {
 
     @SubscribeEvent(receiveCanceled = true)
     public static void onLivingHurt(LivingHurtEvent event) {
+        // 事件已发标记（v1.3.3）：任何 post 的 LivingHurtEvent 必然触发本监听器——
+        // 标记 = 事件已发的直接证据，供 Layer 0（Player.attack）决定是否补发。
+        // 不依赖 Layer 2.5 redirect：redirect 注入失败（require=0 静默失效）时
+        // 原版事件照常 post，本监听器照常 mark，Layer 0 据此不重复补发（防淬魂/嗜血双结算）。
+        PiercingGazeUtil.markVanillaHurtEventPosted();
+
         LivingEntity target = event.getEntity();
         if (target.level().isClientSide()) return;
 

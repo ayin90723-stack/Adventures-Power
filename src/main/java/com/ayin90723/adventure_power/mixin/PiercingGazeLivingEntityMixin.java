@@ -196,12 +196,10 @@ public abstract class PiercingGazeLivingEntityMixin {
                         effectiveAmount = PIERCING_EFFECTIVE_AMOUNT.get();
                     } else {
                         // 情况 A：Boss 完全拦截 hurt()（未走到 ForgeHooks.onLivingHurt），redirect 未触发
-                        // -> 补 post LivingHurtEvent（取 max 防限伤）让淬魂等附魔正常处理
+                        // -> 补 post LivingHurtEvent（取 max 防限伤）让淬魂等附魔正常处理。
+                        // 事件已发标记由 CombatAbilityHandler.onLivingHurt 监听器统一负责
+                        //（任何 post 都触发该监听器），此处不再显式 mark
                         effectiveAmount = PiercingGazeUtil.postHurtEvent(self, source, amount);
-                        // 标记事件已发：Layer 0 的扣血分支据此不补发（防止淬魂/嗜血双结算）。
-                        // 必须在此 mark——否则 I 帧连击场景（invulnerableTime 检查在
-                        // ForgeHooks 调用点之前，redirect 不触发）会读到陈旧标记而重复补发
-                        PiercingGazeUtil.markVanillaHurtEventPosted();
                     }
                     // actuallyHurt 直写 + 血量兜底 + 清无敌字段
                     PiercingGazeUtil.invokeActuallyHurt(self, source, effectiveAmount);
@@ -270,15 +268,14 @@ public abstract class PiercingGazeLivingEntityMixin {
         // 反重入：MME 内部穿透伤害（soul_strike / vengeance）走原版管线。
         // 使用精确 msgId 匹配而非 BYPASSES_INVULNERABILITY 标签检查，
         // 避免将 RevelationFix fe_power 误判为 MME 内部调用。
+        // 注：事件已发标记统一由 CombatAbilityHandler.onLivingHurt 监听器负责
+        //（任何 post 都触发该监听器），redirect 不显式 mark——避免对注入点失效的隐式依赖
         if (DamageUtil.isInternalSource(source)) {
-            // 事件已由原版管线 post（供 Layer 0 决定是否补发）
-            PiercingGazeUtil.markVanillaHurtEventPosted();
             return ForgeHooks.onLivingHurt(entity, source, amount);
         }
 
         // 非破敌之眼攻击 -> 走原版管线
         if (!PiercingGazeUtil.isPiercingGazeAttack(source, entity)) {
-            PiercingGazeUtil.markVanillaHurtEventPosted();
             return ForgeHooks.onLivingHurt(entity, source, amount);
         }
 
@@ -288,7 +285,6 @@ public abstract class PiercingGazeLivingEntityMixin {
         Deque<PiercingStackFrame> stack = PIERCING_STACK.get();
         PiercingStackFrame outer = stack.peek();
         if (outer != null && outer.inPiercing()) {
-            PiercingGazeUtil.markVanillaHurtEventPosted();
             return amount;
         }
 
@@ -303,7 +299,6 @@ public abstract class PiercingGazeLivingEntityMixin {
         IN_PIERCING.set(true);
         PIERCING_EVENT_POSTED.set(true);
         PIERCING_EFFECTIVE_AMOUNT.set(effective);
-        PiercingGazeUtil.markVanillaHurtEventPosted();
         return effective;
     }
 }

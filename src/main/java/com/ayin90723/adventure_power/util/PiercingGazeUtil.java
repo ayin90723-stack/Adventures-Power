@@ -39,18 +39,23 @@ public final class PiercingGazeUtil {
     }
 
     /**
-     * 本次 hurt 是否已 post 事件（原版 ForgeHooks.onLivingHurt 或 Layer 2.5 手动 post）。
+     * 本次 hurt 是否已 post 事件（原版 ForgeHooks.onLivingHurt 或各手动 post 路径）。
      * 由 Layer 0 消费式读取决定是否补发 LivingHurtEvent——正常环境原版已 post，
      * 重复补发会让淬魂/嗜血/禁疗等监听器双倍结算（影杀已有 SHADOW_KILL_TICKED 去重）；
      * 仅当 ASM 跳过 ForgeHooks 的环境（如 fantasy_ending）标记为 false 才需要补发。
+     * <p>
+     * 标记来源（v1.3.3 单一来源）：{@code CombatAbilityHandler.onLivingHurt} 监听器入口
+     * （任何 post 的 LivingHurtEvent 都触发该监听器，标记 = 事件已发的直接证据）——
+     * 不依赖 Layer 2.5 redirect 的 mark（redirect 注入失败 require=0 静默失效时，
+     * 原版事件照常 post、监听器照常 mark，Layer 0 不会误补发）。
      * <p>
      * 放在本工具类而非 Mixin 类：@Mixin 类禁止非 private static 方法
      * （Mixin Applicator 会尝试混入目标类导致 InvalidMixinException）。
      */
     private static final ThreadLocal<Boolean> VANILLA_HURT_EVENT_POSTED = ThreadLocal.withInitial(() -> false);
 
-    /** 由 {@code PiercingGazeLivingEntityMixin#redirectOnLivingHurt} 各分支调用：
-     *  标记本次 hurt 已走原版管线（或已手动 post）事件 */
+    /** 由 {@code CombatAbilityHandler.onLivingHurt} 入口调用（事件 post 即触发）：
+     *  标记本次 hurt 已 post 事件 */
     public static void markVanillaHurtEventPosted() {
         VANILLA_HURT_EVENT_POSTED.set(true);
     }
