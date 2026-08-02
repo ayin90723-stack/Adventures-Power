@@ -45,7 +45,8 @@ libs/
 # Forge 源码补丁副本（ForgeGradle 生成）
 patches/
 
-# 参考文档（仅本地参考，不对外发布；保留能力详解和数据包指导）
+# 参考文档（仅本地参考，不对外发布；保留能力详解、迭代史和数据包指导）
 docs/*
-!docs/能力实现详解.md
+!docs/能力详解.md
+!docs/迭代史.md
 !docs/datapack-guide.md
