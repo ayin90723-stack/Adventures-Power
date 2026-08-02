@@ -84,9 +84,11 @@ public abstract class DeathDefyMixin {
         if (current < DEATH_DEFY_CLAMP_HEALTH) {
             // catchSetTrueHealth 直写了 DataItem.value → getHealth() 已反映新值
             // setAllHealthLikeRaw 遍历所有血量条目并直接用反射写回，
-            // 覆盖 VarHandle 直写的结果
+            // 覆盖 VarHandle 直写的结果。
+            // 只走 setHealthDirect 直写：player.setHealth 内部 clamp(value, 0, maxHealth)，
+            // maxHealth 被外部污染 < 20 时会把钳制目标 20 钳回污染值（与 DeathDefyHandler 同修复）；
+            // TrueHealth backup 由下次 getHealth 惰性同步（DataItem > backup 视为合法回血）
             HealthUtil.setHealthDirect(player, DEATH_DEFY_CLAMP_HEALTH);
-            player.setHealth(DEATH_DEFY_CLAMP_HEALTH);
         }
     }
 }

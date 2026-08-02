@@ -532,6 +532,17 @@ public class PlayerStateHandler {
             Double original = ORIGINAL_MOVE_SPEED.remove(player.getUUID());
             if (original != null) {
                 sanctuarySpeedAttr.setBaseValue(original);
+            } else {
+                // 无记录（服务端重启后静态 Map 清空，而 player.dat 可能已落盘庇护目标值）：
+                // 残留判定——当前值 ≈ 本模组庇护写入值（0 或 0.1×配置，均远低于原版 0.1）
+                // 则判定为本模组残留，回归原版默认 0.1；否则视为其他模组的修改，不覆盖。
+                // 与 ExplorationAbilityHandler 的 maxHealth/reach 残留判定同模式。
+                double sanctuaryTarget = progress.isFullyUnlocked()
+                    ? 0.1 * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SANCTUARY_SPEED.get()
+                    : 0.0;
+                if (Math.abs(sanctuarySpeedAttr.getBaseValue() - sanctuaryTarget) <= 0.001) {
+                    sanctuarySpeedAttr.setBaseValue(0.1);
+                }
             }
         }
     }

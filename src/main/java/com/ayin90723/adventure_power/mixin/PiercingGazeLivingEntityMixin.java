@@ -288,16 +288,19 @@ public abstract class PiercingGazeLivingEntityMixin {
             return amount;
         }
 
-        // 手动 post LivingHurtEvent - 让淬魂等 MME 效果正常处理
+        // 手动 post LivingHurtEvent - 让淬魂等 MME 效果正常处理。
+        // 风暴守卫标记（IN_PIERCING/PIERCING_EVENT_POSTED）须在 post **之前**设置：
+        // 第三方监听器若在事件期间用同一源再次 target.hurt()（反射/反击类逻辑），
+        // 递归层 HEAD 压栈捕获到外层 IN_PIERCING=true 才能触发风暴守卫阻断递归——
+        // post 后才设置会让递归层漏判，每层 post 形成无限递归（StackOverflowError）。
+        // 对本层 onHurtReturn 无副作用（它只读 PIERCING_EVENT_POSTED 与 EFFECTIVE_AMOUNT）。
+        IN_PIERCING.set(true);
+        PIERCING_EVENT_POSTED.set(true);
         LivingHurtEvent event = new LivingHurtEvent(entity, source, amount);
         MinecraftForge.EVENT_BUS.post(event);
 
-        // 伤害只能涨不能降：淬魂追加的伤害保留，Boss 限伤被忽略
+        // 伤害只能涨不能降：淬魂追加的伤害保留，Boss 限伤被忽略（effective 依赖 post 结果，post 后补设）
         float effective = Math.max(amount, event.getAmount());
-
-        // 标记本层已 post，供 onHurtReturn 区分情况 A/C
-        IN_PIERCING.set(true);
-        PIERCING_EVENT_POSTED.set(true);
         PIERCING_EFFECTIVE_AMOUNT.set(effective);
         return effective;
     }
