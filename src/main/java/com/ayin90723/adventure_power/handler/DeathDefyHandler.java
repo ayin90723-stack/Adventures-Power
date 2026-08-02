@@ -53,12 +53,15 @@ public class DeathDefyHandler {
                 .forEach(player::removeEffect);
             player.clearFire();
 
-            // 双轨恢复：取 getMaxHealth() 和 20 的较大值
+            // 恢复血量：取 getMaxHealth() 和 20 的较大值
             // 上限 - 支持 Vitality 等能力提升的最大生命值
             // 下限 - 防止外部模组（如亚波伦结界）临时污染 maxHealth 导致复活后血量过低
+            // 只走 setHealthDirect 直写：若再调 player.setHealth(restoreHealth)，
+            // 原版 setHealth 内部 clamp(value, 0, maxHealth) 会把"下限 20"钳回污染值
+            //（maxHealth < 20 时直写值被覆盖，防护语义失效）。
+            // TrueHealth backup 由下次 getHealth 的惰性同步自动更新（DataItem > backup 视为合法回血）。
             float restoreHealth = Math.max(20.0F, player.getMaxHealth());
             HealthUtil.setHealthDirect(player, restoreHealth);
-            player.setHealth(restoreHealth);
 
             // 写入无敌和冷却结束时间
             long invulEnd = currentTime + ModConfig.DEATH_DEFY_INVUL_DURATION.get();

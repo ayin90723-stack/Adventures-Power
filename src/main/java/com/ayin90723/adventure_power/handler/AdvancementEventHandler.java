@@ -64,8 +64,10 @@ public class AdvancementEventHandler {
             // 再检查 trigger 是否已可触发（所有 5 种类型均支持追赶）
             if (m.trigger() != null) {
                 boolean met = switch (m.trigger().type()) {
-                    // 第一个黎明（23000）即判定度过首夜，与 MilestoneTriggerManager 保持一致
-                    case "survive_night" -> player.level().getDayTime() >= 23000 && player.level().isDay();
+                    // 度过首夜判定：当前处于黎明段 或 曾睡过觉（睡觉跳过黎明窗口，与
+                    // MilestoneTriggerManager 的夜间标记方案语义一致）
+                    case "survive_night" -> (player.level().getDayTime() >= 23000 && player.level().isDay())
+                        || player.getStats().getValue(Stats.CUSTOM.get(Stats.SLEEP_IN_BED)) > 0;
                     case "y_below" -> player.getY() < (m.trigger().y() != null ? m.trigger().y() : 0);
                     case "first_death" -> player.getStats().getValue(Stats.CUSTOM.get(Stats.DEATHS)) > 0;
                     case "first_trade" -> player.getStats().getValue(Stats.CUSTOM.get(Stats.TALKED_TO_VILLAGER)) > 0;
@@ -74,6 +76,10 @@ public class AdvancementEventHandler {
                         EntityType<?> type = ForgeRegistries.ENTITY_TYPES.getValue(m.trigger().entity());
                         yield type != null && player.getStats().getValue(Stats.ENTITY_KILLED.get(type)) > 0;
                     }
+                    // 当前所在维度 == 目标维度 -> 已进入过（追赶用现查即可）
+                    case "enter_dimension" -> m.trigger().dimension() != null
+                        && player.level().dimension().location().equals(m.trigger().dimension());
+                    // obtain_item 无统计可查（原版无"曾拾取过物品"记录），无法追赶——文档注明
                     default -> false;
                 };
                 if (met) {

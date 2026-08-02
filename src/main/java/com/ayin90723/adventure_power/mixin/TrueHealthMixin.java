@@ -216,7 +216,10 @@ public abstract class TrueHealthMixin {
 
         // 觉醒防秒杀底线：外部 setHealth 篡改到致死值（非 hurt 路径 + newHealth<=0），
         // 强制保留 1HP，防止 setHealth(0) 等秒杀。正常 hurt 打死不受影响（HURT_DEPTH>0）。
-        if (progress.isFullyUnlocked() && HealthUtil.HURT_DEPTH.get() == 0 && actual <= 0.0F) {
+        // INTERNAL_HEALTH_WRITE 时不触发：模组内部降血（vitality 裁剪到 ≤0 的极端退化场景）
+        // 不应被防秒杀覆盖（否则裁剪语义失效且 backup 被污染为 1）。
+        if (progress.isFullyUnlocked() && HealthUtil.HURT_DEPTH.get() == 0 && actual <= 0.0F
+            && !HealthUtil.INTERNAL_HEALTH_WRITE.get()) {
             progress.setBackupHealth(1.0F);
             repairHealth(player, 1.0F);
             if (debugLog()) {
@@ -226,7 +229,11 @@ public abstract class TrueHealthMixin {
             return;
         }
 
-        if (HealthUtil.HURT_DEPTH.get() > 0 || actual >= oldBackup - EPSILON) {
+        if (HealthUtil.HURT_DEPTH.get() > 0 || actual >= oldBackup - EPSILON
+            || HealthUtil.INTERNAL_HEALTH_WRITE.get()) {
+            // INTERNAL_HEALTH_WRITE：模组内部降血（vitality 裁剪等）同样同步备份，
+            // 否则 backup 冻结在旧值，下次 getHealth 会把 DataItem 判定为"非法降血直写"
+            // 而修复回旧值，裁剪被反向抵消
             progress.setBackupHealth(actual);
         } else {
             // HURT_DEPTH == 0 && actual < oldBackup -> 外部篡改，拒绝同步

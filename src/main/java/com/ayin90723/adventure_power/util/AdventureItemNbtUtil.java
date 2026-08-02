@@ -53,13 +53,19 @@ public final class AdventureItemNbtUtil {
     public static boolean recoverProgressFromItems(Player player, IAdventureProgress progress) {
         List<Milestone> all = MilestoneRegistry.getAll();
         boolean[] found = new boolean[all.size()];
-        scanAllItemsForMilestones(player, found);
+        java.util.Map<String, Integer> granted = new java.util.HashMap<>();
+        scanAllItemsForMilestones(player, found, granted);
         boolean anyMilestone = false;
         for (int i = 0; i < all.size(); i++) {
             if (found[i]) {
                 progress.unlockMilestone(all.get(i).id());
                 anyMilestone = true;
             }
+        }
+        // 指令后门解锁记录同样纳入第三层备份恢复（含解锁时刻里程碑数，保证 count 平移精确）
+        for (java.util.Map.Entry<String, Integer> e : granted.entrySet()) {
+            progress.setCommandGrantedAtCount(e.getKey(), e.getValue());
+            anyMilestone = true;
         }
         if (anyMilestone) {
             progress.activateAdventurer();
@@ -72,13 +78,14 @@ public final class AdventureItemNbtUtil {
         return anyMilestone;
     }
 
-    private static void scanAllItemsForMilestones(Player player, boolean[] found) {
+    private static void scanAllItemsForMilestones(Player player, boolean[] found, java.util.Map<String, Integer> grantedOut) {
         List<Milestone> all = MilestoneRegistry.getAll();
         ItemInventoryHelper.forEachAdventureSlot(player, stack ->
-            scanItemForMilestones(stack, all, found));
+            scanItemForMilestones(stack, all, found, grantedOut));
     }
 
-    private static void scanItemForMilestones(ItemStack stack, List<Milestone> all, boolean[] found) {
+    private static void scanItemForMilestones(ItemStack stack, List<Milestone> all, boolean[] found,
+                                              java.util.Map<String, Integer> grantedOut) {
         if (!stack.is(ModItems.ADVENTURE_BEGIN.get()) && !stack.is(ModItems.ADVENTURE_END.get())) return;
         migrateOldStage(stack);
         CompoundTag tag = stack.getOrCreateTag();
@@ -86,6 +93,11 @@ public final class AdventureItemNbtUtil {
             if (tag.getBoolean(PersistentDataKeys.milestoneNbtKey(all.get(i).id()))) {
                 found[i] = true;
             }
+        }
+        // 指令后门解锁记录（id -> 解锁时刻里程碑数）
+        CompoundTag grantedTag = tag.getCompound(PersistentDataKeys.COMMAND_GRANTED_KEY);
+        for (String id : grantedTag.getAllKeys()) {
+            grantedOut.put(id, grantedTag.getInt(id));
         }
     }
 
@@ -113,6 +125,16 @@ public final class AdventureItemNbtUtil {
         CompoundTag tag = stack.getOrCreateTag();
         for (Milestone m : MilestoneRegistry.getAll()) {
             tag.putBoolean(PersistentDataKeys.milestoneNbtKey(m.id()), progress.isMilestoneUnlocked(m.id()));
+        }
+        // 指令后门解锁的被禁用能力（含解锁时刻里程碑数，第三层备份）
+        CompoundTag grantedTag = new CompoundTag();
+        for (String id : progress.getCommandGrantedAbilities()) {
+            grantedTag.putInt(id, progress.getCommandGrantedAtCount(id));
+        }
+        if (grantedTag.isEmpty()) {
+            tag.remove(PersistentDataKeys.COMMAND_GRANTED_KEY);
+        } else {
+            tag.put(PersistentDataKeys.COMMAND_GRANTED_KEY, grantedTag);
         }
         stack.setTag(tag);
     }

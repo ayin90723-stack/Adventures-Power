@@ -485,7 +485,9 @@ public class ShadowKillHelper {
 
     /**
      * 检测 shadowData 中的 target 是否存在，无效（死亡/卸载/换实体）则清理。
-     * 2 tick 宽限防跨维度传送时 target 短暂不在任何维度被误清。
+     * 宽限为 2 个清理周期（SHADOW_KILL_CLEANUP_INTERVAL × 2，默认 200×2=400 tick）——
+     * 本方法只在全局清理里按周期调用，MISSING_TARGET_TICKS 的计数单位是"清理周期"而非 tick，
+     * 防跨维度传送时 target 短暂不在任何维度被误清。
      */
     private static void cleanupInvalidTargets(CompoundTag shadowData, MinecraftServer server) {
         Set<UUID> found = new HashSet<>();

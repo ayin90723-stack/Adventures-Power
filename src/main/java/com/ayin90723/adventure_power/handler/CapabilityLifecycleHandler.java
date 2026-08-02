@@ -65,6 +65,16 @@ public class CapabilityLifecycleHandler {
                 newCap.deserializeNBT(data));
         }
 
+        // 时间基准平移：ServerLevel.getGameTime() 每维度独立，跨维度（含死亡重生到异维度）
+        // 后 Capability 中的计时字段与当前维度时钟失配——主世界触发的死亡抗拒冷却进入
+        // 时间更小的下界会被"延长"、下界进主世界则冷却失效；受击坚韧 lastHurtTime 错位
+        // 会导致层数永不过期。按新旧维度时间差平移各 end 字段（同维度 delta=0 无操作）。
+        long timeDelta = newPlayer.level().getGameTime() - oldPlayer.level().getGameTime();
+        if (timeDelta != 0) {
+            newPlayer.getCapability(AdventureProgressCapability.CAPABILITY)
+                .ifPresent(p -> shiftTimers(p, timeDelta));
+        }
+
         // 维度切换（非死亡 clone）保留影杀影子血量进度；死亡清零为刻意设计（重生后重新积累）
         if (!event.isWasDeath()) {
             CompoundTag oldShadowData = oldPlayer.getPersistentData().getCompound(PersistentDataKeys.SHADOW_HP_DATA);
@@ -72,11 +82,29 @@ public class CapabilityLifecycleHandler {
                 newPlayer.getPersistentData().put(PersistentDataKeys.SHADOW_HP_DATA, oldShadowData);
             }
         }
+        // 影杀影子血量过期时间同样平移（攻击者 level 切换后过期判定基准变化——
+        // 不平移会导致下界积累的影子血量进主世界立即过期，或主世界的永不过期）
+        if (timeDelta != 0) {
+            CompoundTag shadowData = newPlayer.getPersistentData().getCompound(PersistentDataKeys.SHADOW_HP_DATA);
+            if (!shadowData.isEmpty()) {
+                for (String key : shadowData.getAllKeys()) {
+                    CompoundTag entry = shadowData.getCompound(key);
+                    long end = entry.getLong(PersistentDataKeys.SHADOW_HP_END_TIME);
+                    if (end > 0) {
+                        entry.putLong(PersistentDataKeys.SHADOW_HP_END_TIME, end + timeDelta);
+                    }
+                }
+                newPlayer.getPersistentData().put(PersistentDataKeys.SHADOW_HP_DATA, shadowData);
+            }
+        }
 
-        // 兜底：以上均未恢复 -> 扫描物品 NBT
+        // 兜底：以上均未恢复 -> 扫描物品 NBT。
+        // 统一扫 oldPlayer（event.getOriginal()）：1.20.1 的 restoreFrom 在 Clone 事件前
+        // 已完成物品栏复制（死亡 respawn 时 newPlayer 物品栏非空），但维度切换路径
+        // newPlayer 物品栏为空——oldPlayer 在事件时点物品栏始终完整，两路径均正确
         newPlayer.getCapability(AdventureProgressCapability.CAPABILITY).ifPresent(progress -> {
             if (!progress.isAdventurer() && !progress.isFullyUnlocked()) {
-                AdventureItemNbtUtil.recoverProgressFromItems(newPlayer, progress);
+                AdventureItemNbtUtil.recoverProgressFromItems(oldPlayer, progress);
             }
             if (progress.isAdventurer() || progress.isFullyUnlocked()) {
                 SyncUtil.syncCapabilityToPersistent(newPlayer, progress);
@@ -146,7 +174,33 @@ public class CapabilityLifecycleHandler {
 
         giveAdventureBeginIfNeeded(player);
         checkAndActivateAdventurer(player);
+
+        // 已激活冒险者登录：补跑成就追赶（catchUpMissedMilestones 仅由 checkAndActivateAdventurer
+        // 在首次激活时调用，已激活玩家登录/数据包 /reload 新增 advancement 里程碑后
+        // 不会重发成就事件——此处兜底，幂等（已解锁跳过））
+        if (player instanceof ServerPlayer sp) {
+            AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
+                if (progress.isAdventurer() || progress.isFullyUnlocked()) {
+                    AdvancementEventHandler.catchUpMissedMilestones(sp);
+                }
+            });
+        }
+
         SyncUtil.syncToClient(player);
+    }
+
+    /** 时间基准平移：把 Capability 中所有 gameTime 时间戳字段按新旧维度时间差平移。
+     *  仅平移 >0 的激活字段（0 = 未激活，平移无意义）。
+     *  注意：休养生息/恩赐永驻等 handler 的静态 Map 缓存（脱战/续期检查）为短时缓存，
+     *  跨维度后自愈（最多一次检查提前/延迟），无需平移。 */
+    private static void shiftTimers(IAdventureProgress p, long delta) {
+        if (p.getDeathDefyInvulEnd() > 0) p.setDeathDefyInvulEnd(p.getDeathDefyInvulEnd() + delta);
+        if (p.getDeathDefyCooldownEnd() > 0) p.setDeathDefyCooldownEnd(p.getDeathDefyCooldownEnd() + delta);
+        if (p.getJudgmentCooldownEnd() > 0) p.setJudgmentCooldownEnd(p.getJudgmentCooldownEnd() + delta);
+        if (p.getSanctuaryCooldownEnd() > 0) p.setSanctuaryCooldownEnd(p.getSanctuaryCooldownEnd() + delta);
+        if (p.getSanctuaryInvulEnd() > 0) p.setSanctuaryInvulEnd(p.getSanctuaryInvulEnd() + delta);
+        if (p.getActiveSkillGcdEnd() > 0) p.setActiveSkillGcdEnd(p.getActiveSkillGcdEnd() + delta);
+        if (p.getLastHurtTime() > 0) p.setLastHurtTime(p.getLastHurtTime() + delta);
     }
 
     /** 补发冒险的开始/终点（若玩家应持有但丢失）。public 供 PlayerTickHandler 开局安全网调用 */

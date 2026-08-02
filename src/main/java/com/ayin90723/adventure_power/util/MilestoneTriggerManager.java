@@ -38,11 +38,12 @@ import java.util.*;
 @Mod.EventBusSubscriber(modid = AdventurePower.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class MilestoneTriggerManager {
 
-    /** 第一个黎明（23000-24000 为黎明段，24000 为新一天开始）——「度过第一夜」在黎明即达成 */
-    private static final long FIRST_DAWN_TICKS = 23000;
-
     /** 已触发的玩家/里程碑集合（Map&lt;UUID, Set&lt;里程碑ID&gt;&gt;，防止重复触发且支持 reload 新增里程碑） */
     private static final Map<UUID, Set<String>> SURVIVE_NIGHT_TRIGGERED = new HashMap<>();
+    /** 本夜已处于夜晚的玩家（日落后标记，黎明/睡觉醒来后消费解锁）。
+     *  不能依赖黎明窗口（dayTime 23000-24000）判定：睡觉会把 dayTime 直接推进到
+     *  24000 倍数，每晚睡觉的玩家永远不经过该窗口——按"夜间标记 + 白天消费"判定 */
+    private static final Map<UUID, Boolean> SURVIVE_NIGHT_PASSED = new HashMap<>();
     private static final Map<UUID, Set<String>> FIRST_DEATH_TRIGGERED = new HashMap<>();
     private static final Map<UUID, Set<String>> FIRST_TRADE_TRIGGERED = new HashMap<>();
     private static final Map<UUID, Set<String>> Y_BELOW_TRIGGERED = new HashMap<>();
@@ -56,6 +57,7 @@ public class MilestoneTriggerManager {
     public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         UUID uuid = event.getEntity().getUUID();
         SURVIVE_NIGHT_TRIGGERED.remove(uuid);
+        SURVIVE_NIGHT_PASSED.remove(uuid);
         FIRST_DEATH_TRIGGERED.remove(uuid);
         FIRST_TRADE_TRIGGERED.remove(uuid);
         Y_BELOW_TRIGGERED.remove(uuid);
@@ -81,13 +83,17 @@ public class MilestoneTriggerManager {
     public static void onTickSurviveNight(Player player, IAdventureProgress progress) {
         List<Milestone> ms = MilestoneRegistry.getByTriggerType("survive_night");
         if (ms.isEmpty()) return;
-        // 未到黎明段直接跳过（条件对所有 survive_night 里程碑一致，前置判定避免每 tick 遍历）
-        long dayTime = player.level().getDayTime();
-        if (dayTime < FIRST_DAWN_TICKS || !player.level().isDay()) return;
-
         UUID uuid = player.getUUID();
         Set<String> triggered = SURVIVE_NIGHT_TRIGGERED.computeIfAbsent(uuid, k -> new HashSet<>());
         if (allDone(ms, triggered, progress)) return;
+
+        // 夜间（日落后 skyDarken≥4）：标记"本夜已度过"——正常度过与睡觉跳夜均覆盖
+        if (player.level().isNight()) {
+            SURVIVE_NIGHT_PASSED.put(uuid, true);
+            return;
+        }
+        // 白天：消费标记（黎明段 isDay 已为 true / 睡觉醒来 dayTime=0）——本夜度过则解锁
+        if (!Boolean.TRUE.equals(SURVIVE_NIGHT_PASSED.remove(uuid))) return;
 
         for (Milestone m : ms) {
             if (triggered.contains(m.id())) continue;

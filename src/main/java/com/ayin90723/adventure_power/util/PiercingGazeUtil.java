@@ -39,6 +39,41 @@ public final class PiercingGazeUtil {
     }
 
     /**
+     * 本次 hurt 是否已 post 事件（原版 ForgeHooks.onLivingHurt 或 Layer 2.5 手动 post）。
+     * 由 Layer 0 消费式读取决定是否补发 LivingHurtEvent——正常环境原版已 post，
+     * 重复补发会让淬魂/嗜血/禁疗等监听器双倍结算（影杀已有 SHADOW_KILL_TICKED 去重）；
+     * 仅当 ASM 跳过 ForgeHooks 的环境（如 fantasy_ending）标记为 false 才需要补发。
+     * <p>
+     * 放在本工具类而非 Mixin 类：@Mixin 类禁止非 private static 方法
+     * （Mixin Applicator 会尝试混入目标类导致 InvalidMixinException）。
+     */
+    private static final ThreadLocal<Boolean> VANILLA_HURT_EVENT_POSTED = ThreadLocal.withInitial(() -> false);
+
+    /** 由 {@code PiercingGazeLivingEntityMixin#redirectOnLivingHurt} 各分支调用：
+     *  标记本次 hurt 已走原版管线（或已手动 post）事件 */
+    public static void markVanillaHurtEventPosted() {
+        VANILLA_HURT_EVENT_POSTED.set(true);
+    }
+
+    /** 本次 attack 作用域隔离：Layer 0 在调 target.hurt() 前清除标记，
+     *  保证 consume 只反映"本次 hurt 期间"的置位——环境噪声 hurt（怪物互殴等）
+     *  在两次 attack 之间的置位被清除，不会被下一次 attack 误消费 */
+    public static void clearVanillaHurtEventPosted() {
+        VANILLA_HURT_EVENT_POSTED.remove();
+    }
+
+    /**
+     * Layer 0（Player.attack 重定向）专用：消费"本次 hurt 已 post 事件"标记。
+     * 消费式读取（读后清除）：保证标记只反映"本次 hurt"，不残留到下一次攻击。
+     * 未走原版管线时 redirect 不触发（Boss 完全重写 hurt() 不调 super），标记保持 false。
+     */
+    public static boolean consumeVanillaHurtEventPosted() {
+        boolean posted = VANILLA_HURT_EVENT_POSTED.get();
+        VANILLA_HURT_EVENT_POSTED.remove();
+        return posted;
+    }
+
+    /**
      * 追溯真正的攻击者：直接实体 -> 间接实体 -> 弹射物发射者。
      * <p>
      * 弹射物（箭/弩箭/火球等）的 {@code getEntity()} 通常是弹射物本身，

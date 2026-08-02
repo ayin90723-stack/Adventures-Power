@@ -169,8 +169,11 @@ public class RecoveryHandler {
                             * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_LIFESTEAL_SHIELD_CAP.get().floatValue();
                         excess = Math.min(excess, shieldCap);
                         if (excess > 0.0F) {
+                            // 上限只限模组新增部分：min(新总量, max(既有吸收, shieldCap))——
+                            // 玩家已有更高吸收（金苹果/其他模组护盾）时不被本能力压掉
                             attacker.setAbsorptionAmount(Math.min(
-                                attacker.getAbsorptionAmount() + excess, shieldCap));
+                                attacker.getAbsorptionAmount() + excess,
+                                Math.max(attacker.getAbsorptionAmount(), shieldCap)));
                         }
                     }
                 }

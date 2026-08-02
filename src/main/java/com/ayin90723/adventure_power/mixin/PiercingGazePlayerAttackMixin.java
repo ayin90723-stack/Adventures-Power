@@ -77,21 +77,36 @@ public class PiercingGazePlayerAttackMixin {
         }
 
         float healthBefore = HealthUtil.getHealthDirect(living);
+        // 本次 attack 作用域隔离：清除标记，只消费"本次 hurt 期间"set 的值
+        //（否则环境噪声 hurt（怪物互殴等）的置位会被本次误消费，导致事件漏补发）
+        PiercingGazeUtil.clearVanillaHurtEventPosted();
         boolean hurtResult = target.hurt(source, amount);
 
         // 实际扣血就放行（不管 hurtResult 真假）。用 getHealthDirect 直读 DataItem，
         // 防 Boss 用 ASM/Mixin 改写 getHealth() 返回假值（Fantasy Ending delta 式）。
         // 覆盖：① 普攻原版怪 ② fdbosses 调 super 扣血但 return false ③ Boss 假成功/拦截
         if (HealthUtil.getHealthDirect(living) < healthBefore) {
-            // 扣血了，放行。但也 postHurtEvent，让影杀等监听器触发
-            // (fantasy_ending 等 ASM 改 hurt 的模组会跳过原版 ForgeHooks.onLivingHurt，导致 LivingHurtEvent 不 post)
-            PiercingGazeUtil.postHurtEvent(living, source, amount);
+            // 扣血了，放行。仅当原版管线未 post 事件时补发 LivingHurtEvent——
+            // 正常环境 hurt() 内 ForgeHooks.onLivingHurt（或 Layer 2.5 手动 post）已发过，
+            // 重复补发会让淬魂/嗜血/禁疗等监听器同 tick 双倍结算（影杀已有 SHADOW_KILL_TICKED 去重）。
+            // 消费式读取：标记只反映本次 hurt；ASM 跳过 ForgeHooks 的环境（fantasy_ending 等）标记为 false 仍需补发
+            if (!PiercingGazeUtil.consumeVanillaHurtEventPosted()) {
+                PiercingGazeUtil.postHurtEvent(living, source, amount);
+            }
             return true;
         }
 
         // 否则（返回 false / return true 假成功未扣血）-> 攻击者持破敌之眼时走穿透
-        if (!PiercingGazeUtil.hasPiercingGaze(self)) return hurtResult;
-        if (FriendlyFireProtection.isOwnerTarget(self, living)) return hurtResult;
+        if (!PiercingGazeUtil.hasPiercingGaze(self)) {
+            // 非破敌之眼：穿透不适用，但消费残留标记（本次 hurt 未走原版管线时置 false），
+            // 防止下次扣血攻击在 ASM 跳过 ForgeHooks 的环境误判"已 post"而不补发
+            PiercingGazeUtil.consumeVanillaHurtEventPosted();
+            return hurtResult;
+        }
+        if (FriendlyFireProtection.isOwnerTarget(self, living)) {
+            PiercingGazeUtil.consumeVanillaHurtEventPosted();
+            return hurtResult;
+        }
 
         // 穿透结算三连（与 Layer 2 情况 A 完全一致）：
         // 1. post LivingHurtEvent（取 max 防限伤，让淬魂/影杀 正常追加伤害）

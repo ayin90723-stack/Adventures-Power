@@ -233,6 +233,11 @@ public class AdventureProgress implements IAdventureProgress {
         return commandGrantedAt.getOrDefault(id, 0);
     }
 
+    @Override
+    public void setCommandGrantedAtCount(String id, int count) {
+        commandGrantedAt.put(id, count);
+    }
+
     // ===== 死亡抗拒 =====
 
     @Override

@@ -5,6 +5,7 @@ import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.FriendlyFireProtection;
+import com.ayin90723.adventure_power.util.PiercingGazeUtil;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -57,8 +58,10 @@ public class LootAllHandler {
         LivingEntity entity = event.getEntity();
         if (entity.level().isClientSide()) return;
 
-        // 仅玩家击杀触发（killer 为 ServerPlayer，便于传 LAST_DAMAGE_PLAYER）
-        if (!(event.getSource().getEntity() instanceof ServerPlayer player)) return;
+        // 仅玩家击杀触发（killer 为 ServerPlayer，便于传 LAST_DAMAGE_PLAYER）。
+        // 用 resolveAttacker 追溯发射者：弹射物击杀（弓箭/弩/三叉戟）的 getEntity()
+        // 是弹射物本身，与 MilestoneTriggerManager.onPlayerFirstKill 的追溯逻辑保持一致
+        if (!(PiercingGazeUtil.resolveAttacker(event.getSource()) instanceof ServerPlayer player)) return;
 
         // 服务端门禁
         var progress = AbilityGate.getActiveProgress(player, AbilityIds.LOOT_ALL).orElse(null);

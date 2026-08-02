@@ -2,6 +2,7 @@ package com.ayin90723.adventure_power.mixin;
 
 import com.ayin90723.adventure_power.util.DamageUtil;
 import com.ayin90723.adventure_power.util.FriendlyFireProtection;
+import com.ayin90723.adventure_power.util.HealthUtil;
 import com.ayin90723.adventure_power.util.PiercingGazeUtil;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -80,11 +81,17 @@ public abstract class PiercingGazeLivingEntityMixin {
     private static final ThreadLocal<Boolean> PIERCING_EVENT_POSTED = ThreadLocal.withInitial(() -> false);
     /** redirect 取 max 后的有效伤害量，供情况 C 补 actuallyHurt 时使用 */
     private static final ThreadLocal<Float> PIERCING_EFFECTIVE_AMOUNT = new ThreadLocal<>();
+    /** 本层伤害结算前的真实血量（onHurtEnter 缓存）——RETURN 注入时 actuallyHurt 已执行，
+     *  此时 getHealth() 是扣血后值，若用作 afterPierceFallback 的参照会被判定"血量未恢复"
+     *  而对普通命中重复直写（双重扣血） */
+    private static final ThreadLocal<Float> PIERCING_HEALTH_BEFORE = new ThreadLocal<>();
+    // 注：事件已 post 标记（VANILLA_HURT_EVENT_POSTED）与消费方法已移至 PiercingGazeUtil——
+    // @Mixin 类禁止非 private static 方法（Mixin Applicator 会尝试混入目标类导致 InvalidMixinException）。
 
-    /** 递归调用栈帧：保存外层 (inPiercing, eventPosted, effectiveAmount) 三态，effectiveAmount 可为 null */
-    private record PiercingStackFrame(boolean inPiercing, boolean eventPosted, Float effectiveAmount) {}
+    /** 递归调用栈帧：保存外层 (inPiercing, eventPosted, effectiveAmount, healthBefore) 四态，effectiveAmount/healthBefore 可为 null */
+    private record PiercingStackFrame(boolean inPiercing, boolean eventPosted, Float effectiveAmount, Float healthBefore) {}
 
-    /** 递归调用栈：保存外层 (IN_PIERCING, POSTED, AMOUNT) 三态，hurt HEAD 压栈、RETURN 弹栈 */
+    /** 递归调用栈：保存外层 (IN_PIERCING, POSTED, AMOUNT, HEALTH_BEFORE) 四态，hurt HEAD 压栈、RETURN 弹栈 */
     private static final ThreadLocal<Deque<PiercingStackFrame>> PIERCING_STACK = ThreadLocal.withInitial(ArrayDeque::new);
 
     @Inject(method = "m_6469_", at = @At("HEAD"))
@@ -98,14 +105,19 @@ public abstract class PiercingGazeLivingEntityMixin {
             IN_PIERCING.set(false);
             PIERCING_EVENT_POSTED.set(false);
             PIERCING_EFFECTIVE_AMOUNT.remove();
+            PIERCING_HEALTH_BEFORE.remove();
         }
         // 压栈保存外层状态，重置本层（递归 hurt 不污染外层）
         stack.push(new PiercingStackFrame(
-            IN_PIERCING.get(), PIERCING_EVENT_POSTED.get(), PIERCING_EFFECTIVE_AMOUNT.get()
+            IN_PIERCING.get(), PIERCING_EVENT_POSTED.get(), PIERCING_EFFECTIVE_AMOUNT.get(),
+            PIERCING_HEALTH_BEFORE.get()
         ));
         IN_PIERCING.set(false);
         PIERCING_EVENT_POSTED.set(false);
         PIERCING_EFFECTIVE_AMOUNT.remove();
+        // 缓存伤害结算前的真实血量（直读 DataItem，防 getHealth 被 ASM/TrueHealth 篡改）
+        LivingEntity self = (LivingEntity) (Object) this;
+        PIERCING_HEALTH_BEFORE.set(HealthUtil.getHealthDirect(self));
     }
 
     /**
@@ -168,9 +180,13 @@ public abstract class PiercingGazeLivingEntityMixin {
 
                 boolean wasBlocked = !cir.getReturnValue();
                 boolean posted = PIERCING_EVENT_POSTED.get();
-                // 在 actuallyHurt 执行前捕捉血量，用于检测 Boss 是否通过注入
-                // setHealth() 在伤害后恢复了血量（如亚波伦 RevelationFix 的 redirectSetHealth）
-                float healthBefore = self.getHealth();
+                // 伤害结算前的真实血量（onHurtEnter 缓存）——RETURN 时 actuallyHurt 已执行，
+                // self.getHealth() 是扣血后值，若用它作参照，普通命中会被判定"血量未恢复"
+                // 而触发 afterPierceFallback 的兜底直写，造成双重扣血。
+                // 用于检测 Boss 是否通过注入 setHealth() 在伤害后恢复血量
+                // （如亚波伦 RevelationFix 的 redirectSetHealth）。
+                float healthBefore = PIERCING_HEALTH_BEFORE.get() != null
+                    ? PIERCING_HEALTH_BEFORE.get() : self.getHealth();
 
                 if (wasBlocked) {
                     // 情况 A/C：actuallyHurt 未由原版执行（Boss 拦截 hurt 不调 super），需主动直写
@@ -182,6 +198,10 @@ public abstract class PiercingGazeLivingEntityMixin {
                         // 情况 A：Boss 完全拦截 hurt()（未走到 ForgeHooks.onLivingHurt），redirect 未触发
                         // -> 补 post LivingHurtEvent（取 max 防限伤）让淬魂等附魔正常处理
                         effectiveAmount = PiercingGazeUtil.postHurtEvent(self, source, amount);
+                        // 标记事件已发：Layer 0 的扣血分支据此不补发（防止淬魂/嗜血双结算）。
+                        // 必须在此 mark——否则 I 帧连击场景（invulnerableTime 检查在
+                        // ForgeHooks 调用点之前，redirect 不触发）会读到陈旧标记而重复补发
+                        PiercingGazeUtil.markVanillaHurtEventPosted();
                     }
                     // actuallyHurt 直写 + 血量兜底 + 清无敌字段
                     PiercingGazeUtil.invokeActuallyHurt(self, source, effectiveAmount);
@@ -205,11 +225,17 @@ public abstract class PiercingGazeLivingEntityMixin {
                 } else {
                     PIERCING_EFFECTIVE_AMOUNT.remove();
                 }
+                if (outer.healthBefore() != null) {
+                    PIERCING_HEALTH_BEFORE.set(outer.healthBefore());
+                } else {
+                    PIERCING_HEALTH_BEFORE.remove();
+                }
             } else {
                 // 栈空（最外层 hurt 退出）-> 彻底清理，防 ThreadLocal 泄漏
                 IN_PIERCING.remove();
                 PIERCING_EVENT_POSTED.remove();
                 PIERCING_EFFECTIVE_AMOUNT.remove();
+                PIERCING_HEALTH_BEFORE.remove();
             }
         }
     }
@@ -245,11 +271,14 @@ public abstract class PiercingGazeLivingEntityMixin {
         // 使用精确 msgId 匹配而非 BYPASSES_INVULNERABILITY 标签检查，
         // 避免将 RevelationFix fe_power 误判为 MME 内部调用。
         if (DamageUtil.isInternalSource(source)) {
+            // 事件已由原版管线 post（供 Layer 0 决定是否补发）
+            PiercingGazeUtil.markVanillaHurtEventPosted();
             return ForgeHooks.onLivingHurt(entity, source, amount);
         }
 
         // 非破敌之眼攻击 -> 走原版管线
         if (!PiercingGazeUtil.isPiercingGazeAttack(source, entity)) {
+            PiercingGazeUtil.markVanillaHurtEventPosted();
             return ForgeHooks.onLivingHurt(entity, source, amount);
         }
 
@@ -259,6 +288,7 @@ public abstract class PiercingGazeLivingEntityMixin {
         Deque<PiercingStackFrame> stack = PIERCING_STACK.get();
         PiercingStackFrame outer = stack.peek();
         if (outer != null && outer.inPiercing()) {
+            PiercingGazeUtil.markVanillaHurtEventPosted();
             return amount;
         }
 
@@ -273,6 +303,7 @@ public abstract class PiercingGazeLivingEntityMixin {
         IN_PIERCING.set(true);
         PIERCING_EVENT_POSTED.set(true);
         PIERCING_EFFECTIVE_AMOUNT.set(effective);
+        PiercingGazeUtil.markVanillaHurtEventPosted();
         return effective;
     }
 }

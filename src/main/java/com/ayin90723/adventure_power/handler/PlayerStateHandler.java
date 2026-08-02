@@ -7,15 +7,18 @@ import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.PersistentDataKeys;
+import com.ayin90723.adventure_power.util.ProgressCache;
 import com.ayin90723.adventure_power.util.RejectHealthManipUtil;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import net.minecraft.ChatFormatting;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundSetExperiencePacket;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.DamageTypeTags;
@@ -92,6 +95,10 @@ public class PlayerStateHandler {
     public static void onPlayerDeath(LivingDeathEvent event) {
         if (!(event.getEntity() instanceof Player player)) return;
         if (player.level().isClientSide()) return;
+        // 死亡已被取消（如死亡抗拒 HIGHEST 救回）时不保存/清零：
+        // Forge 事件 cancel 不中断后续监听器分发，本监听器（LOW）在取消后仍会执行，
+        // 否则觉醒分支会把经验清零存入 NBT，而玩家实际存活——经验永久丢失（无消费路径）。
+        if (event.isCanceled()) return;
 
         AbilityGate.getActiveProgress(player, AbilityIds.SOUL_BIND).ifPresent(progress -> {
             // 只保存正面效果（与能力描述"保留正面效果"一致），负面效果随死亡清除
@@ -205,6 +212,34 @@ public class PlayerStateHandler {
         // 否则 value 强引用会阻止 ServerPlayer 被 GC（内存泄漏）
         RejectHealthManipUtil.clearOwner(event.getEntity());
         // 不清理 ORIGINAL_MOVE_SPEED：庇护期间登出后,重登时 onTick 的 else 分支需 remove 恢复原始速度
+    }
+
+    // ========================================================================
+    //  觉醒玩家名 — 前缀 + 金色（聊天/Tab 列表/头顶名牌/击杀消息全走 getDisplayName()）
+    // ========================================================================
+
+    /**
+     * 全部里程碑达成（持有冒险的终点）的玩家，显示名加金色称号前缀。
+     * Forge 1.20.1 的 Player.getDisplayName() 经 ForgeHooks.getDisplayName post 本事件：
+     * 服务端（聊天广播/玩家列表/死亡消息）与客户端（头顶名牌渲染）均触发，两端一致显示。
+     * 每次事件传入的 displayname 都是原始名字（getName()），前缀不叠加；
+     * ProgressCache 按 tick 缓存 progress，避免名牌每帧渲染时重复 resolve。
+     * 前缀内容由 lang 键 name.adventure_power.awakened_prefix 控制（zh/en 可自定义，如 [觉醒冒险者]）。
+     * <p>
+     * 优先级 HIGH：保证先于多数叠加式模组（权限/称号插件，NORMAL/LOW）执行——
+     * 它们在当前 displayname 上追加时保留本模组前缀；完全覆盖式的模组
+     * （setDisplayname 全新组件丢弃原值）无法防御，属事件机制固有边界。
+     */
+    @SubscribeEvent(priority = net.minecraftforge.eventbus.api.EventPriority.HIGH)
+    public static void onNameFormat(net.minecraftforge.event.entity.player.PlayerEvent.NameFormat event) {
+        Player player = event.getEntity();
+        IAdventureProgress progress = ProgressCache.get(player);
+        if (progress == null) return;
+        if (!progress.isFullyUnlocked()) return;
+        // 称号前缀 + 整体金色（copy 防修改原 Component；先 withStyle 让前缀继承金色）
+        event.setDisplayname(Component.translatable("name.adventure_power.awakened_prefix")
+            .append(event.getDisplayname().copy().withStyle(ChatFormatting.GOLD))
+            .withStyle(ChatFormatting.GOLD));
     }
 
     /** 游戏模式切换后恢复翱翔飞行能力（原版会在切回生存时重置 mayfly）。
@@ -446,12 +481,15 @@ public class PlayerStateHandler {
             }
             // 标记飞行由翱翔授予，用于关闭时精准回收
             progress.setSoarGrantedFlight(true);
-            // 觉醒：飞行速度 +50%（只在值不同时写入，不在 tick 中重复乘法避免指数爆炸）
-            double targetSpeed = progress.isFullyUnlocked()
-                ? 0.05 * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SOAR_SPEED.get()
-                : 0.05;
-            if (Math.abs(player.getAbilities().getFlyingSpeed() - targetSpeed) > 0.0001) {
-                player.getAbilities().setFlyingSpeed((float) targetSpeed);
+            // 觉醒：飞行速度 +50%——仅觉醒覆盖（非觉醒保持原版 0.05，不覆盖其他模组对
+            // flyingSpeed 的设定）；写入后同步客户端（setFlyingSpeed 不会自动发包，
+            // 客户端 LocalPlayer 保持旧速度直到下次 abilities 同步）
+            if (progress.isFullyUnlocked()) {
+                double targetSpeed = 0.05 * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SOAR_SPEED.get();
+                if (Math.abs(player.getAbilities().getFlyingSpeed() - targetSpeed) > 0.0001) {
+                    player.getAbilities().setFlyingSpeed((float) targetSpeed);
+                    player.onUpdateAbilities();
+                }
             }
         } else {
             // 能力关闭/未解锁时回收翱翔授予的飞行，不没收装备或其他模组提供的飞行
@@ -558,16 +596,18 @@ public class PlayerStateHandler {
                 }
             }
             double bonus = pieces * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_UNDYING_ARMOR_BONUS.get();
-            if (existing != null) {
-                if (Math.abs(existing.getAmount() - bonus) > 0.001) {
+            // 注意：值未变时不能 return——武器加成分支仍需检查
+            // （否则武器 modifier 被外部移除/配置热重载后永不补挂，直到穿脱甲或 Clone）
+            if (existing != null && Math.abs(existing.getAmount() - bonus) <= 0.001) {
+                // value unchanged，跳过重挂
+            } else {
+                if (existing != null) {
                     armorAttr.removeModifier(AWAKEN_UNDYING_ARMOR_UUID);
-                } else {
-                    return; // value unchanged
                 }
+                armorAttr.addPermanentModifier(new net.minecraft.world.entity.ai.attributes.AttributeModifier(
+                    AWAKEN_UNDYING_ARMOR_UUID, "awakened_undying_armor", bonus,
+                    net.minecraft.world.entity.ai.attributes.AttributeModifier.Operation.ADDITION));
             }
-            armorAttr.addPermanentModifier(new net.minecraft.world.entity.ai.attributes.AttributeModifier(
-                AWAKEN_UNDYING_ARMOR_UUID, "awakened_undying_armor", bonus,
-                net.minecraft.world.entity.ai.attributes.AttributeModifier.Operation.ADDITION));
         }
 
         var atkAttr = player.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.ATTACK_DAMAGE);

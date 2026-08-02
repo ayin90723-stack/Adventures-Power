@@ -7,6 +7,7 @@ import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.util.AbilityGate;
+import com.ayin90723.adventure_power.util.HealthUtil;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
@@ -91,6 +92,13 @@ public class ExplorationAbilityHandler {
                     AbilityGate.effectiveCount(progress, AbilityIds.EXTENDED_REACH),
                     progress.isFullyUnlocked());
             }
+            // 修复：vitality/swift 同样需要关闭恢复——三能力全关时
+            // maxHealth baseValue 加成与速度 modifier 会残留（直到重新开启任一能力或登出）。
+            // sync 内部自带残留判定（无记录时按当前值判断是否本模组残留），从未启用的玩家为 no-op。
+            syncVitalityAttribute(player, false,
+                AbilityGate.effectiveCount(progress, AbilityIds.VITALITY), progress.isFullyUnlocked());
+            syncSpeedAttribute(player, false,
+                AbilityGate.effectiveCount(progress, AbilityIds.SWIFT), progress.isFullyUnlocked());
             return;
         }
 
@@ -183,38 +191,62 @@ public class ExplorationAbilityHandler {
     private static void syncVitalityAttribute(Player player, boolean enabled, int milestones, boolean fullyUnlocked) {
         var attr = player.getAttribute(Attributes.MAX_HEALTH);
         if (attr == null) return;
+        Ability ability = AbilityRegistry.get(AbilityIds.VITALITY);
+        if (ability == null) return;
 
         double currentVal = attr.getBaseValue();
+        // activeBonus = 启用时会写入的加成（与 enabled 无关，供残留判定用）
+        float bonus = ability.value(milestones);
+        if (fullyUnlocked) {
+            bonus = (float) Math.ceil(bonus * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get());
+        }
 
         if (enabled) {
-            Ability ability = AbilityRegistry.get(AbilityIds.VITALITY);
-            if (ability == null) return;
-            float bonus = ability.value(milestones);
-            if (fullyUnlocked) {
-                bonus = (float) Math.ceil(bonus * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get());
-            }
             double expected = 20.0 + bonus;
             if (Math.abs(currentVal - expected) > 0.001) {
                 ORIGINAL_MAX_HEALTH.putIfAbsent(player.getUUID(), currentVal);
                 attr.setBaseValue(expected);
                 // 如果当前血量超过新上限，裁剪到新上限
                 if (player.getHealth() > expected) {
-                    player.setHealth((float) expected);
+                    clampHealthTo(player, (float) expected);
                 }
             }
         } else {
             // 关闭能力：恢复到本模组记录的原值（其他模组的 baseValue 修改不被覆盖）。
-            // 注意：玩家可能从未解锁 vitality（putIfAbsent 从未触发），此时 baseValue 可能
-            // 已被其他模组修改——首次执行恢复前先记录当前值为原值，避免每 tick 踩回 20。
-            ORIGINAL_MAX_HEALTH.putIfAbsent(player.getUUID(), currentVal);
-            double restore = ORIGINAL_MAX_HEALTH.get(player.getUUID());
+            Double restore = ORIGINAL_MAX_HEALTH.get(player.getUUID());
+            if (restore == null) {
+                // 无记录（从未启用，或服务端重启后静态 Map 清空、player.dat 已保存 20+bonus 的残留值）：
+                // 残留判定——当前值 ≈ 本模组启用时会写的值（20+bonus）则判定为本模组残留，回归默认 20；
+                // 否则视为其他模组的修改，**不记录、不操作**——若无条件记录当前值为原值，
+                // 从未启用过本能力的玩家其 baseValue 会被永久"锁存"，之后其他模组的临时修改
+                // 会被本模组每 tick 还原并强制裁剪血量（三能力全关的短路分支每 tick 调用本方法）。
+                double own = 20.0 + bonus;
+                if (Math.abs(currentVal - own) > 0.001) return;
+                restore = 20.0;
+                ORIGINAL_MAX_HEALTH.put(player.getUUID(), restore);
+            }
             if (Math.abs(currentVal - restore) > 0.001) {
                 // 裁剪血量到目标上限以下再调低上限，防止血量卡在异常值
                 if (player.getHealth() > restore) {
-                    player.setHealth((float) restore);
+                    clampHealthTo(player, restore.floatValue());
                 }
                 attr.setBaseValue(restore);
             }
+        }
+    }
+
+    /**
+     * 模组内部血量裁剪（降上限时把血量裁到新上限）。
+     * 包 {@link HealthUtil#INTERNAL_HEALTH_WRITE} 标记：放行 RejectHealthManipMixin 的
+     * reject_manip 拦截（否则"降血被拒 + 上限已降"造成 health > maxHealth 卡死），
+     * 同时让 TrueHealthMixin 同步备份（否则 backup 冻结旧值、getHealth 会把裁剪反向修复）。
+     */
+    private static void clampHealthTo(Player player, float target) {
+        HealthUtil.INTERNAL_HEALTH_WRITE.set(true);
+        try {
+            player.setHealth(target);
+        } finally {
+            HealthUtil.INTERNAL_HEALTH_WRITE.remove();
         }
     }
 
@@ -314,8 +346,10 @@ public class ExplorationAbilityHandler {
 
         var healthAttr = player.getAttribute(Attributes.MAX_HEALTH);
         if (healthAttr != null) {
-            double restore = ORIGINAL_MAX_HEALTH.getOrDefault(uuid, 20.0);
-            if (Math.abs(healthAttr.getBaseValue() - restore) > 0.001) {
+            // 与 BLOCK_REACH 一致：仅本模组实际写入过才恢复原值——从未解锁坚韧之躯的玩家跳过，
+            // 避免覆盖其他模组对 maxHealth baseValue 的持久化修改
+            Double restore = ORIGINAL_MAX_HEALTH.get(uuid);
+            if (restore != null && Math.abs(healthAttr.getBaseValue() - restore) > 0.001) {
                 healthAttr.setBaseValue(restore);
             }
         }

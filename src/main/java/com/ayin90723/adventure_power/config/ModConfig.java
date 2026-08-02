@@ -178,7 +178,7 @@ public class ModConfig {
         BUILDER.pop();
 
         BUILDER.push("伤害抗性");
-        DAMAGE_RESIST_BASE = BUILDER.comment("基础减伤率（%），里程碑4时的值")
+        DAMAGE_RESIST_BASE = BUILDER.comment("基础减伤率（%），里程碑6时的值")
             .defineInRange("damage_resist_base", 10, 0, 100);
         DAMAGE_RESIST_PER_MILESTONE = BUILDER.comment("每额外里程碑增加的减伤率（%）")
             .defineInRange("damage_resist_per_milestone", 5, 0, 50);

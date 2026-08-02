@@ -47,6 +47,10 @@ public final class PersistentDataKeys {
         return "MME_Milestone_" + Character.toUpperCase(id.charAt(0)) + id.substring(1);
     }
 
+    /** 指令后门解锁的被禁用能力（物品 NBT 子键：CompoundTag，key=能力ID, value=解锁时刻里程碑数）。
+     *  第三层备份（物品 NBT）的一部分，capability/persistentData 丢失时兜底恢复 */
+    public static final String COMMAND_GRANTED_KEY = "MME_CommandGranted";
+
     // ==================== 禁疗之触 — 实体 persistentData ====================
 
     /** 禁疗之触到期时间（long, gameTime） */

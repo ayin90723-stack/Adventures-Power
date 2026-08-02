@@ -22,6 +22,7 @@ import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -74,6 +75,8 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
     /** 能力 tab hover 信息框的 progress 快照（每 20 tick 刷新，避免每帧 capability resolve） */
     private Optional<IAdventureProgress> abilityHoverProgress = Optional.empty();
     private long abilityHoverProgressTick = -1;
+    /** 悬停信息框内容缓存（按能力 ID；随 20 tick 快照基准失效）——避免悬停期间每帧 wrapText/格式化 */
+    private final Map<String, InfoBoxCacheEntry> infoBoxCache = new HashMap<>();
 
     // ===== 布局 =====
     private int leftX;
@@ -244,10 +247,16 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        // Buff tab 周期刷新效果列表
+        // 能力/Buff tab 周期刷新（面板打开期间里程碑解锁/能力开关变更时列表与开关状态需跟进。
+        // 注意：AdventureSyncPacket 只更新 capability，不触达本屏幕——能力 tab 的
+        // 权威状态刷新完全依赖这里的 20-tick 兜底重建）
         refreshTick++;
-        if (currentTab == Tab.BUFF && refreshTick % 20 == 0) {
-            refreshDisplayEffects();
+        if (refreshTick % 20 == 0) {
+            if (currentTab == Tab.BUFF) {
+                refreshDisplayEffects();
+            } else if (currentTab == Tab.ABILITY) {
+                initAbilityData();
+            }
         }
 
         this.renderBackground(graphics);
@@ -341,10 +350,81 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
                 abilityHoverProgressTick = tick;
                 abilityHoverProgress = mc.player != null
                     ? AdventureProgressCapability.getAdventureProgress(mc.player) : Optional.empty();
+                infoBoxCache.clear(); // 快照基准变化 -> 悬停内容缓存失效（内容依赖 progress/开关状态）
             }
+        } else {
+            // level 为空（维度切换/重连窄窗口）：清空快照与缓存并重置 tick 基准——
+            // 否则过渡结束后若落入同一 /20 桶，旧快照/旧缓存仍残留
+            abilityHoverProgress = Optional.empty();
+            abilityHoverProgressTick = -1;
+            infoBoxCache.clear();
         }
         var progress = abilityHoverProgress.orElse(null);
 
+        // 内容缓存：悬停期间每帧渲染，wrapText/String.format/I18n.get 全部预计算一次
+        //（与 Buff tab 的 displayEffectTimes 预计算同一模式，避免每帧字符级测量）
+        InfoBoxCacheEntry cached = infoBoxCache.get(abilityId);
+        if (cached == null) {
+            cached = buildInfoBoxContent(ability, progress);
+            infoBoxCache.put(abilityId, cached);
+        }
+
+        // ---- 位置与宽度：内容自然宽度来自缓存，再决定框宽（自适应不撑满） ----
+        int rightSpace = this.width - (leftX + PANEL_WIDTH + 10) - 8;
+        int leftSpace = leftX - 10 - 8;
+        int naturalWidth = cached.naturalWidth;
+
+        int sideX;
+        int boxWidth;
+        if (rightSpace >= MIN_INFO_BOX_SIDE) {
+            sideX = leftX + PANEL_WIDTH + 10;
+            boxWidth = Math.min(naturalWidth, rightSpace);
+        } else if (leftSpace >= MIN_INFO_BOX_SIDE) {
+            boxWidth = Math.min(naturalWidth, leftSpace);
+            boxWidth = Math.max(boxWidth, 80); // 先抬下限再算 sideX，防右缘越过 leftX
+            sideX = leftX - 10 - boxWidth;
+        } else {
+            boxWidth = Math.min(naturalWidth, Math.max(60, rightSpace));
+            boxWidth = Math.max(boxWidth, 80); // 下限保证不塌成一条（须在算 sideX 前，否则右缘溢出屏幕）
+            sideX = this.width - boxWidth - 8;
+        }
+        if (rightSpace >= MIN_INFO_BOX_SIDE || leftSpace >= MIN_INFO_BOX_SIDE) {
+            boxWidth = Math.max(boxWidth, 80);
+        }
+
+        List<String> lines = cached.lines;
+
+        int boxHeight = lines.size() * INFO_BOX_LINE_SPACING + INFO_BOX_PADDING * 2 - 1;
+        // 高度：顶部对齐；内容超高时底部锚定；极端超高时贴顶 + 绘制裁剪，保证不溢出屏幕
+        int boxY = Math.max(4, Math.min(TOP_Y, this.height - boxHeight - 4));
+
+        graphics.fill(sideX, boxY, sideX + boxWidth, boxY + boxHeight, 0xBB000000);
+        graphics.fill(sideX, boxY, sideX + boxWidth, boxY + 1, 0x66FFFFFF);
+        graphics.fill(sideX, boxY + boxHeight - 1, sideX + boxWidth, boxY + boxHeight, 0x66FFFFFF);
+        graphics.fill(sideX, boxY, sideX + 1, boxY + boxHeight, 0x66FFFFFF);
+        graphics.fill(sideX + boxWidth - 1, boxY, sideX + boxWidth, boxY + boxHeight, 0x66FFFFFF);
+
+        int lineY = boxY + INFO_BOX_PADDING;
+        for (String line : lines) {
+            if (lineY + INFO_BOX_LINE_SPACING > this.height - 4) break; // 底部裁剪，防溢出
+            graphics.drawString(this.font, line, sideX + INFO_BOX_PADDING, lineY, COLOR_WHITE);
+            lineY += INFO_BOX_LINE_SPACING;
+        }
+    }
+
+    /** 悬停信息框缓存条目：最终渲染行 + 内容自然宽度（含 padding） */
+    private static class InfoBoxCacheEntry {
+        final List<String> lines;
+        final int naturalWidth;
+        InfoBoxCacheEntry(List<String> lines, int naturalWidth) {
+            this.lines = lines;
+            this.naturalWidth = naturalWidth;
+        }
+    }
+
+    /** 预构建信息框内容（悬停缓存源）：预计算 wrapText/数值文本/觉醒文案与自然宽度 */
+    private InfoBoxCacheEntry buildInfoBoxContent(Ability ability, IAdventureProgress progress) {
+        String abilityId = ability.id();
         // ---- 预构建内容行（先收集纯文本，再按实际宽度算框宽） ----
         List<String> headerParts = new ArrayList<>();
         boolean isDisabled = disabledAbilities.contains(abilityId);
@@ -362,7 +442,7 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         String awakenedKey = "ability.adventure_power." + abilityId + ".awakened";
         boolean hasAwakened = progress != null && progress.isFullyUnlocked() && I18n.exists(awakenedKey);
 
-        // ---- 位置与宽度：先按最大宽度测出内容自然宽度，再决定框宽（自适应不撑满） ----
+        // ---- 宽度：按最大可用宽度测内容自然宽度 ----
         int rightSpace = this.width - (leftX + PANEL_WIDTH + 10) - 8;
         int leftSpace = leftX - 10 - 8;
         int candidateMaxWidth = Math.min(INFO_BOX_MAX_WIDTH, Math.max(rightSpace, leftSpace));
@@ -384,20 +464,6 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         for (String s : awakenedLines) naturalWidth = Math.max(naturalWidth, this.font.width(s));
         naturalWidth += INFO_BOX_PADDING * 2;
 
-        int sideX;
-        int boxWidth;
-        if (rightSpace >= MIN_INFO_BOX_SIDE) {
-            sideX = leftX + PANEL_WIDTH + 10;
-            boxWidth = Math.min(naturalWidth, rightSpace);
-        } else if (leftSpace >= MIN_INFO_BOX_SIDE) {
-            boxWidth = Math.min(naturalWidth, leftSpace);
-            sideX = leftX - 10 - boxWidth;
-        } else {
-            boxWidth = Math.min(naturalWidth, Math.max(60, rightSpace));
-            sideX = this.width - boxWidth - 8;
-        }
-        boxWidth = Math.max(boxWidth, 80); // 下限保证不塌成一条
-
         // 组装最终行（带颜色码）
         List<String> lines = new ArrayList<>(headerParts);
         lines.addAll(descLines);
@@ -406,23 +472,7 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
             lines.add("§6" + I18n.get("screen.adventure_power.awakened_title"));
             lines.addAll(awakenedLines);
         }
-
-        int boxHeight = lines.size() * INFO_BOX_LINE_SPACING + INFO_BOX_PADDING * 2 - 1;
-        // 高度：顶部对齐；内容超高时底部锚定；极端超高时贴顶 + 绘制裁剪，保证不溢出屏幕
-        int boxY = Math.max(4, Math.min(TOP_Y, this.height - boxHeight - 4));
-
-        graphics.fill(sideX, boxY, sideX + boxWidth, boxY + boxHeight, 0xBB000000);
-        graphics.fill(sideX, boxY, sideX + boxWidth, boxY + 1, 0x66FFFFFF);
-        graphics.fill(sideX, boxY + boxHeight - 1, sideX + boxWidth, boxY + boxHeight, 0x66FFFFFF);
-        graphics.fill(sideX, boxY, sideX + 1, boxY + boxHeight, 0x66FFFFFF);
-        graphics.fill(sideX + boxWidth - 1, boxY, sideX + boxWidth, boxY + boxHeight, 0x66FFFFFF);
-
-        int lineY = boxY + INFO_BOX_PADDING;
-        for (String line : lines) {
-            if (lineY + INFO_BOX_LINE_SPACING > this.height - 4) break; // 底部裁剪，防溢出
-            graphics.drawString(this.font, line, sideX + INFO_BOX_PADDING, lineY, COLOR_WHITE);
-            lineY += INFO_BOX_LINE_SPACING;
-        }
+        return new InfoBoxCacheEntry(lines, naturalWidth);
     }
 
     /**
@@ -572,10 +622,13 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         int startRow = Math.max(0, scrollOffset / MILESTONE_ROW_HEIGHT);
         int endRow = Math.min(total, startRow + visibleRows + 1);
 
-        // progress 快照每 20 tick 刷新一次，避免每帧 capability resolve
+        // progress 快照每 20 tick 刷新一次，避免每帧 capability resolve。
+        // 注意：player 非空而 level 为空的窄窗口（维度切换/重连期间面板保持打开）需一并守卫，
+        // 否则 mc.level.getGameTime() NPE（与 renderAbilityInfoBox / ClientHudDataCache 的守卫一致）
         Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null) {
+        if (mc.player == null || mc.level == null) {
             milestoneProgress = Optional.empty();
+            milestoneProgressRefreshTick = -1; // 重置基准：level 恢复后立即刷新，防同 /20 桶残留旧快照
         } else {
             long tick = mc.level.getGameTime() / 20;
             if (milestoneProgressRefreshTick != tick) {
@@ -678,6 +731,9 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
                 String id = abilityEntries.get(i).getKey();
                 if (disabledAbilities.contains(id)) disabledAbilities.remove(id);
                 else disabledAbilities.add(id);
+                // 开关状态变化 -> 悬停信息框缓存失效（头部 ●/○ 图标固化在缓存条目中，
+                // 不失效会显示旧开关状态直到下一个 20 tick 快照基准）
+                infoBoxCache.remove(id);
                 NetworkHandler.sendAbilityToggle(id);
                 return true;
             }

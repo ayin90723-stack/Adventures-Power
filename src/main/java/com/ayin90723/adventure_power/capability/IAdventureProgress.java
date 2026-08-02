@@ -45,6 +45,9 @@ public interface IAdventureProgress {
     /** 指令解锁该能力时的已解锁里程碑数（成长基准：解锁后数值=基础值，之后随进度正常成长） */
     int getCommandGrantedAtCount(String id);
 
+    /** 从物品 NBT 兜底恢复指令解锁记录（默认空实现——仅 AdventureProgress 需要） */
+    default void setCommandGrantedAtCount(String id, int count) {}
+
     // ===== 死亡抗拒 =====
 
     long getDeathDefyInvulEnd();

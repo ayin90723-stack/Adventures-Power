@@ -145,6 +145,9 @@ public class PlayerTickHandler {
             if (effect.getEffect().getCategory() == MobEffectCategory.BENEFICIAL) {
                 String effectId = ForgeRegistries.MOB_EFFECTS.getKey(effect.getEffect()).toString();
                 if (excluded.contains(effectId)) continue;
+                // 无限时长效果（duration=-1，如潮涌能量/部分模组永久 buff）不需要续期，
+                // 否则会被降级为有限时长并每 60 tick 反复重建 + GLOW 粒子刷屏
+                if (effect.getDuration() < 0) continue;
                 if (effect.getDuration() < threshold) {
                     extended = true;
                     // 重建时携带 factorData（潮涌能量等环境效果数据），避免续期后丢失环境属性

@@ -5,10 +5,12 @@ import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.network.NetworkHandler;
 import com.ayin90723.adventure_power.ui.ActiveSkillHudOverlay;
 import com.ayin90723.adventure_power.ui.AdventureMainScreen;
+import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.InputEvent.Key;
+import net.minecraftforge.client.event.InputEvent.MouseButton;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber.Bus;
@@ -16,12 +18,10 @@ import net.minecraftforge.fml.common.Mod.EventBusSubscriber.Bus;
 @EventBusSubscriber(value = Dist.CLIENT, bus = Bus.FORGE)
 public class InputHandler {
    // 按键状态追踪器（封装玩家引用变化重置 + 上升沿检测）
-   private static final KeyButton abilityMgmt = new KeyButton();
    private static final KeyButton skillSwitch = new KeyButton();
    private static final KeyButton skillActivate = new KeyButton();
 
    // 玩家引用追踪（按重置分组）
-   private static Player lastPlayer = null;
    private static Player lastActiveSkillPlayer = null;
 
    @SubscribeEvent
@@ -29,24 +29,15 @@ public class InputHandler {
       if (Minecraft.getInstance().player != null) {
          Minecraft mc = Minecraft.getInstance();
          if (mc.level != null && mc.player != null) {
-            // 玩家引用变化（死亡重生/跨维度）-> 重置面板按键状态
-            if (mc.player != lastPlayer) {
-               lastPlayer = mc.player;
-               abilityMgmt.reset();
-            }
             // P 键：冒险统一面板（开关式：已打开则关闭，避免重建面板跳回能力 tab）
-            if (abilityMgmt.consumePress(ClientModEvents.ABILITY_MANAGEMENT.isDown())) {
-               if (mc.screen instanceof AdventureMainScreen) {
-                  mc.setScreen(null);
-                  return;
-               }
-               if (AdventureProgressCapability.isAdventurer(mc.player)
-                   || AdventureProgressCapability.isFullyUnlocked(mc.player)) {
-                  mc.setScreen(new AdventureMainScreen());
-               } else {
-                  AdventureProgressCapability
-                     .requestSyncAndOpenScreen(AdventureProgressCapability.PENDING_ABILITY);
-               }
+            // 注意：屏幕打开期间 KeyMapping.isDown() 恒 false（按键状态冻结 + setScreen 时
+            // releaseAll 清空），原 consumePress 的"已打开则关闭"分支不可达——
+            // 改用输入事件 key/action 直接匹配（action==1 = GLFW_PRESS，过滤长按 REPEAT）。
+            // 仅匹配键盘类型绑定：InputEvent.Key 只由键盘触发，鼠标绑定走 onMouseButton
+            InputConstants.Key bound = ClientModEvents.ABILITY_MANAGEMENT.getKey();
+            if (bound.getType() == InputConstants.Type.KEYSYM
+                && event.getKey() == bound.getValue() && event.getAction() == 1) {
+               handleAbilityScreenKey(mc);
             }
 
             // 主动技能 - 门禁检查（体验预检，服务端另有校验）
@@ -90,6 +81,47 @@ public class InputHandler {
                      }
                   });
                }
+            }
+         }
+      }
+   }
+
+   /**
+    * P 键打开/关闭冒险统一面板（键盘与鼠标绑定共用）。
+    * 其他屏幕（聊天/物品栏等）打开时忽略，避免误触面板。
+    */
+   private static void handleAbilityScreenKey(Minecraft mc) {
+      if (mc.screen instanceof AdventureMainScreen) {
+         mc.setScreen(null);
+      } else if (mc.screen == null) {
+         if (AdventureProgressCapability.isAdventurer(mc.player)
+             || AdventureProgressCapability.isFullyUnlocked(mc.player)) {
+            mc.setScreen(new AdventureMainScreen());
+         } else {
+            AdventureProgressCapability
+               .requestSyncAndOpenScreen(AdventureProgressCapability.PENDING_ABILITY);
+         }
+      }
+   }
+
+   /**
+    * P 键（鼠标绑定）：InputEvent.Key 仅由键盘触发，玩家把 P 绑到鼠标键时
+    * 键盘事件永远匹配不到——补一路鼠标事件（action==1 = GLFW_PRESS）。
+    * 注意：InputEvent.MouseButton 在 MouseHandler.onPress 最开头触发（先于
+    * screen.mouseClicked）——面板打开时的任何点击都会先进入本事件，若在此
+    * 处理"关闭"会把面板点没且点击穿透到世界。故鼠标路径**只处理无屏幕时打开**，
+    * 不处理关闭（关闭靠 ESC 或键盘 P）；面板打开时对鼠标 P 绑定玩家是 no-op，
+    * 面板内点击正常工作。
+    */
+   @SubscribeEvent
+   public static void onMouseButton(MouseButton event) {
+      if (Minecraft.getInstance().player != null) {
+         Minecraft mc = Minecraft.getInstance();
+         if (mc.level != null && mc.player != null && mc.screen == null) {
+            InputConstants.Key bound = ClientModEvents.ABILITY_MANAGEMENT.getKey();
+            if (bound.getType() == InputConstants.Type.MOUSE
+                && event.getButton() == bound.getValue() && event.getAction() == 1) {
+               handleAbilityScreenKey(mc);
             }
          }
       }

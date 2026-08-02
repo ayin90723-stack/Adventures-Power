@@ -61,11 +61,11 @@ public class ClientHudDataCache {
         }
         currentGameTime = mc.level.getGameTime();
         // capability 可解析时更新快照；不可解析时（跨维度瞬间等）清零，
-        // 避免 HUD 显示上一个实体/上一玩家的残留数据
-        // （LazyOptional 无 ifPresentOrElse，先 isPresent 再 resolve）
-        var capOpt = mc.player.getCapability(AdventureProgressCapability.CAPABILITY);
-        if (capOpt.isPresent()) {
-            capOpt.resolve().ifPresent(p -> {
+        // 避免 HUD 显示上一个实体/上一玩家的残留数据。
+        // 统一走 resolve().ifPresentOrElse：isPresent true 但 resolve 为空时同样归零
+        //（原实现该路径 ifPresent 空转，旧字段残留）
+        mc.player.getCapability(AdventureProgressCapability.CAPABILITY).resolve()
+            .ifPresentOrElse(p -> {
                 activeSkillReady = (p.isAdventurer() || p.isFullyUnlocked()) && p.isAbilityEnabled(AbilityIds.ACTIVE_SKILL);
                 activeSkillIndex = p.getActiveSkillIndex();
                 judgmentCdEnd = p.getJudgmentCooldownEnd();
@@ -74,10 +74,7 @@ public class ClientHudDataCache {
                 deathDefyInvulEnd = p.getDeathDefyInvulEnd();
                 allSeeingEnabled = (p.isAdventurer() || p.isFullyUnlocked()) && p.isAbilityEnabled(AbilityIds.ALL_SEEING);
                 fullyUnlocked = p.isFullyUnlocked();
-            });
-        } else {
-            resetToZero();
-        }
+            }, ClientHudDataCache::resetToZero);
 
         // 觉醒威胁雷达：限频扫描
         if (allSeeingEnabled && fullyUnlocked) {

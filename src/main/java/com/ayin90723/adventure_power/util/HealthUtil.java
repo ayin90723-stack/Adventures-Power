@@ -54,6 +54,16 @@ public class HealthUtil {
     public static final ThreadLocal<Integer> HURT_DEPTH = ThreadLocal.withInitial(() -> 0);
 
     /**
+     * 模组内部降血标记——仅在本模组主动维护玩家状态（如 vitality 关闭时
+     * 把血量裁剪到新上限）的 setHealth 调用窗口内为 true。
+     * 由 {@code RejectHealthManipMixin} 放行（reject_manip 防的是外部篡改，不拦模组自身状态维护），
+     * 由 {@code TrueHealthMixin} 放行备份同步（否则裁剪后 backup 不更新，
+     * 下次 getHealth 会把 DataItem 判定为"非法降血直写"而修复回旧值，裁剪被反向抵消）。
+     * 窗口极窄（单行 setHealth，try/finally 包裹），无嵌套风险。
+     */
+    public static final ThreadLocal<Boolean> INTERNAL_HEALTH_WRITE = ThreadLocal.withInitial(() -> false);
+
+    /**
      * 每 tick 末强制归零 HURT_DEPTH（由 ServerTickEnd 调用）。
      * <p>
      * 防御外部模组对 {@code hurt()} HEAD 做 cancellable cancel（低优先级 Mixin）：
@@ -282,6 +292,11 @@ public class HealthUtil {
         // ② 先走标准路径 — 确保已知 key 全部写入
         setAllHealthLikeDirect(target, health);
 
+        // 玩家实体在血量维度上只有 DATA_HEALTH_ID（步骤②已写入，匹配池自然消失），
+        // 无自定义血量条目——若继续遍历玩家 DataItem 按值匹配，饱食度/吸收/等级等
+        // 与血量同量级的同步副本会被单次误写（显示错乱）。跳过整个遍历。
+        if (target instanceof Player) return;
+
         // ③ 原始路径：遍历所有 DataItem，找到值约等于原始血量的条目，
         //    直接写入目标血量值。不依赖 EntityDataAccessor key。
         //    匹配阈值 0.01 — 一个 tick 内血量不会被其他因素改动超过此值。
@@ -392,6 +407,16 @@ public class HealthUtil {
 
         Class<?> current = target.getClass();
         while (current != null && current != Object.class) {
+            // Player 类声明的 EntityDataAccessor 全部是非血量同步字段
+            // （饱食度 DATA_PLAYER_SATURATION / 吸收 DATA_PLAYER_ABSORPTION / 等级等，
+            //  与血量同量级同范围——值域容差无法区分，只能按类身份排除）。
+            // 血量 key 定义在 LivingEntity（DATA_HEALTH_ID），由上方单独排除；
+            // 若不排除，血量≈饱食度/吸收时会把这些 key 永久缓存为"自定义血量"，
+            // 之后所有对玩家的直写都会把饱食度/吸收写成血量值（显示错乱）。
+            if (current == Player.class) {
+                current = current.getSuperclass();
+                continue;
+            }
             for (Field field : current.getDeclaredFields()) {
                 // 只关注 static EntityDataAccessor 字段
                 if (!Modifier.isStatic(field.getModifiers())) continue;

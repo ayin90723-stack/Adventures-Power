@@ -89,6 +89,9 @@ public abstract class RejectHealthManipMixin {
 
         // 合法 hurt() 调用链内的 setHealth 放行
         if (HealthUtil.HURT_DEPTH.get() > 0) return;
+        // 模组内部降血（vitality 关闭/启用时的血量裁剪等）放行——
+        // reject_manip 防的是外部篡改，不拦模组自身的状态维护
+        if (HealthUtil.INTERNAL_HEALTH_WRITE.get()) return;
 
         // 外部直接 setHealth 降血 → 检查能力（ProgressCache 按 tick 缓存引用，避免每次 resolve）
         var progress = com.ayin90723.adventure_power.util.ProgressCache.get(player);

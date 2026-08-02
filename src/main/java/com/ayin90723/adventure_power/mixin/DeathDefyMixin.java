@@ -46,6 +46,9 @@ public abstract class DeathDefyMixin {
             return;
         }
         if (newHealth >= currentHealth) return;
+        // 模组内部降血（vitality 关闭/启用时的血量裁剪等）放行——与 RejectHealthManipMixin/TrueHealthMixin
+        // 一致：本拦截防的是外部攻击在无敌期的降血，不拦模组自身的状态维护
+        if (HealthUtil.INTERNAL_HEALTH_WRITE.get()) return;
 
         // ProgressCache 按 tick 缓存 progress 引用，避免 setHealth 高频调用每次 resolve
         var progress = com.ayin90723.adventure_power.util.ProgressCache.get(player);

@@ -5,6 +5,7 @@ import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.milestone.Milestone;
+import com.ayin90723.adventure_power.util.AdventureItemNbtUtil;
 import com.ayin90723.adventure_power.util.MilestoneRegistry;
 import com.ayin90723.adventure_power.util.SyncUtil;
 import com.mojang.brigadier.CommandDispatcher;
@@ -12,6 +13,8 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.brigadier.suggestion.SuggestionProvider;
+import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -43,6 +46,22 @@ public class AdventurePowerCommand {
     private static final String ARG_ABILITY = "ability";
     private static final String ARG_TARGET = "target";
 
+    /** 里程碑 id TAB 联想（tooltip 显示显示名——玩家无需记忆 id） */
+    private static final SuggestionProvider<CommandSourceStack> MILESTONE_SUGGESTIONS = (ctx, builder) -> {
+        for (Milestone m : MilestoneRegistry.getAll()) {
+            builder.suggest(m.id(), Component.literal(m.name()));
+        }
+        return builder.buildFuture();
+    };
+
+    /** 被禁用能力 id TAB 联想（/ap unlock ability 仅允许这些能力） */
+    private static final SuggestionProvider<CommandSourceStack> DISABLED_ABILITY_SUGGESTIONS = (ctx, builder) -> {
+        for (String id : MilestoneRegistry.getDisabledAbilities()) {
+            builder.suggest(id);
+        }
+        return builder.buildFuture();
+    };
+
     @SubscribeEvent
     public static void onRegisterCommands(RegisterCommandsEvent event) {
         CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
@@ -56,11 +75,13 @@ public class AdventurePowerCommand {
             .then(Commands.literal("unlock")
                 .then(Commands.literal("milestone")
                     .then(Commands.argument(ARG_MILESTONE, StringArgumentType.word())
+                        .suggests(MILESTONE_SUGGESTIONS)
                         .executes(ctx -> unlockMilestone(ctx, getPlayer(ctx, null)))
                         .then(Commands.argument(ARG_TARGET, EntityArgument.player())
                             .executes(ctx -> unlockMilestone(ctx, getPlayer(ctx, ARG_TARGET))))))
                 .then(Commands.literal("ability")
                     .then(Commands.argument(ARG_ABILITY, StringArgumentType.word())
+                        .suggests(DISABLED_ABILITY_SUGGESTIONS)
                         .executes(ctx -> unlockAbility(ctx, getPlayer(ctx, null)))
                         .then(Commands.argument(ARG_TARGET, EntityArgument.player())
                             .executes(ctx -> unlockAbility(ctx, getPlayer(ctx, ARG_TARGET)))))))
@@ -148,6 +169,9 @@ public class AdventurePowerCommand {
             return 0;
         }
         SyncUtil.syncCapabilityToPersistent(player, progress);
+        // 同步物品 NBT 第三层备份（MME_CommandGranted）——否则指令解锁记录只存在于
+        // Capability + persistentData，物品兜底路径（维度切换/Clone 极端场景）会静默丢失
+        AdventureItemNbtUtil.syncAllAdventureItemNbt(player, progress);
         SyncUtil.syncToClient(player);
         ctx.getSource().sendSuccess(
             () -> Component.translatable("command.adventure_power.ability_unlocked", id), false);
