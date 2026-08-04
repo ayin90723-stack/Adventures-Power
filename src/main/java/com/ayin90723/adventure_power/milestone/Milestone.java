@@ -16,8 +16,4 @@ public record Milestone(
     ResourceLocation advancement,
     @Nullable TriggerDef trigger
 ) {
-    /** 根据 id 查找里程碑，委托给 MilestoneRegistry */
-    public static Milestone fromId(String id) {
-        return com.ayin90723.adventure_power.util.MilestoneRegistry.getById(id);
-    }
 }

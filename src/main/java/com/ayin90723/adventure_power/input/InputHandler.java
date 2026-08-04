@@ -40,15 +40,17 @@ public class InputHandler {
                handleAbilityScreenKey(mc);
             }
 
+            // 玩家引用变化 -> 重置技能按键状态（移到门禁块外：持饰品按住 Y 卸下饰品时
+            // 门禁块外松开 lastPressed 不更新，重新戴上后按下会丢上升沿——极边缘 UX 修复）
+            if (mc.player != lastActiveSkillPlayer) {
+               lastActiveSkillPlayer = mc.player;
+               skillSwitch.reset();
+               skillActivate.reset();
+            }
+
             // 主动技能 - 门禁检查（体验预检，服务端另有校验）
             if (AdventureProgressCapability.isAdventurer(mc.player)
                 || AdventureProgressCapability.isFullyUnlocked(mc.player)) {
-               // 玩家引用变化 -> 重置技能按键状态
-               if (mc.player != lastActiveSkillPlayer) {
-                  lastActiveSkillPlayer = mc.player;
-                  skillSwitch.reset();
-                  skillActivate.reset();
-               }
                // Y 键：切换技能（本地乐观更新 + 发包由服务端持久化，避免被后续 sync 覆盖）
                if (skillSwitch.consumePress(ClientModEvents.SKILL_SWITCH.isDown())) {
                   mc.player.getCapability(AdventureProgressCapability.CAPABILITY).ifPresent(progress -> {

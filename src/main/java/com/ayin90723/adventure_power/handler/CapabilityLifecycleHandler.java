@@ -11,6 +11,7 @@ import com.ayin90723.adventure_power.util.SyncUtil;
 import net.minecraft.ChatFormatting;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -283,6 +284,35 @@ public class CapabilityLifecycleHandler {
     public static void onDimensionChange(PlayerChangedDimensionEvent event) {
         Player player = event.getEntity();
         if (player.level().isClientSide()) return;
+
+        // 时间基准平移：维度切换（传送门/末地出口）不触发 PlayerEvent.Clone（1.20.1 仅死亡
+        // respawn 触发 Clone），但 ServerLevel.getGameTime() 每维度独立——CD/无敌/受击坚韧等
+        // 计时字段与当前维度时钟失配（主世界触发进下界被延长、反向秒失效），需按新旧维度时间差平移。
+        // PlayerChangedDimensionEvent 双向触发（已从 binpatched jar 字节码验证：changeDimension
+        // normal 分支与 teleportTo（m_8999_，末地出口 credits 路径）各 fire 一次），
+        // 故进末地/出末地/传送门均在事件内平移，无需额外 tick 检测
+        if (player.getServer() != null && event.getFrom() != null) {
+            ServerLevel fromLevel = player.getServer().getLevel(event.getFrom());
+            if (fromLevel != null) {
+                long timeDelta = player.level().getGameTime() - fromLevel.getGameTime();
+                if (timeDelta != 0) {
+                    player.getCapability(AdventureProgressCapability.CAPABILITY)
+                        .ifPresent(p -> shiftTimers(p, timeDelta));
+                    // 影杀影子血量过期时间同理平移（攻击者维度切换后过期判定基准变化）
+                    CompoundTag shadowData = player.getPersistentData().getCompound(PersistentDataKeys.SHADOW_HP_DATA);
+                    if (!shadowData.isEmpty()) {
+                        for (String key : shadowData.getAllKeys()) {
+                            CompoundTag entry = shadowData.getCompound(key);
+                            long end = entry.getLong(PersistentDataKeys.SHADOW_HP_END_TIME);
+                            if (end > 0) {
+                                entry.putLong(PersistentDataKeys.SHADOW_HP_END_TIME, end + timeDelta);
+                            }
+                        }
+                        player.getPersistentData().put(PersistentDataKeys.SHADOW_HP_DATA, shadowData);
+                    }
+                }
+            }
+        }
 
         // 维度切换兜底恢复：PlayerEvent.Clone 在部分场景不触发，
         // 或 reviveCaps() 导致 AttachCapabilitiesEvent 重新创建空实例，

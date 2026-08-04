@@ -1,7 +1,6 @@
 package com.ayin90723.adventure_power.util;
 
 import com.ayin90723.adventure_power.AdventurePower;
-import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.mixin.PiercingGazeLivingEntityAccessor;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
@@ -42,40 +41,64 @@ public final class PiercingGazeUtil {
      * 本次 hurt 是否已 post 事件（原版 ForgeHooks.onLivingHurt 或各手动 post 路径）。
      * 由 Layer 0 消费式读取决定是否补发 LivingHurtEvent——正常环境原版已 post，
      * 重复补发会让淬魂/嗜血/禁疗等监听器双倍结算（影杀已有 SHADOW_KILL_TICKED 去重）；
-     * 仅当 ASM 跳过 ForgeHooks 的环境（如 fantasy_ending）标记为 false 才需要补发。
+     * 仅当 ASM 跳过 ForgeHooks 的环境（如 fantasy_ending）计数无新增才需要补发。
+     * <p>
+     * <b>实现：单调递增计数 + 基线比较，而非布尔</b>。全局布尔无法区分"本层/外层"——
+     * 嵌套 hurt（Boss 在 hurt 管线内对另一实体 AoE、风暴守卫跳过的递归）清除/恢复布尔
+     * 会污染外层判定（外层误判"未 post"→ 补 post + 再次 actuallyHurt 双倍结算）。
+     * 计数按"本层开始时的基准"比较增量，天然栈式隔离：本层帧保存压栈时的计数，
+     * 本层 posted = 当前计数 > 基准，嵌套层的新增 post 只影响其自身基准，外层不受污染，
+     * 且无需压栈恢复（计数单调递增，外层基准始终有效）。
      * <p>
      * 标记来源（v1.3.3 单一来源）：{@code CombatAbilityHandler.onLivingHurt} 监听器入口
-     * （任何 post 的 LivingHurtEvent 都触发该监听器，标记 = 事件已发的直接证据）——
-     * 不依赖 Layer 2.5 redirect 的 mark（redirect 注入失败 require=0 静默失效时，
-     * 原版事件照常 post、监听器照常 mark，Layer 0 不会误补发）。
+     * （任何 post 的 LivingHurtEvent 都触发该监听器，计数 = 事件已发的直接证据）。
      * <p>
      * 放在本工具类而非 Mixin 类：@Mixin 类禁止非 private static 方法
      * （Mixin Applicator 会尝试混入目标类导致 InvalidMixinException）。
      */
-    private static final ThreadLocal<Boolean> VANILLA_HURT_EVENT_POSTED = ThreadLocal.withInitial(() -> false);
+    private static final ThreadLocal<Long> VANILLA_HURT_EVENT_POST_COUNT = ThreadLocal.withInitial(() -> 0L);
+    /** Layer 0（Player.attack）的本次攻击作用域基线（begin 时记录，consume 比较增量） */
+    private static final ThreadLocal<Long> VANILLA_HURT_SCOPE_BASE = ThreadLocal.withInitial(() -> 0L);
 
     /** 由 {@code CombatAbilityHandler.onLivingHurt} 入口调用（事件 post 即触发）：
-     *  标记本次 hurt 已 post 事件 */
+     *  本次 hurt 已 post 事件（计数 +1） */
     public static void markVanillaHurtEventPosted() {
-        VANILLA_HURT_EVENT_POSTED.set(true);
+        VANILLA_HURT_EVENT_POST_COUNT.set(VANILLA_HURT_EVENT_POST_COUNT.get() + 1);
     }
 
-    /** 本次 attack 作用域隔离：Layer 0 在调 target.hurt() 前清除标记，
-     *  保证 consume 只反映"本次 hurt 期间"的置位——环境噪声 hurt（怪物互殴等）
-     *  在两次 attack 之间的置位被清除，不会被下一次 attack 误消费 */
-    public static void clearVanillaHurtEventPosted() {
-        VANILLA_HURT_EVENT_POSTED.remove();
+    /** 读取当前 post 计数（Layer 2 onHurtEnter 压栈时记录本层基准用） */
+    public static long getVanillaHurtEventPostCount() {
+        return VANILLA_HURT_EVENT_POST_COUNT.get();
+    }
+
+    /** Layer 0（Player.attack 重定向）专用：记录本次攻击作用域的 post 计数基线。
+     *  consume 只反映"基线之后的增量"——环境噪声 hurt（怪物互殴等）在两次 attack
+     *  之间的 post 计入基线，不会被下一次 attack 误消费 */
+    public static void beginVanillaHurtScope() {
+        VANILLA_HURT_SCOPE_BASE.set(VANILLA_HURT_EVENT_POST_COUNT.get());
     }
 
     /**
-     * Layer 0（Player.attack 重定向）专用：消费"本次 hurt 已 post 事件"标记。
-     * 消费式读取（读后清除）：保证标记只反映"本次 hurt"，不残留到下一次攻击。
-     * 未走原版管线时 redirect 不触发（Boss 完全重写 hurt() 不调 super），标记保持 false。
+     * Layer 0（Player.attack 重定向）专用：本次攻击作用域内是否已 post 事件
+     * （当前计数 > 基线）。未走原版管线时（Boss 完全重写 hurt() 不调 super）
+     * 无新增 post，返回 false。
      */
     public static boolean consumeVanillaHurtEventPosted() {
-        boolean posted = VANILLA_HURT_EVENT_POSTED.get();
-        VANILLA_HURT_EVENT_POSTED.remove();
-        return posted;
+        return VANILLA_HURT_EVENT_POST_COUNT.get() > VANILLA_HURT_SCOPE_BASE.get();
+    }
+
+    /**
+     * Layer 2（hurt RETURN）专用：本层 hurt 期间是否已 post 事件（当前计数 > 本层基准）。
+     * <p>
+     * 用于判断原版管线（{@code actuallyHurt -> ForgeHooks.onLivingHurt}）是否已完整结算——
+     * 是则 Boss 仅改了返回值（放行不重复结算），否则是 Boss 完全拦截（需补 post + 直写）。
+     * <p>
+     * 非消费式：计数单调递增，本层基准由调用方（栈帧）持有，读取不影响后续判定。
+     *
+     * @param base 本层 hurt 开始时的计数（onHurtEnter 压栈时记录）
+     */
+    public static boolean peekVanillaHurtEventPosted(long base) {
+        return VANILLA_HURT_EVENT_POST_COUNT.get() > base;
     }
 
     /**
@@ -108,13 +131,21 @@ public final class PiercingGazeUtil {
     }
 
     /**
-     * 检查伤害源是否来自破敌之眼持有者，且非自身/友好火力/重入调用。
+     * 破敌之眼穿透门禁统一入口：攻击者持有破敌之眼 + 非友伤 + 非玩家目标（PVP 禁用）。
+     * <p>
+     * Layer 0（Player.attack）/ Layer 1（isInvulnerableTo）/ Layer 2（hurt RETURN）
+     * 三个注入点共用此方法，门禁规则单一来源——新增排除条件只改这一处。
      *
-     * @param source 伤害源
-     * @param target 受击目标（用于友好火力判定）
+     * @param source 伤害源（内部追溯真正的攻击者）
+     * @param target 受击目标
      * @return true 表示这是一次应当穿透的破敌之眼攻击
      */
-    public static boolean isPiercingGazeAttack(DamageSource source, LivingEntity target) {
+    public static boolean shouldPierce(DamageSource source, LivingEntity target) {
+        // PVP 禁用：穿透三连会绕过玩家 hurt 被取消时的保护（PVP 保护类模组），
+        // 且觉醒禁无敌帧让对手无敌帧失效——对玩家目标一律不穿透
+        if (target instanceof Player) {
+            return false;
+        }
         Entity attacker = resolveAttacker(source);
         if (!(attacker instanceof LivingEntity living)) {
             return false;
@@ -179,7 +210,9 @@ public final class PiercingGazeUtil {
      * @param healthBefore actuallyHurt 执行前的血量（用于检测血量是否被恢复）
      */
     public static void afterPierceFallback(LivingEntity target, float effectiveAmount, float healthBefore) {
-        if (effectiveAmount > 0.0F && HealthUtil.getHealthDirect(target) >= healthBefore && target.isAlive()) {
+        // 架空参照读数：自定义血条 Boss（亚波伦）原版槽被架空，getHealthDirect 读到不动值，
+        // 会导致"血量未下降"检测恒成立而每击触发直写兜底（数值错位）；取真实血量判断
+        if (effectiveAmount > 0.0F && HealthUtil.getEffectiveHealth(target) >= healthBefore && target.isAlive()) {
             HealthUtil.setAllHealthLikeRaw(target, Math.max(0.0F, healthBefore - effectiveAmount));
         }
         InvulClearUtil.clearCustomInvulTimers(target);

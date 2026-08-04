@@ -91,12 +91,8 @@ public final class AbilityGate {
      * 用于灵巧/伤害抗性等：value 是 0-100 的百分比，结果为 0-cap 的比率。
      */
     public static float awakenedRatio(Ability ability, int milestones, boolean fullyUnlocked) {
-        float v = ability.value(milestones) / 100.0f;
-        if (fullyUnlocked) {
-            v = Math.min(v * ModConfig.AWAKEN_MULTIPLIER.get().floatValue(),
-                ModConfig.AWAKEN_PERCENT_CAP.get().floatValue());
-        }
-        return v;
+        return applyAwakenedMultiplier(ability.value(milestones) / 100.0f, fullyUnlocked,
+            ModConfig.AWAKEN_PERCENT_CAP.get().floatValue());
     }
 
     /**
@@ -104,7 +100,12 @@ public final class AbilityGate {
      * 用于不动如山等：value 直接是属性百分比，cap 来自配置。
      */
     public static float awakenedPercent(Ability ability, int milestones, boolean fullyUnlocked, float cap) {
-        float v = ability.value(milestones);
+        return applyAwakenedMultiplier(ability.value(milestones), fullyUnlocked, cap);
+    }
+
+    /** 觉醒倍率核心：fullyUnlocked 时 × AWAKEN_MULTIPLIER 并钳 cap，否则原值。
+     *  awakenedRatio / awakenedPercent 共用，避免两处重复 */
+    private static float applyAwakenedMultiplier(float v, boolean fullyUnlocked, float cap) {
         if (fullyUnlocked) {
             v = Math.min(v * ModConfig.AWAKEN_MULTIPLIER.get().floatValue(), cap);
         }

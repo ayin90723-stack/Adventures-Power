@@ -1,6 +1,5 @@
 package com.ayin90723.adventure_power.mixin;
 
-import com.ayin90723.adventure_power.util.FriendlyFireProtection;
 import com.ayin90723.adventure_power.util.PiercingGazeUtil;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -46,14 +45,8 @@ public class PiercingGazeMixin {
             return;
         }
 
-        Entity attacker = PiercingGazeUtil.resolveAttacker(source);
-        // 攻击者持有破敌之眼 -> 强制穿透无敌
-        if (attacker instanceof LivingEntity living && PiercingGazeUtil.hasPiercingGaze(living)) {
-            // 友好火力保护：不穿透自己驯服生物的无敌
-            if (self instanceof LivingEntity target
-                && FriendlyFireProtection.isOwnerTarget(living, target)) {
-                return;
-            }
+        // 穿透门禁统一入口：攻击者持破敌之眼 + 非友伤 + 非玩家目标（PVP 禁用）
+        if (self instanceof LivingEntity target && PiercingGazeUtil.shouldPierce(source, target)) {
             cir.setReturnValue(false);
         }
     }

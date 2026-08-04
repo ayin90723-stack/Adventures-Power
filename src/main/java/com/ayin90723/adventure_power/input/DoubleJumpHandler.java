@@ -2,7 +2,6 @@ package com.ayin90723.adventure_power.input;
 
 import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
-import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.server.level.ServerLevel;

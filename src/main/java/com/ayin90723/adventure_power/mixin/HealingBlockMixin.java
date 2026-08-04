@@ -37,7 +37,9 @@ public class HealingBlockMixin {
             return;
         }
         Float tracked = HealingBlockEffect.getTrackedHealth(self);
-        float current = HealthUtil.getHealthDirect(self);
+        // 架空参照读数：自定义血条实体（亚波伦）原版槽被架空，getHealthDirect 读到不动值，
+        // 跟踪层必须取真实血量才能正确记录低点
+        float current = HealthUtil.getEffectiveHealth(self);
         if (tracked != null) {
             HealingBlockEffect.updateTrackedHealth(self, Math.min(current, tracked));
         }
@@ -63,7 +65,8 @@ public class HealingBlockMixin {
         if (tracked == null) {
             return;
         }
-        float current = HealthUtil.getHealthDirect(self);
+        // 架空参照读数：与 onSetHealthReturn 一致，自定义血条实体取真实血量检测回血
+        float current = HealthUtil.getEffectiveHealth(self);
         if (current > tracked) {
             HealthUtil.setAllHealthLikeRaw(self, tracked);
         }

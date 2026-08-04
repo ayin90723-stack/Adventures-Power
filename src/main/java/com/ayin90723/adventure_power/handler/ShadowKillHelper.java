@@ -7,9 +7,9 @@ import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.ability.ShadowKillAbility;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
-import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.DamageUtil;
 import com.ayin90723.adventure_power.util.HealthUtil;
+import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.PersistentDataKeys;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.nbt.CompoundTag;
@@ -75,6 +75,10 @@ public class ShadowKillHelper {
 
     /** target 有效性检测宽限：跨维度传送时短暂不在任何维度，避免误清 */
     private static final Map<UUID, Integer> MISSING_TARGET_TICKS = new ConcurrentHashMap<>();
+
+    /** dropAllDeathLoot 反射缓存（m_6668_ = dropAllDeathLoot(DamageSource)） */
+    private static final java.lang.reflect.Method DROP_ALL_DEATH_LOOT =
+        HealthUtil.reflectMethod(LivingEntity.class, "m_6668_", "dropAllDeathLoot", DamageSource.class);
 
     /**
      * 每攻击者对每目标的影子血量 BossBar：attacker UUID -> target UUID -> bar。
@@ -144,7 +148,7 @@ public class ShadowKillHelper {
         // 写回攻击者侧 NBT（复用 entry，已有条目不需新建）
         entry.putFloat(NBT_SP_TOTAL_HP, totalHP);
         entry.putFloat(NBT_SP_SHADOW_HP, shadowHP);
-        entry.putLong(NBT_SP_END_TIME, gameTime + com.ayin90723.adventure_power.config.ModConfig.SHADOW_KILL_DATA_EXPIRE_TICKS.get());
+        entry.putLong(NBT_SP_END_TIME, gameTime + ModConfig.SHADOW_KILL_DATA_EXPIRE_TICKS.get());
         if (isNew) {
             shadowData.put(targetKey, entry);
         }
@@ -212,18 +216,8 @@ public class ShadowKillHelper {
 
         // ③ 反射调用 dropAllDeathLoot（触发战利品表 / LivingDropsEvent / LootModifier）
         try {
-            java.lang.reflect.Method dropAll = LivingEntity.class
-                .getDeclaredMethod("m_6668_", DamageSource.class);
-            dropAll.setAccessible(true);
-            dropAll.invoke(target, source);
-        } catch (NoSuchMethodException e) {
-            try {
-                java.lang.reflect.Method dropAll = LivingEntity.class
-                    .getDeclaredMethod("dropAllDeathLoot", DamageSource.class);
-                dropAll.setAccessible(true);
-                dropAll.invoke(target, source);
-            } catch (Exception ex) {
-                LOGGER.error("[ShadowKill] 反射/内部操作失败", ex);
+            if (DROP_ALL_DEATH_LOOT != null) {
+                DROP_ALL_DEATH_LOOT.invoke(target, source);
             }
         } catch (Exception e) {
             LOGGER.error("[ShadowKill] 反射/内部操作失败", e);
@@ -321,9 +315,9 @@ public class ShadowKillHelper {
      * 觉醒影杀 AOE：对斩杀目标周围实体施加影子血量削减，归零时触发斩杀。
      */
     private static void shadowKillAoe(Player attacker, LivingEntity killed) {
-        double radius = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SHADOW_KILL_AOE_RADIUS.get();
-        float ratio = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SHADOW_KILL_AOE_RATIO.get().floatValue();
-        int maxTargets = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SHADOW_KILL_AOE_MAX_TARGETS.get();
+        double radius = ModConfig.AWAKEN_SHADOW_KILL_AOE_RADIUS.get();
+        float ratio = ModConfig.AWAKEN_SHADOW_KILL_AOE_RATIO.get().floatValue();
+        int maxTargets = ModConfig.AWAKEN_SHADOW_KILL_AOE_MAX_TARGETS.get();
 
         AABB aabb = killed.getBoundingBox().inflate(radius);
         java.util.List<LivingEntity> nearby = killed.level().getEntitiesOfClass(LivingEntity.class, aabb,
@@ -339,7 +333,7 @@ public class ShadowKillHelper {
         // 懒清理过期条目（与 handleShadowKill 保持一致）
         cleanupExpiredShadowData(shadowData, gameTime);
 
-        long expireTicks = com.ayin90723.adventure_power.config.ModConfig.SHADOW_KILL_DATA_EXPIRE_TICKS.get();
+        long expireTicks = ModConfig.SHADOW_KILL_DATA_EXPIRE_TICKS.get();
         for (LivingEntity target : nearby) {
             if (count >= maxTargets) break;
 
@@ -458,7 +452,7 @@ public class ShadowKillHelper {
         // 每 tick 清去重标记（防影杀同 tick 双倍削减）
         SHADOW_KILL_TICKED.clear();
 
-        int interval = com.ayin90723.adventure_power.config.ModConfig.SHADOW_KILL_CLEANUP_INTERVAL.get();
+        int interval = ModConfig.SHADOW_KILL_CLEANUP_INTERVAL.get();
         shadowHpCleanupTick++;
         if (shadowHpCleanupTick < interval) return;
         shadowHpCleanupTick = 0;

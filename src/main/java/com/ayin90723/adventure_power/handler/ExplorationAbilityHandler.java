@@ -17,7 +17,6 @@ import java.util.UUID;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraftforge.common.ForgeMod;
-import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -51,16 +50,15 @@ public class ExplorationAbilityHandler {
             Ability ability = AbilityRegistry.get(AbilityIds.DIGGING_POWER);
             if (ability == null) return;
 
-            float multiplier = ability.value(AbilityGate.effectiveCount(progress, AbilityIds.DIGGING_POWER));
-            boolean awakened = progress.isFullyUnlocked();
-            if (awakened) {
-                multiplier *= com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get().floatValue();
-            }
+            // 觉醒倍率统一走 AbilityGate.awakenedPercent（无 cap 上限，数值语义 = value × 觉醒倍率）
+            float multiplier = AbilityGate.awakenedPercent(ability,
+                AbilityGate.effectiveCount(progress, AbilityIds.DIGGING_POWER),
+                progress.isFullyUnlocked(), Float.MAX_VALUE);
 
             float speed = event.getOriginalSpeed();
             // 觉醒：取消水中/空中挖掘惩罚（反向补偿原版 getDestroySpeed 的 /5）
             // 原版条件：眼在水中且无水下速掘附魔 -> /5；未着地 -> /5（飞行也受此惩罚）
-            if (awakened) {
+            if (progress.isFullyUnlocked()) {
                 if (player.isEyeInFluid(FluidTags.WATER) && !EnchantmentHelper.hasAquaAffinity(player)) {
                     speed *= 5.0F;
                 }
@@ -120,10 +118,7 @@ public class ExplorationAbilityHandler {
         // activeBonus = 能力开启时会写入的加成（与 enabled 无关，供残留判定用）
         float activeBonus = 0.0F;
         if (ability != null) {
-            activeBonus = ability.value(milestones);
-            if (fullyUnlocked) {
-                activeBonus *= com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get().floatValue();
-            }
+            activeBonus = AbilityGate.awakenedPercent(ability, milestones, fullyUnlocked, Float.MAX_VALUE);
         }
         float bonus = enabled ? activeBonus : 0.0F;
         // 方块触及 + 实体触及（攻击距离）
@@ -196,9 +191,10 @@ public class ExplorationAbilityHandler {
 
         double currentVal = attr.getBaseValue();
         // activeBonus = 启用时会写入的加成（与 enabled 无关，供残留判定用）
-        float bonus = ability.value(milestones);
+        // 坚韧之躯觉醒 ×1.5 向上取整（仅觉醒取整，未觉醒保持原值——避免小数配置下未觉醒 +1）
+        float bonus = AbilityGate.awakenedPercent(ability, milestones, fullyUnlocked, Float.MAX_VALUE);
         if (fullyUnlocked) {
-            bonus = (float) Math.ceil(bonus * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get());
+            bonus = (float) Math.ceil(bonus);
         }
 
         if (enabled) {
@@ -261,10 +257,8 @@ public class ExplorationAbilityHandler {
         if (enabled) {
             Ability ability = AbilityRegistry.get(AbilityIds.SWIFT);
             if (ability != null) {
-                bonus = ability.value(milestones);  // 移速加成比例（类似迅捷药水）
-                if (fullyUnlocked) {
-                    bonus *= com.ayin90723.adventure_power.config.ModConfig.AWAKEN_MULTIPLIER.get().floatValue();
-                }
+                // 移速加成比例（类似迅捷药水），觉醒倍率统一走 AbilityGate
+                bonus = AbilityGate.awakenedPercent(ability, milestones, fullyUnlocked, Float.MAX_VALUE);
             }
         }
         // 仅在加成变化时更新 modifier，避免每 tick add/remove 开销

@@ -8,6 +8,7 @@ import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.FortuneContext;
 import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.event.entity.living.LootingLevelEvent;
+import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.level.BlockEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -63,5 +64,12 @@ public class FortuneFavorHandler {
                 FortuneContext.setAwakened(true);
             }
         });
+    }
+
+    /** 玩家登出清理时运上下文：破坏方块后登出且无后续 BreakEvent 时，
+     *  ThreadLocal 会残留玩家强引用（违反"登出清理 per-player 状态"规范） */
+    @SubscribeEvent
+    public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
+        FortuneContext.clear();
     }
 }

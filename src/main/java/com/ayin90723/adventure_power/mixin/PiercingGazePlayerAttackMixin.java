@@ -1,6 +1,5 @@
 package com.ayin90723.adventure_power.mixin;
 
-import com.ayin90723.adventure_power.util.FriendlyFireProtection;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import com.ayin90723.adventure_power.util.PiercingGazeUtil;
 import net.minecraft.world.entity.Entity;
@@ -76,16 +75,18 @@ public class PiercingGazePlayerAttackMixin {
             return target.hurt(source, amount);
         }
 
-        float healthBefore = HealthUtil.getHealthDirect(living);
-        // 本次 attack 作用域隔离：清除标记，只消费"本次 hurt 期间"set 的值
-        //（否则环境噪声 hurt（怪物互殴等）的置位会被本次误消费，导致事件漏补发）
-        PiercingGazeUtil.clearVanillaHurtEventPosted();
+        // 架空参照读数：自定义血条 Boss（亚波伦）原版槽被架空，扣血检测必须用真实血量，
+        // 否则普通命中也会被误判"未扣血"而恒走穿透三连（满额直写、数值错位）
+        float healthBefore = HealthUtil.getEffectiveHealth(living);
+        // 本次 attack 作用域隔离：记录 post 计数基线，consume 只反映"本次 hurt 期间"的新增
+        //（环境噪声 hurt（怪物互殴等）在两次 attack 之间的 post 计入基线，不会被误消费）
+        PiercingGazeUtil.beginVanillaHurtScope();
         boolean hurtResult = target.hurt(source, amount);
 
-        // 实际扣血就放行（不管 hurtResult 真假）。用 getHealthDirect 直读 DataItem，
+        // 实际扣血就放行（不管 hurtResult 真假）。用 getEffectiveHealth 直读真实血量，
         // 防 Boss 用 ASM/Mixin 改写 getHealth() 返回假值（Fantasy Ending delta 式）。
         // 覆盖：① 普攻原版怪 ② fdbosses 调 super 扣血但 return false ③ Boss 假成功/拦截
-        if (HealthUtil.getHealthDirect(living) < healthBefore) {
+        if (HealthUtil.getEffectiveHealth(living) < healthBefore) {
             // 扣血了，放行。仅当原版管线未 post 事件时补发 LivingHurtEvent——
             // 正常环境 hurt() 内 ForgeHooks.onLivingHurt（或 Layer 2.5 手动 post）已发过，
             // 重复补发会让淬魂/嗜血/禁疗等监听器同 tick 双倍结算（影杀已有 SHADOW_KILL_TICKED 去重）。
@@ -96,14 +97,11 @@ public class PiercingGazePlayerAttackMixin {
             return true;
         }
 
-        // 否则（返回 false / return true 假成功未扣血）-> 攻击者持破敌之眼时走穿透
-        if (!PiercingGazeUtil.hasPiercingGaze(self)) {
-            // 非破敌之眼：穿透不适用，但消费残留标记（本次 hurt 未走原版管线时置 false），
+        // 否则（返回 false / return true 假成功未扣血）-> 穿透门禁统一入口：
+        // 攻击者持破敌之眼 + 非友伤 + 非玩家目标（PVP 禁用）
+        if (!PiercingGazeUtil.shouldPierce(source, living)) {
+            // 非破敌之眼/友伤/PVP：穿透不适用，但消费残留标记（本次 hurt 未走原版管线时置 false），
             // 防止下次扣血攻击在 ASM 跳过 ForgeHooks 的环境误判"已 post"而不补发
-            PiercingGazeUtil.consumeVanillaHurtEventPosted();
-            return hurtResult;
-        }
-        if (FriendlyFireProtection.isOwnerTarget(self, living)) {
             PiercingGazeUtil.consumeVanillaHurtEventPosted();
             return hurtResult;
         }

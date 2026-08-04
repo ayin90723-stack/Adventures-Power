@@ -25,6 +25,10 @@ import org.spongepowered.asm.mixin.injection.ModifyArg;
  *   <li>觉醒（BYPASS=true, AWAKEN=true）-- 用 ConstantMaxRandomSource，数量最大化</li>
  * </ul>
  * target 为构造函数描述符，类名 / &lt;init&gt; / 参数类名在 SRG 下不变，无需 refmap 条目。
+ * <p>
+ * <b>依赖说明</b>：4 参私有构造器是 <b>Forge binpatch 添加</b>的（携带
+ * {@code queriedLootTableId} 字段），裸 Mojang jar 没有、未来版本可能移除。
+ * require=0 降级：注入失败仅损失"觉醒取最大数量"，不导致整模组启动崩溃。
  */
 @Mixin(LootContext.Builder.class)
 public abstract class LootContextBuilderMixin {
@@ -35,7 +39,8 @@ public abstract class LootContextBuilderMixin {
             value = "INVOKE",
             target = "Lnet/minecraft/world/level/storage/loot/LootContext;<init>(Lnet/minecraft/world/level/storage/loot/LootParams;Lnet/minecraft/util/RandomSource;Lnet/minecraft/world/level/storage/loot/LootDataResolver;Lnet/minecraft/resources/ResourceLocation;)V"
         ),
-        index = 1
+        index = 1,
+        require = 0
     )
     private RandomSource adventure_power$lootAllMaxCount(RandomSource original) {
         if (LootAllHandler.BYPASS.get() > 0 && LootAllHandler.AWAKEN.get() > 0) {

@@ -1,6 +1,7 @@
 package com.ayin90723.adventure_power.ui;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.RenderGuiOverlayEvent;
@@ -45,7 +46,7 @@ public class DeathDefyHudOverlay {
 
         // 中上方倒计时
         graphics.drawCenteredString(mc.font,
-            net.minecraft.network.chat.Component.translatable("hud.adventure_power.death_defy", remainingSeconds),
+            Component.translatable("hud.adventure_power.death_defy", remainingSeconds),
             screenW / 2, screenH / 6, TEXT_COLOR);
     }
 

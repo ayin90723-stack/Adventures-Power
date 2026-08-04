@@ -103,12 +103,6 @@ public class MilestoneRegistry {
         return disabledAbilities;
     }
 
-    /** 获取某里程碑包含的能力 ID 列表 */
-    public static List<String> getAbilitiesForMilestone(String milestoneId) {
-        Milestone m = byId.get(milestoneId);
-        return m != null ? m.abilities() : List.of();
-    }
-
     // ===== 加载逻辑 =====
 
     /**

@@ -12,6 +12,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.storage.loot.BuiltInLootTables;
 import net.minecraft.world.level.storage.loot.LootParams;
 import net.minecraft.world.level.storage.loot.LootTable;
 import net.minecraft.world.level.storage.loot.parameters.LootContextParamSets;
@@ -70,9 +71,10 @@ public class LootAllHandler {
         // 友伤保护：不对玩家自己驯服的生物生效
         if (FriendlyFireProtection.isOwnerTarget(player, entity)) return;
 
-        // 取 loot table（玩家等无 loot table 的实体跳过）
+        // 取 loot table（玩家等无掉落表实体跳过——1.20.1 返回 BuiltInLootTables.EMPTY 而非 null）
         ResourceLocation lootTableId = entity.getLootTable();
-        if (lootTableId == null) return;
+        // 1.20.1 原版无掉落表实体返回 EMPTY 而非 null；第三方覆写 getLootTable 返回 null 时也跳过
+        if (lootTableId == null || BuiltInLootTables.EMPTY.equals(lootTableId)) return;
         ServerLevel level = (ServerLevel) entity.level();
         LootTable table = level.getServer().getLootData().getLootTable(lootTableId);
 

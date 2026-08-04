@@ -15,7 +15,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
-import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.effect.MobEffectCategory;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.LivingEntity;
@@ -63,6 +62,9 @@ public class ActiveSkillHandler {
         long cdEnd = progress.getJudgmentCooldownEnd();
         if (cdEnd > 0 && currentTime < cdEnd) return;
 
+        // 空放不惩罚：范围内无敌对目标则不进 CD/GCD（预检与 executeJudgment 共用收集逻辑）
+        if (collectJudgmentTargets(player, progress).isEmpty()) return;
+
         // 消耗冷却
         int cooldown = ModConfig.ACTIVE_SKILL_JUDGMENT_COOLDOWN.get();
         int gcd = ModConfig.ACTIVE_SKILL_GCD.get();
@@ -72,6 +74,17 @@ public class ActiveSkillHandler {
         SyncUtil.syncToClient(player);
 
         executeJudgment(player);
+    }
+
+    /** 收集审判范围内敌对目标（空放预检与执行共用——范围随觉醒 +50%） */
+    private static List<LivingEntity> collectJudgmentTargets(ServerPlayer player, IAdventureProgress progress) {
+        double radius = ModConfig.ACTIVE_SKILL_JUDGMENT_RADIUS.get();
+        if (progress.isFullyUnlocked()) {
+            radius *= ModConfig.AWAKEN_JUDGMENT_RANGE_MULT.get();
+        }
+        AABB aabb = player.getBoundingBox().inflate(radius);
+        return player.level().getEntitiesOfClass(LivingEntity.class, aabb,
+            e -> e != player && e.isAlive() && isHostileTarget(player, e));
     }
 
     /**
@@ -98,29 +111,20 @@ public class ActiveSkillHandler {
 
         float baseDamage = (float) (double) ModConfig.ACTIVE_SKILL_JUDGMENT_BASE_DAMAGE.get();
         float hpRatio = (float) (double) ModConfig.ACTIVE_SKILL_JUDGMENT_HP_RATIO.get() * milestones;
-        double radius = ModConfig.ACTIVE_SKILL_JUDGMENT_RADIUS.get();
 
-        // 觉醒：审判范围 +50%
-        if (progress.isFullyUnlocked()) {
-            radius *= ModConfig.AWAKEN_JUDGMENT_RANGE_MULT.get();
-        }
-
-        AABB aabb = player.getBoundingBox().inflate(radius);
-        List<LivingEntity> targets = player.level().getEntitiesOfClass(LivingEntity.class, aabb,
-            e -> e != player && e.isAlive() && isHostileTarget(player, e));
-
+        List<LivingEntity> targets = collectJudgmentTargets(player, progress);
         if (targets.isEmpty()) return 0;
-
         ServerLevel level = (ServerLevel) player.level();
         for (LivingEntity target : targets) {
             float maxHpPart = target.getMaxHealth() * hpRatio;
-            float currentHpPart = HealthUtil.getHealthDirect(target) * hpRatio;
+            // 架空参照读数：自定义血条 Boss（亚波伦）原版槽被架空，百分比基准与兜底检测取真实血量
+            float currentHpPart = HealthUtil.getEffectiveHealth(target) * hpRatio;
             float totalDamage = baseDamage + maxHpPart + currentHpPart;
 
             var source = DamageUtil.createJudgment(level, player);
-            float healthBefore = HealthUtil.getHealthDirect(target);
+            float healthBefore = HealthUtil.getEffectiveHealth(target);
             target.hurt(source, totalDamage);
-            float actualDealt = healthBefore - HealthUtil.getHealthDirect(target);
+            float actualDealt = healthBefore - HealthUtil.getEffectiveHealth(target);
             target.invulnerableTime = 0;
 
             float epsilon = Math.max(0.01F, totalDamage * 0.01F);
@@ -137,7 +141,11 @@ public class ActiveSkillHandler {
             }
         }
 
-        // 音效 + 粒子
+        // 音效 + 粒子（粒子范围与审判半径一致：觉醒 +50%）
+        double radius = ModConfig.ACTIVE_SKILL_JUDGMENT_RADIUS.get();
+        if (progress.isFullyUnlocked()) {
+            radius *= ModConfig.AWAKEN_JUDGMENT_RANGE_MULT.get();
+        }
         level.playSound(null, player.getX(), player.getY(), player.getZ(),
             SoundEvents.ENDER_DRAGON_GROWL, SoundSource.PLAYERS, 1.0F, 0.8F);
         for (int i = 0; i < 60; i++) {

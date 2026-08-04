@@ -60,16 +60,22 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
     private final List<String> displayEffectStatuses = new ArrayList<>();
     private boolean ready = false;
     private boolean buffExtendEnabled = true;
-    private int refreshTick = 0;
+    /** 能力/Buff tab 周期刷新的 tick 桶基准（gameTime/20，与 milestoneProgressRefreshTick 同款——
+     *  帧计数冒充 tick 会导致行为帧率依赖：60FPS 下 3 倍刷新、低 FPS 下响应迟钝） */
+    private long lastRefreshBucket = -1;
 
     // ===== 里程碑 tab 缓存（按 version 失效，避免每帧 AbilityRegistry.get + 遍历计数） =====
     private static int cachedMilestoneVersion = -1;
     private static List<List<Component>> milestoneAbilityNames = List.of();
+    /** 里程碑 tab 渲染行/解锁提示缓存（随 progress 20-tick 快照重建，避免每行每帧构建 Component。
+     *  static：ensureMilestoneAbilityCache（static）在 /reload 版本变化时需同步置空失效） */
+    private static List<Component> milestoneRowCache = List.of();
+    private static List<Component> milestoneHintCache = List.of();
     /** 标签 Component，init 时构建（语言切换重开即更新） */
     private Component[] tabLabels = new Component[0];
 
     /** 里程碑 tab 的 progress 快照（每 20 tick 刷新一次，避免每帧 capability resolve） */
-    private Optional<com.ayin90723.adventure_power.capability.IAdventureProgress> milestoneProgress = Optional.empty();
+    private Optional<IAdventureProgress> milestoneProgress = Optional.empty();
     private long milestoneProgressRefreshTick = -1;
 
     /** 能力 tab hover 信息框的 progress 快照（每 20 tick 刷新，避免每帧 capability resolve） */
@@ -211,6 +217,11 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
     private static void ensureMilestoneAbilityCache() {
         if (cachedMilestoneVersion == MilestoneRegistry.getVersion()) return;
         cachedMilestoneVersion = MilestoneRegistry.getVersion();
+        // /reload 后版本变化：置空渲染行/提示缓存——reload 可能替换同 size 的列表
+        //（行缓存按索引对齐 milestoneAbilityNames，size 相同但内容变化时兜底不触发，
+        //  必须显式失效，让下一个进度桶重建）
+        milestoneRowCache = List.of();
+        milestoneHintCache = List.of();
         List<List<Component>> built = new ArrayList<>();
         for (Milestone m : MilestoneRegistry.getAll()) {
             List<Component> names = new ArrayList<>();
@@ -231,7 +242,8 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         return switch (currentTab) {
             case ABILITY -> abilityEntries.size() * ROW_HEIGHT;
             case BUFF -> displayEffects.size() * ROW_HEIGHT;
-            case MILESTONE -> MilestoneRegistry.getMilestoneCount() * MILESTONE_ROW_HEIGHT;
+            // 与渲染路径一致取引用（getMilestoneCount 独立读取在 /reload 窗口可能差一帧）
+            case MILESTONE -> MilestoneRegistry.getAll().size() * MILESTONE_ROW_HEIGHT;
         };
     }
 
@@ -250,12 +262,15 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         // 能力/Buff tab 周期刷新（面板打开期间里程碑解锁/能力开关变更时列表与开关状态需跟进。
         // 注意：AdventureSyncPacket 只更新 capability，不触达本屏幕——能力 tab 的
         // 权威状态刷新完全依赖这里的 20-tick 兜底重建）
-        refreshTick++;
-        if (refreshTick % 20 == 0) {
-            if (currentTab == Tab.BUFF) {
-                refreshDisplayEffects();
-            } else if (currentTab == Tab.ABILITY) {
-                initAbilityData();
+        if (this.minecraft.level != null) {
+            long bucket = this.minecraft.level.getGameTime() / 20;
+            if (bucket != lastRefreshBucket) {
+                lastRefreshBucket = bucket;
+                if (currentTab == Tab.BUFF) {
+                    refreshDisplayEffects();
+                } else if (currentTab == Tab.ABILITY) {
+                    initAbilityData();
+                }
             }
         }
 
@@ -605,7 +620,10 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         // 与面板同坐标系（面板居中），右列为解锁条件
         final int LEFT_X = leftX;
         final int RIGHT_X = leftX + 110;
-        int total = MilestoneRegistry.getMilestoneCount();
+        // 单次取列表引用：getMilestoneCount() 与 getAll() 分离读取在 /reload 重建窗口
+        // 可能读到旧 count + 已被替换的更短列表（IndexOutOfBounds）——统一用引用 + size
+        List<Milestone> all = MilestoneRegistry.getAll();
+        int total = all.size();
         ensureMilestoneAbilityCache();
         graphics.drawString(this.font, Component.translatable("screen.adventure_power.header_progress").withStyle(s -> s.withColor(COLOR_GRAY)),
             LEFT_X, TOP_Y - 14, COLOR_GRAY);
@@ -622,7 +640,8 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         int startRow = Math.max(0, scrollOffset / MILESTONE_ROW_HEIGHT);
         int endRow = Math.min(total, startRow + visibleRows + 1);
 
-        // progress 快照每 20 tick 刷新一次，避免每帧 capability resolve。
+        // progress 快照每 20 tick 刷新一次，避免每帧 capability resolve，并同步重建
+        // 渲染行/提示缓存（解锁状态随快照更新，渲染循环只引用缓存组件，零每帧构建）。
         // 注意：player 非空而 level 为空的窄窗口（维度切换/重连期间面板保持打开）需一并守卫，
         // 否则 mc.level.getGameTime() NPE（与 renderAbilityInfoBox / ClientHudDataCache 的守卫一致）
         Minecraft mc = Minecraft.getInstance();
@@ -634,29 +653,22 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
             if (milestoneProgressRefreshTick != tick) {
                 milestoneProgressRefreshTick = tick;
                 milestoneProgress = AdventureProgressCapability.getAdventureProgress(mc.player);
+                rebuildMilestoneRowCache(all);
             }
         }
         var progress = milestoneProgress.orElse(null);
 
         for (int i = startRow; i < endRow; i++) {
-            Milestone m = MilestoneRegistry.getAll().get(i);
+            Milestone m = all.get(i);
             int y = TOP_Y + i * MILESTONE_ROW_HEIGHT - scrollOffset;
-            boolean unlocked = progress != null && progress.isMilestoneUnlocked(m.id());
             graphics.fill(LEFT_X - 4, y - 1, leftX + PANEL_WIDTH + 4, y + MILESTONE_ROW_HEIGHT - 1, COLOR_BG);
-            MutableComponent left = Component.literal(unlocked ? "✓ " : "✗ ")
-                .withStyle(s -> s.withColor(unlocked ? COLOR_GREEN : COLOR_DARK));
-            left.append(Component.literal(m.name())
-                .withStyle(s -> s.withColor(unlocked ? COLOR_GREEN : COLOR_GRAY)));
-            if (unlocked) {
-                left.append(Component.literal("  §8->  "));
-                List<Component> names = milestoneAbilityNames.get(i);
-                for (int j = 0; j < names.size(); j++) {
-                    if (j > 0) left.append(Component.literal(" §8· "));
-                    left.append(names.get(j).copy().withStyle(s -> s.withColor(COLOR_WHITE)));
-                }
-            }
+            // 缓存行兜底：/reload 后行缓存尚未随进度桶重建（size 不匹配）时现场构建
+            Component left = i < milestoneRowCache.size()
+                ? milestoneRowCache.get(i) : buildMilestoneRow(m, progress != null && progress.isMilestoneUnlocked(m.id()));
             graphics.drawString(this.font, left, LEFT_X, y + 4, COLOR_WHITE);
-            graphics.drawString(this.font, getUnlockHint(m), RIGHT_X, y + 4, COLOR_GRAY);
+            Component hint = i < milestoneHintCache.size()
+                ? milestoneHintCache.get(i) : getUnlockHint(m);
+            graphics.drawString(this.font, hint, RIGHT_X, y + 4, COLOR_GRAY);
         }
         renderScrollBar(graphics, getScrollBarX(), TOP_Y);
 
@@ -666,6 +678,48 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
                 Component.translatable("screen.adventure_power.unlocked_count", unlockedCount, total).withStyle(s -> s.withColor(COLOR_GOLD)),
                 this.width / 2, this.height - 16, COLOR_GOLD);
         }
+    }
+
+    /** 构建单行里程碑渲染组件（✓/✗ + 名称 + 解锁后的能力列表） */
+    private static MutableComponent buildMilestoneRow(Milestone m, boolean unlocked) {
+        MutableComponent left = Component.literal(unlocked ? "✓ " : "✗ ")
+            .withStyle(s -> s.withColor(unlocked ? COLOR_GREEN : COLOR_DARK));
+        left.append(Component.literal(m.name())
+            .withStyle(s -> s.withColor(unlocked ? COLOR_GREEN : COLOR_GRAY)));
+        if (unlocked) {
+            left.append(Component.literal("  §8->  "));
+            List<Component> names = cachedMilestoneNamesFor(m);
+            for (int j = 0; j < names.size(); j++) {
+                if (j > 0) left.append(Component.literal(" §8· "));
+                left.append(names.get(j).copy().withStyle(s -> s.withColor(COLOR_WHITE)));
+            }
+        }
+        return left;
+    }
+
+    /** 按里程碑 id 从缓存中取能力名列表（缓存未命中返回空列表） */
+    private static List<Component> cachedMilestoneNamesFor(Milestone m) {
+        List<Milestone> all = MilestoneRegistry.getAll();
+        int idx = all.indexOf(m);
+        if (idx >= 0 && idx < milestoneAbilityNames.size()) {
+            return milestoneAbilityNames.get(idx);
+        }
+        return List.of();
+    }
+
+    /** 重建里程碑 tab 渲染行与解锁提示缓存（随 progress 20-tick 快照调用，
+     *  消除每行每帧的 Component 构建——里程碑数据与解锁状态在快照间静态） */
+    private void rebuildMilestoneRowCache(List<Milestone> all) {
+        var progress = milestoneProgress.orElse(null);
+        List<Component> rows = new ArrayList<>(all.size());
+        List<Component> hints = new ArrayList<>(all.size());
+        for (Milestone m : all) {
+            boolean unlocked = progress != null && progress.isMilestoneUnlocked(m.id());
+            rows.add(buildMilestoneRow(m, unlocked));
+            hints.add(getUnlockHint(m));
+        }
+        milestoneRowCache = rows;
+        milestoneHintCache = hints;
     }
 
     private static Component getUnlockHint(Milestone m) {

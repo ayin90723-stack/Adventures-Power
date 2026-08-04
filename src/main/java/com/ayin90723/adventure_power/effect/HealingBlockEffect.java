@@ -39,8 +39,33 @@ public class HealingBlockEffect extends MobEffect {
    public static final String NBT_KEY = PersistentDataKeys.HEALING_BLOCK_END_TIME;
    /** NBT 中存储强制击杀标记的 key（跨优先级传递） */
    public static final String FORCE_KILL_KEY = PersistentDataKeys.HEALING_BLOCK_FORCE_KILL;
-   /** 记录实体在禁疗之触期间的最近已知血量，用于拦截 setHealth() 直接回血 */
-   private static final Map<UUID, Float> TRACKED_HEALTH = new ConcurrentHashMap<>();
+   /** 觉醒易伤 NBT key（与禁疗标记同期到期） */
+   public static final String VULN_NBT_KEY = PersistentDataKeys.HEALING_BLOCK_VULN_END;
+
+   /**
+    * 内存追踪记录：血量低点 + 到期时间。
+    * <p>
+    * 内存表与 NBT 构成<b>双源标记</b>：部分 Boss（如启示录亚波伦）重写
+    * {@code getPersistentData()} 每次返回全新空 tag，NBT 标记写入即丢、
+    * 读取永远为空。此时 {@link #isActive(LivingEntity)} 回退查内存表，
+    * 保证钳制链不因 NBT 失效（代价：服务器重启后此类实体标记丢失）。
+    */
+   public static final class TrackedEntry {
+      /** 追踪血量低点（钳制基准） */
+      public float health;
+      /** 到期时间（gameTime，tick） */
+      public final long endTime;
+
+      TrackedEntry(float health, long endTime) {
+         this.health = health;
+         this.endTime = endTime;
+      }
+   }
+
+   /** 记录实体在禁疗之触期间的追踪血量与到期时间（内存表，双源之一） */
+   private static final Map<UUID, TrackedEntry> TRACKED_HEALTH = new ConcurrentHashMap<>();
+   /** 觉醒易伤到期时间内存表（双源之一，防 getPersistentData() 重写丢失） */
+   private static final Map<UUID, Long> VULN_END = new ConcurrentHashMap<>();
    /** 跨维度传送宽限期：记录实体连续未在维度中找到的 tick 数，防止传送时误清理 */
    private static final Map<UUID, Integer> MISSING_TICKS = new ConcurrentHashMap<>();
 
@@ -52,29 +77,39 @@ public class HealingBlockEffect extends MobEffect {
       return true;
    }
 
-   /** 检查实体当前是否受禁疗之触效果影响（以 NBT 为准，过期自动清理） */
+   /** 检查实体当前是否受禁疗之触效果影响（NBT 优先，内存表回退；过期自动清理） */
    public static boolean isActive(LivingEntity entity) {
       if (entity == null || entity.level().isClientSide()) {
          return false;
       }
+      long gameTime = entity.level().getGameTime();
+      // ① NBT 标记优先 —— 正常实体持久化路径（服务器重启后仍可恢复）
       CompoundTag data = entity.getPersistentData();
-      if (data == null || !data.contains(NBT_KEY)) {
-         return false;
+      if (data != null && data.contains(NBT_KEY)) {
+         long endTime = data.getLong(NBT_KEY);
+         if (gameTime > endTime) {
+            data.remove(NBT_KEY); // 过期自动清理
+         } else {
+            return true;
+         }
       }
-      long endTime = data.getLong(NBT_KEY);
-      if (entity.level().getGameTime() > endTime) {
-         data.remove(NBT_KEY); // 过期自动清理
-         return false;
-      }
-      return true;
+      // ② 内存表回退 —— 实体重写 getPersistentData() 返回空 tag 时
+      //    （如启示录亚波伦 Apostle），NBT 标记写入即丢，仅能靠内存表判定
+      TrackedEntry entry = TRACKED_HEALTH.get(entity.getUUID());
+      return entry != null && gameTime <= entry.endTime;
    }
 
    /** 向目标施加禁疗之触标记，持续时间单位：tick */
    public static void apply(LivingEntity target, int durationTicks) {
       long endTime = target.level().getGameTime() + durationTicks;
+      // 内存表记录（血量低点 + 到期时间）—— 双源核心：
+      // getPersistentData() 被重写返回空 tag 的实体（如亚波伦）NBT 标记写入即丢，
+      // isActive() 回退查此表，钳制链不因 NBT 失效
+      // 基准血量用架空参照（getEffectiveHealth）：自定义血条实体（亚波伦）原版槽架空，
+      // getHealthDirect 读到的是不动值，钳制基准必须取真实血量
+      TRACKED_HEALTH.put(target.getUUID(), new TrackedEntry(HealthUtil.getEffectiveHealth(target), endTime));
+      // NBT 持久化（正常实体重启后可恢复；对重写 getPersistentData 的实体静默无效）
       target.getPersistentData().putLong(NBT_KEY, endTime);
-      // 记录施加时的血量，用于后续拦截 setHealth() 直写回血
-      TRACKED_HEALTH.put(target.getUUID(), HealthUtil.getHealthDirect(target));
       // 同时施加 MobEffect 作为视觉指示器
       MobEffect visualEffect = ModEffects.UNDYING_SLASH.get();
       if (visualEffect != null) {
@@ -84,12 +119,41 @@ public class HealingBlockEffect extends MobEffect {
 
    /** 获取实体当前的追踪血量（用于 Mixin 等外部调用者读取钳制基准） */
    public static Float getTrackedHealth(LivingEntity entity) {
-      return TRACKED_HEALTH.get(entity.getUUID());
+      TrackedEntry entry = TRACKED_HEALTH.get(entity.getUUID());
+      return entry != null ? entry.health : null;
    }
 
    /** 更新实体的追踪血量（用于 Mixin 等外部调用者在钳制后同步基准值） */
    public static void updateTrackedHealth(LivingEntity entity, float health) {
-      TRACKED_HEALTH.put(entity.getUUID(), health);
+      TrackedEntry entry = TRACKED_HEALTH.get(entity.getUUID());
+      if (entry != null) {
+         entry.health = health;
+      }
+   }
+
+   /** 记录觉醒易伤到期时间（内存 + NBT 双源，与禁疗标记同理） */
+   public static void applyVuln(LivingEntity target, long endTime) {
+      VULN_END.put(target.getUUID(), endTime);
+      target.getPersistentData().putLong(VULN_NBT_KEY, endTime);
+   }
+
+   /** 清除觉醒易伤标记（内存 + NBT） */
+   public static void removeVuln(LivingEntity entity) {
+      VULN_END.remove(entity.getUUID());
+      entity.getPersistentData().remove(VULN_NBT_KEY);
+   }
+
+   /** 读取觉醒易伤到期时间：内存表优先，NBT 兜底（重启恢复）；无标记返回 null */
+   public static Long getVulnEnd(LivingEntity entity) {
+      Long endTime = VULN_END.get(entity.getUUID());
+      if (endTime != null) {
+         return endTime;
+      }
+      CompoundTag data = entity.getPersistentData();
+      if (data != null && data.contains(VULN_NBT_KEY)) {
+         return data.getLong(VULN_NBT_KEY);
+      }
+      return null;
    }
 
    /** 检查是否应允许二阶段（Boss 实体 + 配置启用） */
@@ -120,9 +184,11 @@ public class HealingBlockEffect extends MobEffect {
          // 避免每 tick 对全服实体做 NBT 查找 + CHM 原子操作
          if (!TRACKED_HEALTH.containsKey(uuid)) return;
          if (!isActive(entity)) {
-            // 效果已过期，清理追踪记录与宽限期
+            // 效果已过期，清理追踪记录、觉醒易伤（内存 + NBT）与宽限期
             TRACKED_HEALTH.remove(uuid);
+            VULN_END.remove(uuid);
             MISSING_TICKS.remove(uuid);
+            entity.getPersistentData().remove(VULN_NBT_KEY);
          }
       }
 
@@ -139,9 +205,11 @@ public class HealingBlockEffect extends MobEffect {
       public static void onLivingDeathPreMark(LivingDeathEvent event) {
          if (isActive(event.getEntity())) {
             if (shouldAllowPhaseTwo(event.getEntity())) {
-               // 允许 Boss 进入二阶段，清理追踪记录、宽限期与 NBT 标记
-               TRACKED_HEALTH.remove(event.getEntity().getUUID());
-               MISSING_TICKS.remove(event.getEntity().getUUID());
+               // 允许 Boss 进入二阶段，清理追踪记录、觉醒易伤、宽限期与 NBT 标记
+               UUID uuid = event.getEntity().getUUID();
+               TRACKED_HEALTH.remove(uuid);
+               VULN_END.remove(uuid);
+               MISSING_TICKS.remove(uuid);
                event.getEntity().getPersistentData().remove(NBT_KEY);
                return;
             }
@@ -168,14 +236,16 @@ public class HealingBlockEffect extends MobEffect {
                Entity entity = level.getEntity(uuid);
                if (entity instanceof LivingEntity living && living.isAlive()) {
                   found.add(uuid);
-                  Float tracked = TRACKED_HEALTH.get(uuid);
-                  if (tracked != null) {
-                     float current = HealthUtil.getHealthDirect(living);
-                     if (current > tracked) {
-                        HealthUtil.setAllHealthLikeRaw(living, tracked);
-                        current = tracked;
+                  TrackedEntry entry = TRACKED_HEALTH.get(uuid);
+                  if (entry != null) {
+                     // 架空参照读数：自定义血条实体（亚波伦）原版槽被架空，
+                     // getHealthDirect 读到不动值会导致回血检测永远 false，钳制失效
+                     float current = HealthUtil.getEffectiveHealth(living);
+                     if (current > entry.health) {
+                        HealthUtil.setAllHealthLikeRaw(living, entry.health);
+                        current = entry.health;
                      }
-                     TRACKED_HEALTH.put(uuid, Math.min(current, tracked));
+                     entry.health = Math.min(current, entry.health);
                   }
                }
             }
@@ -187,6 +257,7 @@ public class HealingBlockEffect extends MobEffect {
                int missing = MISSING_TICKS.getOrDefault(uuid, 0) + 1;
                if (missing >= 2) {
                   TRACKED_HEALTH.remove(uuid);
+                  VULN_END.remove(uuid);
                   MISSING_TICKS.remove(uuid);
                } else {
                   MISSING_TICKS.put(uuid, missing);
@@ -201,10 +272,12 @@ public class HealingBlockEffect extends MobEffect {
       @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
       public static void onLivingDeath(LivingDeathEvent event) {
          LivingEntity entity = event.getEntity();
-         // 死亡时清理追踪记录、宽限期与禁疗之触 NBT 标记（防止玩家复活后残留禁疗）
+         // 死亡时清理追踪记录、觉醒易伤（内存 + NBT）、宽限期与禁疗之触 NBT 标记（防止玩家复活后残留禁疗）
          TRACKED_HEALTH.remove(entity.getUUID());
+         VULN_END.remove(entity.getUUID());
          MISSING_TICKS.remove(entity.getUUID());
          entity.getPersistentData().remove(NBT_KEY);
+         entity.getPersistentData().remove(VULN_NBT_KEY);
          CompoundTag data = entity.getPersistentData();
          if (data.contains(FORCE_KILL_KEY) && data.getBoolean(FORCE_KILL_KEY)) {
             data.remove(FORCE_KILL_KEY);

@@ -13,7 +13,6 @@ import com.ayin90723.adventure_power.util.FriendlyFireProtection;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
-import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
@@ -166,7 +165,7 @@ public class RecoveryHandler {
                     float excess = toFull > 0 ? Math.max(0, healAmount - toFull) : healAmount;
                     if (excess > 0) {
                         float shieldCap = attacker.getMaxHealth()
-                            * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_LIFESTEAL_SHIELD_CAP.get().floatValue();
+                            * ModConfig.AWAKEN_LIFESTEAL_SHIELD_CAP.get().floatValue();
                         excess = Math.min(excess, shieldCap);
                         if (excess > 0.0F) {
                             // 上限只限模组新增部分：min(新总量, max(既有吸收, shieldCap))——

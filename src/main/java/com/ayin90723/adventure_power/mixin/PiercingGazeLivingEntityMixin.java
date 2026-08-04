@@ -1,19 +1,13 @@
 package com.ayin90723.adventure_power.mixin;
 
 import com.ayin90723.adventure_power.util.DamageUtil;
-import com.ayin90723.adventure_power.util.FriendlyFireProtection;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import com.ayin90723.adventure_power.util.PiercingGazeUtil;
-import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.damagesource.DamageSource;
-import net.minecraftforge.common.ForgeHooks;
-import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.ArrayDeque;
@@ -22,52 +16,48 @@ import java.util.Deque;
 /**
  * 破敌之眼 Mixin（第二层 + 兜底） - 穿透通过重写 {@code hurt()} 实现的自定义无敌。
  * <p>
+ * priority = 2000（高于默认 1000）：本类注入 {@code hurt()} RETURN（穿透结算）必须
+ * 先于 {@code RejectHealthManipMixin.onHurtExit}（同一注入点的 HURT_DEPTH 递减）执行——
+ * 否则穿透路径 {@code invokeActuallyHurt → setHealth} 时 HURT_DEPTH 已归零，
+ * 会被拒绝篡改按"外部篡改"拦截/反弹，伤害走完全不同的结算分支。
+ * <p>
  * 第一层 {@link PiercingGazeMixin} 拦截 {@code isInvulnerableTo()} 检查，
  * 处理原版及大多数基于该方法实现的模组无敌。但部分 Boss（如钢铁守护者）直接重写
  * {@code hurt()} 方法，在其内部返回 false 来实现无敌，完全绕过了
  * {@code isInvulnerableTo()}。
  * <p>
- * 本 Mixin 包含两个注入点：
- * <ul>
- *   <li><b>Layer 2.5</b> - {@link #redirectOnLivingHurt}：{@code @Redirect} 替换
- *        {@code ForgeHooks.onLivingHurt()} 调用，手动 post {@link LivingHurtEvent}
- *        （让淬魂等附魔正常追加伤害），但强制返回值不低于原始伤害量 -
- *        Boss 限伤只能让伤害涨不能降。</li>
- *   <li><b>Layer 2</b> - {@link #onHurtReturn}：{@code @Inject} 注入
- *        {@code hurt()} 的 RETURN 点，若伤害被阻止则通过 {@code actuallyHurt()}
- *        穿透自定义无敌逻辑。</li>
- * </ul>
+ * 本 Mixin 在 {@code hurt()} RETURN 点（{@link #onHurtReturn}）做穿透结算：
+ * 若伤害被阻止则通过 {@code actuallyHurt()} 穿透自定义无敌逻辑。
  *
  * <h3>穿透结算段</h3>
  * 实际的伤害直写 / 血量兜底 / 清无敌字段统一由 {@link PiercingGazeUtil} 提供，
  * 与 {@link PiercingGazePlayerAttackMixin}(Layer 0) 共用同一套逻辑，保证一致。
  *
  * <h3>防 LivingHurtEvent 重复 post（核心）</h3>
- * 两个注入点都可能 post LivingHurtEvent，必须避免同一次 hurt() 调用内重复 post
- * （否则淬魂追加伤害 / 嗜血吸血 / 影杀影子血量等所有监听器触发两次）。
- * 按 hurt() 被 Boss 拦截的位置分三种情况：
+ * "事件已发"判定统一走 {@link PiercingGazeUtil#peekVanillaHurtEventPosted()}（非消费式）：
+ * 单一来源 = {@code CombatAbilityHandler.onLivingHurt} 监听器（任何 post 都触发）。
+ * Forge 1.20.1 把 {@code ForgeHooks.onLivingHurt} 的调用点放在 {@code actuallyHurt}
+ * （m_6475_）而非 {@code hurt}（m_6469_）——旧 Layer 2.5 @Redirect 在该位置是死靶
+ * （require=0 静默失效），已移除。按原版管线是否已结算分两种情况：
  * <ul>
- *   <li><b>A 完全拦截</b>（Boss 不调 super return false）：redirect 未执行 ->
- *       onHurtReturn 补 post 一次</li>
- *   <li><b>B 正常流程</b>（super 走完，actuallyHurt 执行，return true）：
- *       redirect post 一次，onHurtReturn 不再 post</li>
- *   <li><b>C 中途拦截</b>（走到 onLivingHurt 后 return false）：redirect post 过 ->
- *       onHurtReturn 不再 post，直接用 redirect 的 max amount 补 actuallyHurt</li>
+ *   <li><b>已 post（Boss 调 super 走到 actuallyHurt）</b>：事件已结算、伤害可能已扣，
+ *       Boss 仅把返回值改为 false（fdbosses 类）-> 放行 + 血量兜底，不重复结算</li>
+ *   <li><b>未 post（Boss 完全拦截，未走到 actuallyHurt）</b>：补 post（让淬魂等监听器
+ *       正常处理）+ actuallyHurt 直写穿透</li>
  * </ul>
- * 通过 {@link #PIERCING_EVENT_POSTED} 标记区分 A 与 C。
  *
  * <h3>防事件风暴（核心）</h3>
  * 第三方模组若在 LivingHurtEvent 监听器里再调 {@code target.hurt()}（破敌之眼源），
  * 会形成递归事件风暴。{@link #IN_PIERCING} 风暴守卫检测"是否已在外层破敌之眼穿透内"，
- * 若是则走原版 ForgeHooks.onLivingHurt（不手动 post），阻断递归。
+ * 手动 post 前置 true（post 期间递归 hurt 不再穿透），阻断递归。
  *
  * <h3>栈式隔离</h3>
- * 三个 ThreadLocal 代表"本层"状态。{@link #onHurtEnter}（HEAD）将外层状态压栈并重置本层，
+ * 两个 ThreadLocal 代表"本层"状态。{@link #onHurtEnter}（HEAD）将外层状态压栈并重置本层，
  * {@link #onHurtReturn}（RETURN）finally 弹栈恢复外层。这样淬魂在 LivingHurtEvent 里
  * 调 {@code soul_strike hurt}（递归）不会污染外层标记。递归 hurt 走原版不设本层标记，
  * 外层标记完整保留。
  */
-@Mixin(LivingEntity.class)
+@Mixin(value = LivingEntity.class, priority = 2000)
 public abstract class PiercingGazeLivingEntityMixin {
 
     // ===== actuallyHurt Invoker 已迁移至 PiercingGazeLivingEntityAccessor =====
@@ -75,23 +65,23 @@ public abstract class PiercingGazeLivingEntityMixin {
 
     // ===== ThreadLocal：本层破敌之眼穿透状态（栈式隔离递归调用） =====
 
-    /** 风暴守卫：本层是否已在破敌之眼穿透内（redirect 手动 post 后置 true） */
+    /** 风暴守卫：本层是否已在破敌之眼穿透内（手动 post 事件前置 true，防事件风暴） */
     private static final ThreadLocal<Boolean> IN_PIERCING = ThreadLocal.withInitial(() -> false);
-    /** 本层 LivingHurtEvent 是否已被 redirect 手动 post 过（区分情况 A 与 C） */
-    private static final ThreadLocal<Boolean> PIERCING_EVENT_POSTED = ThreadLocal.withInitial(() -> false);
-    /** redirect 取 max 后的有效伤害量，供情况 C 补 actuallyHurt 时使用 */
-    private static final ThreadLocal<Float> PIERCING_EFFECTIVE_AMOUNT = new ThreadLocal<>();
     /** 本层伤害结算前的真实血量（onHurtEnter 缓存）——RETURN 注入时 actuallyHurt 已执行，
      *  此时 getHealth() 是扣血后值，若用作 afterPierceFallback 的参照会被判定"血量未恢复"
      *  而对普通命中重复直写（双重扣血） */
     private static final ThreadLocal<Float> PIERCING_HEALTH_BEFORE = new ThreadLocal<>();
     // 注：事件已 post 标记（VANILLA_HURT_EVENT_POSTED）与消费方法已移至 PiercingGazeUtil——
     // @Mixin 类禁止非 private static 方法（Mixin Applicator 会尝试混入目标类导致 InvalidMixinException）。
+    // 事件已发判定统一走 PiercingGazeUtil.peek/consumeVanillaHurtEventPosted（单一来源 = CombatAbilityHandler 监听器）：
+    // Forge 1.20.1 把 ForgeHooks.onLivingHurt 的调用点放在 actuallyHurt（m_6475_）而非 hurt（m_6469_），
+    // 旧 Layer 2.5 @Redirect(method="m_6469_", target=onLivingHurt) 是死靶（require=0 静默失效），
+    // 导致 PIERCING_EVENT_POSTED 恒 false、对"super 扣血但 return false"的 Boss 重复结算——已移除该 redirect。
 
-    /** 递归调用栈帧：保存外层 (inPiercing, eventPosted, effectiveAmount, healthBefore) 四态，effectiveAmount/healthBefore 可为 null */
-    private record PiercingStackFrame(boolean inPiercing, boolean eventPosted, Float effectiveAmount, Float healthBefore) {}
+    /** 递归调用栈帧：保存外层 (inPiercing, healthBefore) 两态，healthBefore 可为 null */
+    private record PiercingStackFrame(boolean inPiercing, Float healthBefore, long postedBase) {}
 
-    /** 递归调用栈：保存外层 (IN_PIERCING, POSTED, AMOUNT, HEALTH_BEFORE) 四态，hurt HEAD 压栈、RETURN 弹栈 */
+    /** 递归调用栈：保存外层 (IN_PIERCING, HEALTH_BEFORE) 两态，hurt HEAD 压栈、RETURN 弹栈 */
     private static final ThreadLocal<Deque<PiercingStackFrame>> PIERCING_STACK = ThreadLocal.withInitial(ArrayDeque::new);
 
     @Inject(method = "m_6469_", at = @At("HEAD"))
@@ -103,21 +93,22 @@ public abstract class PiercingGazeLivingEntityMixin {
         if (stack.size() > 64) {
             stack.clear();
             IN_PIERCING.set(false);
-            PIERCING_EVENT_POSTED.set(false);
-            PIERCING_EFFECTIVE_AMOUNT.remove();
             PIERCING_HEALTH_BEFORE.remove();
         }
-        // 压栈保存外层状态，重置本层（递归 hurt 不污染外层）
+        // 压栈保存外层状态，重置本层（递归 hurt 不污染外层）。
+        // postedBase = 本层开始时的 post 计数：本层"是否已 post" = 当前计数 > postedBase，
+        // 嵌套 hurt 的新增 post 只影响其自身基准，外层判定不受污染（计数方案天然栈式隔离，
+        // 无需清除/恢复布尔——旧布尔方案嵌套未 post 的 hurt 会清掉外层标记导致外层误判）
         stack.push(new PiercingStackFrame(
-            IN_PIERCING.get(), PIERCING_EVENT_POSTED.get(), PIERCING_EFFECTIVE_AMOUNT.get(),
-            PIERCING_HEALTH_BEFORE.get()
+            IN_PIERCING.get(), PIERCING_HEALTH_BEFORE.get(),
+            PiercingGazeUtil.getVanillaHurtEventPostCount()
         ));
         IN_PIERCING.set(false);
-        PIERCING_EVENT_POSTED.set(false);
-        PIERCING_EFFECTIVE_AMOUNT.remove();
-        // 缓存伤害结算前的真实血量（直读 DataItem，防 getHealth 被 ASM/TrueHealth 篡改）
+        // 缓存伤害结算前的真实血量（架空参照读数：自定义血条 Boss 原版槽被架空，
+        // getHealthDirect 读到不动值会导致兜底检测永远误判"血量未下降"而双重扣血；
+        // 防 getHealth 被 ASM/TrueHealth 篡改则靠架空参照的差值判定回退到 DataItem）
         LivingEntity self = (LivingEntity) (Object) this;
-        PIERCING_HEALTH_BEFORE.set(HealthUtil.getHealthDirect(self));
+        PIERCING_HEALTH_BEFORE.set(HealthUtil.getEffectiveHealth(self));
     }
 
     /**
@@ -170,16 +161,18 @@ public abstract class PiercingGazeLivingEntityMixin {
                 return;
             }
 
-            // 攻击者持有破敌之眼 -> 穿透该实体的一切无敌手段
-            Entity attacker = PiercingGazeUtil.resolveAttacker(source);
-            if (attacker instanceof LivingEntity living && PiercingGazeUtil.hasPiercingGaze(living)) {
-                // 友好火力保护：不穿透自己驯服生物的无敌
-                if (FriendlyFireProtection.isOwnerTarget(living, self)) {
-                    return;
-                }
+            // 穿透门禁统一入口：攻击者持破敌之眼 + 非友伤 + 非玩家目标（PVP 禁用）
+            if (PiercingGazeUtil.shouldPierce(source, self)) {
 
                 boolean wasBlocked = !cir.getReturnValue();
-                boolean posted = PIERCING_EVENT_POSTED.get();
+                // 本层是否已 post LivingHurtEvent（当前计数 > 本层基准）。
+                // 单一来源 = CombatAbilityHandler 监听器 mark；Forge 1.20.1 的
+                // ForgeHooks.onLivingHurt 在 actuallyHurt（m_6475_）内调用——
+                // hurt() 正常走到 actuallyHurt 即已 post。计数方案天然栈式隔离：
+                // 嵌套 hurt 的 post 只影响其自身基准，本层基准 = 栈帧压栈时记录的值
+                PiercingStackFrame frame = PIERCING_STACK.get().peek();
+                boolean posted = PiercingGazeUtil.peekVanillaHurtEventPosted(
+                    frame != null ? frame.postedBase() : 0L);
                 // 伤害结算前的真实血量（onHurtEnter 缓存）——RETURN 时 actuallyHurt 已执行，
                 // self.getHealth() 是扣血后值，若用它作参照，普通命中会被判定"血量未恢复"
                 // 而触发 afterPierceFallback 的兜底直写，造成双重扣血。
@@ -189,26 +182,31 @@ public abstract class PiercingGazeLivingEntityMixin {
                     ? PIERCING_HEALTH_BEFORE.get() : self.getHealth();
 
                 if (wasBlocked) {
-                    // 情况 A/C：actuallyHurt 未由原版执行（Boss 拦截 hurt 不调 super），需主动直写
-                    float effectiveAmount;
                     if (posted) {
-                        // 情况 C：redirect 已 post 过 LivingHurtEvent，用其取 max 后的有效伤害量
-                        effectiveAmount = PIERCING_EFFECTIVE_AMOUNT.get();
+                        // 原版管线已完整结算（actuallyHurt → onLivingHurt → 扣血），Boss 仅把
+                        // 返回值改为 false（"调 super 扣血但 return false"类，如 fdbosses）——
+                        // 放行 + 血量兜底即可，重复 post/actuallyHurt 会双倍结算
+                        //（旧 2.5 redirect 死靶时 posted 恒 false，此分支从不命中导致双倍）。
+                        cir.setReturnValue(true);
+                        PiercingGazeUtil.afterPierceFallback(self, amount, healthBefore);
                     } else {
-                        // 情况 A：Boss 完全拦截 hurt()（未走到 ForgeHooks.onLivingHurt），redirect 未触发
-                        // -> 补 post LivingHurtEvent（取 max 防限伤）让淬魂等附魔正常处理。
+                        // 情况 A：Boss 完全拦截 hurt()（未走到 actuallyHurt，事件未 post）
+                        // -> 补 post LivingHurtEvent（让淬魂等监听器正常处理）+ actuallyHurt 直写。
                         // 事件已发标记由 CombatAbilityHandler.onLivingHurt 监听器统一负责
                         //（任何 post 都触发该监听器），此处不再显式 mark
-                        effectiveAmount = PiercingGazeUtil.postHurtEvent(self, source, amount);
+                        // 风暴守卫：post 期间第三方监听器用同一源递归 target.hurt() 时，
+                        // 递归层 HEAD 压栈捕获到本层 IN_PIERCING=true 即可跳过穿透阻断递归
+                        IN_PIERCING.set(true);
+                        float effectiveAmount = PiercingGazeUtil.postHurtEvent(self, source, amount);
+                        // actuallyHurt 直写 + 血量兜底 + 清无敌字段
+                        PiercingGazeUtil.invokeActuallyHurt(self, source, effectiveAmount);
+                        cir.setReturnValue(true);
+                        PiercingGazeUtil.afterPierceFallback(self, effectiveAmount, healthBefore);
                     }
-                    // actuallyHurt 直写 + 血量兜底 + 清无敌字段
-                    PiercingGazeUtil.invokeActuallyHurt(self, source, effectiveAmount);
-                    cir.setReturnValue(true);
-                    PiercingGazeUtil.afterPierceFallback(self, effectiveAmount, healthBefore);
                 } else {
-                    // 情况 B：正常流程，actuallyHurt 已由原版管线执行，只做兜底（不重复 actuallyHurt）
-                    float effectiveAmount = posted ? PIERCING_EFFECTIVE_AMOUNT.get() : amount;
-                    PiercingGazeUtil.afterPierceFallback(self, effectiveAmount, healthBefore);
+                    // 情况 B：正常流程，actuallyHurt 已由原版管线执行（事件已按其结算），
+                    // 只做兜底（不重复 actuallyHurt / post）
+                    PiercingGazeUtil.afterPierceFallback(self, amount, healthBefore);
                 }
             }
         } finally {
@@ -217,12 +215,6 @@ public abstract class PiercingGazeLivingEntityMixin {
             PiercingStackFrame outer = stack.poll();
             if (outer != null) {
                 IN_PIERCING.set(outer.inPiercing());
-                PIERCING_EVENT_POSTED.set(outer.eventPosted());
-                if (outer.effectiveAmount() != null) {
-                    PIERCING_EFFECTIVE_AMOUNT.set(outer.effectiveAmount());
-                } else {
-                    PIERCING_EFFECTIVE_AMOUNT.remove();
-                }
                 if (outer.healthBefore() != null) {
                     PIERCING_HEALTH_BEFORE.set(outer.healthBefore());
                 } else {
@@ -231,77 +223,8 @@ public abstract class PiercingGazeLivingEntityMixin {
             } else {
                 // 栈空（最外层 hurt 退出）-> 彻底清理，防 ThreadLocal 泄漏
                 IN_PIERCING.remove();
-                PIERCING_EVENT_POSTED.remove();
-                PIERCING_EFFECTIVE_AMOUNT.remove();
                 PIERCING_HEALTH_BEFORE.remove();
             }
         }
-    }
-
-    /**
-     * Layer 2.5 - 绕过 LivingHurtEvent 中的 Boss 限伤。
-     * <p>
-     * 正常流程中 {@code ForgeHooks.onLivingHurt()} 会 post {@link LivingHurtEvent}，
-     * Boss 限伤模组在此事件中通过 {@code setAmount()} 压低伤害值。
-     * 本 Redirect 在破敌之眼攻击下替换该调用：
-     * <ul>
-     *   <li>手动 post LivingHurtEvent（让淬魂/影杀 正常追加百分比伤害）</li>
-     *   <li>返回值取 {@code Math.max(原始值, 事件值)} - 破敌之眼下伤害只能涨不能降</li>
-     *   <li>设 {@link #PIERCING_EVENT_POSTED} 标记，告知 onHurtReturn 已 post 过</li>
-     *   <li>风暴守卫：检测栈顶外层 IN_PIERCING，若外层已在破敌之眼穿透内则走原版，防事件风暴</li>
-     * </ul>
-     * 不取消事件是因为淬魂需在 LivingHurtEvent 中正常计算百分比伤害和写入 NBT。
-     *
-     * <p>目标 {@code ForgeHooks.onLivingHurt} 为 Forge 自有静态方法，
-     * 不受原版字节码混淆影响，无需 refmap 条目。</p>
-     */
-    @Redirect(
-        method = "m_6469_",
-        at = @At(
-            value = "INVOKE",
-            target = "Lnet/minecraftforge/common/ForgeHooks;onLivingHurt(Lnet/minecraft/world/entity/LivingEntity;Lnet/minecraft/world/damagesource/DamageSource;F)F",
-            remap = false
-        ),
-        require = 0
-    )
-    private float redirectOnLivingHurt(LivingEntity entity, DamageSource source, float amount) {
-        // 反重入：MME 内部穿透伤害（soul_strike / vengeance）走原版管线。
-        // 使用精确 msgId 匹配而非 BYPASSES_INVULNERABILITY 标签检查，
-        // 避免将 RevelationFix fe_power 误判为 MME 内部调用。
-        // 注：事件已发标记统一由 CombatAbilityHandler.onLivingHurt 监听器负责
-        //（任何 post 都触发该监听器），redirect 不显式 mark——避免对注入点失效的隐式依赖
-        if (DamageUtil.isInternalSource(source)) {
-            return ForgeHooks.onLivingHurt(entity, source, amount);
-        }
-
-        // 非破敌之眼攻击 -> 走原版管线
-        if (!PiercingGazeUtil.isPiercingGazeAttack(source, entity)) {
-            return ForgeHooks.onLivingHurt(entity, source, amount);
-        }
-
-        // 风暴守卫：外层已在破敌之眼穿透内（栈顶 IN_PIERCING=true）-> 不 post 事件，直接返回原 amount。
-        // 走原版 ForgeHooks.onLivingHurt 仍会 post 事件触发监听器导致递归，无法防风暴；
-        // 返回 amount 跳过 post，递归 hurt 不触发 LivingHurtEvent 监听器，打破递归链
-        Deque<PiercingStackFrame> stack = PIERCING_STACK.get();
-        PiercingStackFrame outer = stack.peek();
-        if (outer != null && outer.inPiercing()) {
-            return amount;
-        }
-
-        // 手动 post LivingHurtEvent - 让淬魂等 MME 效果正常处理。
-        // 风暴守卫标记（IN_PIERCING/PIERCING_EVENT_POSTED）须在 post **之前**设置：
-        // 第三方监听器若在事件期间用同一源再次 target.hurt()（反射/反击类逻辑），
-        // 递归层 HEAD 压栈捕获到外层 IN_PIERCING=true 才能触发风暴守卫阻断递归——
-        // post 后才设置会让递归层漏判，每层 post 形成无限递归（StackOverflowError）。
-        // 对本层 onHurtReturn 无副作用（它只读 PIERCING_EVENT_POSTED 与 EFFECTIVE_AMOUNT）。
-        IN_PIERCING.set(true);
-        PIERCING_EVENT_POSTED.set(true);
-        LivingHurtEvent event = new LivingHurtEvent(entity, source, amount);
-        MinecraftForge.EVENT_BUS.post(event);
-
-        // 伤害只能涨不能降：淬魂追加的伤害保留，Boss 限伤被忽略（effective 依赖 post 结果，post 后补设）
-        float effective = Math.max(amount, event.getAmount());
-        PIERCING_EFFECTIVE_AMOUNT.set(effective);
-        return effective;
     }
 }

@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.network;
 
+import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.handler.PlayerStateHandler;
@@ -166,8 +167,15 @@ public class NetworkHandler {
                 return;
             }
             runOnServer(ctx, player -> {
-                if (AdventureProgressCapability.isAdventurer(player)
-                    || AdventureProgressCapability.isFullyUnlocked(player)) {
+                // 门禁补全：黑名单只对恩赐永驻有意义，需能力启用；effectId 必须是已注册效果，
+                // 否则任意字符串会永久写入 persistentData 撑大 NBT
+                if (!AdventureProgressCapability.isAdventurer(player)
+                    && !AdventureProgressCapability.isFullyUnlocked(player)) return;
+                var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
+                if (progressOpt.isEmpty()) return;
+                if (!AbilityGate.isActive(progressOpt.get(), AbilityIds.PERPETUAL_BLESSING)) return;
+                if (net.minecraftforge.registries.ForgeRegistries.MOB_EFFECTS.containsKey(
+                        net.minecraft.resources.ResourceLocation.tryParse(msg.effectId))) {
                     BuffExclusionManager.toggleBuffExclusion(player, msg.effectId);
                     Set<String> updated = BuffExclusionManager.getBuffExclusionSet(player);
                     INSTANCE.send(PacketDistributor.PLAYER.with(() -> player),
@@ -197,6 +205,13 @@ public class NetworkHandler {
         public BuffBlacklistSyncPacket(FriendlyByteBuf buf) {
             this.request = buf.readBoolean();
             int size = buf.readVarInt();
+            // 解码钳制（按方向区分）：
+            //  C2S 请求（request=true）：黑名单应为空，钳 128 防伪造包把 size 撑到 VarInt 上限
+            //    （2.68 亿）OOM 服务端——decode 在网络线程先于 handle 的方向防御执行，必须钳制；
+            //  S2C 响应（request=false）：服务端发的完整排除列表，大型整合包效果数可能超 128，
+            //    钳 2048 仅防异常包，不截断合法数据
+            int cap = this.request ? 128 : 2048;
+            if (size > cap) size = cap;
             Set<String> set = new HashSet<>();
             for (int i = 0; i < size; i++) set.add(buf.readUtf(64));
             this.blacklist = set;
@@ -318,7 +333,7 @@ public class NetworkHandler {
         }
     }
 
-    /** 客户端→服务端：请求重新同步冒险进度 Capability */
+    /** 客户端→服务端：冒险进度同步请求（服务端限频 1s 一次后回发全量 Capability） */
     public static class AdventureSyncRequestPacket {
         public AdventureSyncRequestPacket() {}
 
@@ -330,12 +345,29 @@ public class NetworkHandler {
             return new AdventureSyncRequestPacket(buf);
         }
 
+        /** 限频表：玩家 UUID -> 上次处理请求的服务端全局 tick（ServerLifecycleHooks）。
+         *  每次处理都会回发全量 Capability NBT（含里程碑元数据，KB 级），
+         *  恶意客户端刷请求会放大服务器→客户端流量——限 1s（20 tick）一次。
+         *  用全局 tick 而非维度 gameTime：1.20.1 每维度计时独立，跨维度会基准错位。
+         *  put 时顺带清理超时条目（防长期服务器 UUID 累积） */
+        private static final java.util.Map<java.util.UUID, Long> SYNC_REQUEST_COOLDOWN =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
         public static void handle(AdventureSyncRequestPacket msg, Supplier<NetworkEvent.Context> ctx) {
             if (ctx.get().getDirection() != NetworkDirection.PLAY_TO_SERVER) {
                 ctx.get().setPacketHandled(true);
                 return;
             }
-            runOnServer(ctx, player -> SyncUtil.syncToClient(player));
+            runOnServer(ctx, player -> {
+                long now = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer().getTickCount();
+                Long last = SYNC_REQUEST_COOLDOWN.get(player.getUUID());
+                if (last != null && now - last < 20) return; // 1s 限频，静默丢弃
+                if (SYNC_REQUEST_COOLDOWN.size() > 2048) {
+                    SYNC_REQUEST_COOLDOWN.values().removeIf(t -> now - t > 6000); // 5 分钟超时清理
+                }
+                SYNC_REQUEST_COOLDOWN.put(player.getUUID(), now);
+                SyncUtil.syncToClient(player);
+            });
         }
     }
 

@@ -17,6 +17,7 @@ import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.*;
+import java.util.function.Predicate;
 
 /**
  * 里程碑触发器管理器 — 根据 MilestoneRegistry 中的 trigger 定义注册事件监听。
@@ -81,6 +82,10 @@ public class MilestoneTriggerManager {
 
     /** 门禁后业务（由 PlayerTickDispatcher 调用）：survive_night 里程碑检测 */
     public static void onTickSurviveNight(Player player, IAdventureProgress progress) {
+        // 固定时间维度（下界 fixedTime=18000 / 末地 fixedTime=6000）入口统一排除：
+        // isNight/isDay 在固定时间维度恒为 false（不参与昼夜判定），主世界夜晚标记的 PASSED
+        // 带入固定维度会被"白天消费"分支误消费解锁——排除后标记/消费两分支都不执行
+        if (player.level().dimensionType().hasFixedTime()) return;
         List<Milestone> ms = MilestoneRegistry.getByTriggerType("survive_night");
         if (ms.isEmpty()) return;
         UUID uuid = player.getUUID();
@@ -88,6 +93,7 @@ public class MilestoneTriggerManager {
         if (allDone(ms, triggered, progress)) return;
 
         // 夜间（日落后 skyDarken≥4）：标记"本夜已度过"——正常度过与睡觉跳夜均覆盖
+        //（固定时间维度已在入口统一排除）
         if (player.level().isNight()) {
             SURVIVE_NIGHT_PASSED.put(uuid, true);
             return;
@@ -105,51 +111,7 @@ public class MilestoneTriggerManager {
         }
     }
 
-    // ===== first_death =====
-
-    @SubscribeEvent
-    public static void onPlayerFirstDeath(LivingDeathEvent event) {
-        if (!(event.getEntity() instanceof ServerPlayer player)) return;
-        if (player.level().isClientSide()) return;
-        if (event.isCanceled()) return;
-
-        UUID uuid = player.getUUID();
-        Set<String> triggered = FIRST_DEATH_TRIGGERED.computeIfAbsent(uuid, k -> new HashSet<>());
-        if (!AdventureProgressCapability.isAdventurer(player)) return;
-
-        var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
-        if (progressOpt.isEmpty()) return;
-        for (Milestone m : MilestoneRegistry.getByTriggerType("first_death")) {
-            if (triggered.contains(m.id())) continue;
-            if (progressOpt.map(p -> p.isMilestoneUnlocked(m.id())).orElse(true)) continue;
-            AdventureProgressCapability.grantMilestone(player, m.id());
-            triggered.add(m.id());
-        }
-    }
-
-    // ===== first_trade =====
-
-    @SubscribeEvent
-    public static void onPlayerFirstTrade(PlayerInteractEvent.EntityInteract event) {
-        if (!(event.getEntity() instanceof ServerPlayer player)) return;
-        if (player.level().isClientSide()) return;
-        if (!(event.getTarget() instanceof Villager)) return;
-
-        UUID uuid = player.getUUID();
-        Set<String> triggered = FIRST_TRADE_TRIGGERED.computeIfAbsent(uuid, k -> new HashSet<>());
-        if (!AdventureProgressCapability.isAdventurer(player)) return;
-
-        var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
-        if (progressOpt.isEmpty()) return;
-        for (Milestone m : MilestoneRegistry.getByTriggerType("first_trade")) {
-            if (triggered.contains(m.id())) continue;
-            if (progressOpt.map(p -> p.isMilestoneUnlocked(m.id())).orElse(true)) continue;
-            AdventureProgressCapability.grantMilestone(player, m.id());
-            triggered.add(m.id());
-        }
-    }
-
-    // ===== y_below（由 PlayerTickDispatcher 分发，已统一门禁与 resolve） =====
+    // ===== y_below / reach_y（由 PlayerTickDispatcher 分发，已统一门禁与 resolve） =====
 
     /** 门禁后业务（由 PlayerTickDispatcher 调用）：y_below 里程碑检测 */
     public static void onTickYBelow(Player player, IAdventureProgress progress) {
@@ -172,8 +134,6 @@ public class MilestoneTriggerManager {
         }
     }
 
-    // ===== reach_y（由 PlayerTickDispatcher 分发，已统一门禁与 resolve） =====
-
     /** 门禁后业务（由 PlayerTickDispatcher 调用）：reach_y 里程碑检测（Y ≥ 阈值） */
     public static void onTickReachY(Player player, IAdventureProgress progress) {
         List<Milestone> ms = MilestoneRegistry.getByTriggerType("reach_y");
@@ -195,7 +155,53 @@ public class MilestoneTriggerManager {
         }
     }
 
-    // ===== first_kill =====
+    // ===== 事件类触发器统一处理（first_death / first_trade / first_kill / enter_dimension / obtain_item） =====
+
+    /**
+     * 事件类触发器统一入口：门禁 → resolve → 遍历匹配 → 解锁记录。
+     * <p>
+     * 五个事件 handler 仅"匹配条件"不同，其余（ServerPlayer 强转 / isAdventurer 门禁 /
+     * resolve / computeIfAbsent / triggered+isMilestoneUnlocked 双查 / grantMilestone+记录）
+     * 完全一致，收敛于此消除 ~120 行样板。
+     * <p>
+     * 门禁（isAdventurer）前置在 computeIfAbsent 之前：非冒险者玩家的事件
+     * 不再向 map 写入空 Set（原实现先 computeIfAbsent 后门禁，为门禁外玩家付 map 写入开销）。
+     *
+     * @param type        trigger type（"first_death" 等）
+     * @param triggeredMap 该类型的已触发记录表
+     * @param matcher     匹配条件；null 表示无条件匹配
+     */
+    private static void triggerMilestones(ServerPlayer player, String type,
+                                          Map<UUID, Set<String>> triggeredMap, Predicate<Milestone> matcher) {
+        if (!AdventureProgressCapability.isAdventurer(player)) return;
+        var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
+        if (progressOpt.isEmpty()) return;
+        UUID uuid = player.getUUID();
+        Set<String> triggered = triggeredMap.computeIfAbsent(uuid, k -> new HashSet<>());
+        for (Milestone m : MilestoneRegistry.getByTriggerType(type)) {
+            if (triggered.contains(m.id())) continue;
+            if (progressOpt.map(p -> p.isMilestoneUnlocked(m.id())).orElse(true)) continue;
+            if (matcher != null && !matcher.test(m)) continue;
+            AdventureProgressCapability.grantMilestone(player, m.id());
+            triggered.add(m.id());
+        }
+    }
+
+    @SubscribeEvent
+    public static void onPlayerFirstDeath(LivingDeathEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        if (player.level().isClientSide()) return;
+        if (event.isCanceled()) return;
+        triggerMilestones(player, "first_death", FIRST_DEATH_TRIGGERED, null);
+    }
+
+    @SubscribeEvent
+    public static void onPlayerFirstTrade(PlayerInteractEvent.EntityInteract event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        if (player.level().isClientSide()) return;
+        if (!(event.getTarget() instanceof Villager)) return;
+        triggerMilestones(player, "first_trade", FIRST_TRADE_TRIGGERED, null);
+    }
 
     @SubscribeEvent
     public static void onPlayerFirstKill(LivingDeathEvent event) {
@@ -203,76 +209,30 @@ public class MilestoneTriggerManager {
         if (!(PiercingGazeUtil.resolveAttacker(event.getSource()) instanceof ServerPlayer player)) return;
         if (player.level().isClientSide()) return;
         if (event.isCanceled()) return;
-        if (!AdventureProgressCapability.isAdventurer(player)) return;
-
-        UUID uuid = player.getUUID();
-        Set<String> triggered = FIRST_KILL_TRIGGERED.computeIfAbsent(uuid, k -> new HashSet<>());
-
-        var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
-        if (progressOpt.isEmpty()) return;
-        for (Milestone m : MilestoneRegistry.getByTriggerType("first_kill")) {
-            if (triggered.contains(m.id())) continue;
-            if (progressOpt.map(p -> p.isMilestoneUnlocked(m.id())).orElse(true)) continue;
-            if (m.trigger().entity() == null) continue;
-
+        triggerMilestones(player, "first_kill", FIRST_KILL_TRIGGERED, m -> {
+            if (m.trigger().entity() == null) return false;
             EntityType<?> requiredType = ForgeRegistries.ENTITY_TYPES.getValue(m.trigger().entity());
-            if (requiredType != null && event.getEntity().getType() == requiredType) {
-                AdventureProgressCapability.grantMilestone(player, m.id());
-                triggered.add(m.id());
-            }
-        }
+            return requiredType != null && event.getEntity().getType() == requiredType;
+        });
     }
-
-    // ===== enter_dimension =====
 
     @SubscribeEvent
     public static void onDimensionChange(PlayerEvent.PlayerChangedDimensionEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         if (player.level().isClientSide()) return;
-        if (!AdventureProgressCapability.isAdventurer(player)) return;
-
-        var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
-        if (progressOpt.isEmpty()) return;
-        UUID uuid = player.getUUID();
-        Set<String> triggered = ENTER_DIMENSION_TRIGGERED.computeIfAbsent(uuid, k -> new HashSet<>());
-
         // 1.20.1 中 PlayerChangedDimensionEvent.getTo() 返回 ResourceKey<Level>，取 location() 与 JSON 中的维度 ID 比较
         ResourceLocation to = event.getTo().location();
-        for (Milestone m : MilestoneRegistry.getByTriggerType("enter_dimension")) {
-            if (triggered.contains(m.id())) continue;
-            if (progressOpt.map(p -> p.isMilestoneUnlocked(m.id())).orElse(true)) continue;
-            if (m.trigger().dimension() == null) continue;
-            if (to.equals(m.trigger().dimension())) {
-                AdventureProgressCapability.grantMilestone(player, m.id());
-                triggered.add(m.id());
-            }
-        }
+        triggerMilestones(player, "enter_dimension", ENTER_DIMENSION_TRIGGERED,
+            m -> m.trigger().dimension() != null && to.equals(m.trigger().dimension()));
     }
-
-    // ===== obtain_item =====
 
     @SubscribeEvent
     public static void onItemPickup(PlayerEvent.ItemPickupEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         if (player.level().isClientSide()) return;
-        if (!AdventureProgressCapability.isAdventurer(player)) return;
-
-        var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
-        if (progressOpt.isEmpty()) return;
         ResourceLocation itemId = ForgeRegistries.ITEMS.getKey(event.getStack().getItem());
         if (itemId == null) return;
-
-        UUID uuid = player.getUUID();
-        Set<String> triggered = OBTAIN_ITEM_TRIGGERED.computeIfAbsent(uuid, k -> new HashSet<>());
-
-        for (Milestone m : MilestoneRegistry.getByTriggerType("obtain_item")) {
-            if (triggered.contains(m.id())) continue;
-            if (progressOpt.map(p -> p.isMilestoneUnlocked(m.id())).orElse(true)) continue;
-            if (m.trigger().item() == null) continue;
-            if (itemId.equals(m.trigger().item())) {
-                AdventureProgressCapability.grantMilestone(player, m.id());
-                triggered.add(m.id());
-            }
-        }
+        triggerMilestones(player, "obtain_item", OBTAIN_ITEM_TRIGGERED,
+            m -> m.trigger().item() != null && itemId.equals(m.trigger().item()));
     }
 }

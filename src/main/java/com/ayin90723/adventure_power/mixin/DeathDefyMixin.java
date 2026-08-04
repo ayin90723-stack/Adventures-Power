@@ -28,7 +28,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(value = LivingEntity.class, priority = 1500)
 public abstract class DeathDefyMixin {
 
-    /** 死亡抗拒无敌期间保留的目标血量（固定 20，避开 maxHealth 被污染的问题） */
+    /** 死亡抗拒无敌期间保留的目标血量下限（与 DeathDefyHandler 一致：取 maxHealth 与 20 的较大值——
+     *  上限支持坚韧之躯等提升的最大生命值，下限防外部模组临时污染 maxHealth 导致血量过低） */
     private static final float DEATH_DEFY_CLAMP_HEALTH = 20.0F;
 
     // ===== 层1：setHealth() HEAD 拦截 =====
@@ -81,14 +82,17 @@ public abstract class DeathDefyMixin {
         if (!progress.isDeathDefyInvulnerable(player.level().getGameTime())) return;
 
         float current = HealthUtil.getHealthDirect(player);
-        if (current < DEATH_DEFY_CLAMP_HEALTH) {
+        // 钳制目标与 DeathDefyHandler 一致：max(20, maxHealth)——低 maxHealth（<20）时
+        // 固定 20 会超出上限，统一两处语义
+        float clampTarget = Math.max(DEATH_DEFY_CLAMP_HEALTH, player.getMaxHealth());
+        if (current < clampTarget) {
             // catchSetTrueHealth 直写了 DataItem.value → getHealth() 已反映新值
             // setAllHealthLikeRaw 遍历所有血量条目并直接用反射写回，
             // 覆盖 VarHandle 直写的结果。
             // 只走 setHealthDirect 直写：player.setHealth 内部 clamp(value, 0, maxHealth)，
             // maxHealth 被外部污染 < 20 时会把钳制目标 20 钳回污染值（与 DeathDefyHandler 同修复）；
             // TrueHealth backup 由下次 getHealth 惰性同步（DataItem > backup 视为合法回血）
-            HealthUtil.setHealthDirect(player, DEATH_DEFY_CLAMP_HEALTH);
+            HealthUtil.setHealthDirect(player, clampTarget);
         }
     }
 }

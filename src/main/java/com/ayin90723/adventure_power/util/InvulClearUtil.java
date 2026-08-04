@@ -3,6 +3,7 @@ package com.ayin90723.adventure_power.util;
 import net.minecraft.world.entity.LivingEntity;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -71,6 +72,9 @@ public class InvulClearUtil {
         Class<?> current = clazz;
         while (current != null && current != Object.class) {
             for (Field field : current.getDeclaredFields()) {
+                // 跳过 static 字段：static 无敌计时器是类级共享，清零会影响所有实例
+                //（static final 会抛 IllegalAccessException 被吞，白扫）
+                if (Modifier.isStatic(field.getModifiers())) continue;
                 String name = field.getName();
                 boolean matches;
                 if (field.getType() == int.class) {

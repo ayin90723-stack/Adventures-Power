@@ -95,6 +95,34 @@ public class HealthUtil {
     }
 
     /**
+     * 架空参照血量 —— 统一的血量读数入口。
+     * <p>
+     * 部分 Boss（如启示录亚波伦）重写 {@code setHealth()/getHealth()} 走自定义
+     * SynchedEntityData 槽，原版血条被架空（停在初始值不动）。此时
+     * {@link #getHealthDirect} 读到的不是真实血量，回血/扣血检测会失真。
+     * <p>
+     * 判定规则与 {@link #scanCustomHealthKeys} 的参照逻辑一致：
+     * {@code |getHealth() - getHealthDirect()| > 1.0} 即判定原版血条被架空，
+     * 返回 {@code getHealth()}（重写返回的真实血量）；否则返回原版 DataItem 值
+     * （防 {@code getHealth()} 被 ASM 篡改返回假值，如终焉秩序维系者的 delta 偏移）。
+     * <p>
+     * <b>已知边界</b>：二分规则无法区分"合法重写 getHealth 返回真实血量"与
+     * "getHealth 被 delta 偏移篡改返回假值"（两者 |差值| 均 >1.0，规则都会取
+     * {@code getHealth()}）。玩家侧无风险（玩家两读数恒 ≤1 差，回落 DataItem）；
+     * 敌方目标侧的 delta 篡改场景（第三方把偏移注入 Boss 而非玩家）极罕见，
+     * 若遇到可再按实体类做白名单修正。before/after 差值类检测（兜底补刀等）
+     * 因差值抵消不受影响。
+     *
+     * @param target 目标实体
+     * @return 真实血量
+     */
+    public static float getEffectiveHealth(LivingEntity target) {
+        float direct = getHealthDirect(target);
+        float reported = target.getHealth();
+        return Math.abs(reported - direct) > 1.0F ? reported : direct;
+    }
+
+    /**
      * 直接读取 SynchedEntityData 中的真实血量字段，绕过一切 {@code getHealth()} 覆写和
      * ASM 字节码篡改（如终焉秩序维系者的 health delta 偏移）。
      * <p>
@@ -400,10 +428,10 @@ public class HealthUtil {
     private static Set<EntityDataAccessor<Float>> scanCustomHealthKeys(LivingEntity target) {
         Set<EntityDataAccessor<Float>> keys = new LinkedHashSet<>();
         net.minecraft.network.syncher.SynchedEntityData data = target.getEntityData();
-        // 参照血量：原版血条被架空（getHealth 与原版脱钩）时改用 getHealth()，否则用原版血条值
-        float directHealth = getHealthDirect(target);
-        float reportedHealth = target.getHealth();
-        float currentHealth = Math.abs(reportedHealth - directHealth) > 1.0F ? reportedHealth : directHealth;
+        // 参照血量：统一走架空参照读数入口（原版血条被架空时取 getHealth() 真实血量，
+        // 否则用原版 DataItem 值防 ASM 篡改）——与所有敌方目标侧读数判定保持一致，
+        // 避免判定规则改一处漏一处
+        float currentHealth = getEffectiveHealth(target);
 
         Class<?> current = target.getClass();
         while (current != null && current != Object.class) {
@@ -619,8 +647,19 @@ public class HealthUtil {
         ETL_PASSIVE = ep;
     }
 
-    /** 反射获取字段，先试 SRG 名再试 MCP 名 */
-    private static Field reflectField(Class<?> clz, String srg, String mcp) {
+    /**
+     * 反射获取字段，先试 SRG 名再试 MCP 名（已 setAccessible）。
+     * <p>
+     * 全模组统一的字段反射入口：CombatAbilityHandler（hurtTime/deathScore）、
+     * ShadowKillHelper 等复用，避免各自内联 try-SRG-catch-MCP 重复模式。
+     * 失败返回 null（不抛异常）。
+     *
+     * @param clz 目标类
+     * @param srg SRG 名（生产环境）
+     * @param mcp MCP 开发环境回退名
+     * @return 已 setAccessible 的 Field；失败返回 null
+     */
+    public static Field reflectField(Class<?> clz, String srg, String mcp) {
         try {
             Field f = clz.getDeclaredField(srg);
             f.setAccessible(true);
@@ -636,8 +675,17 @@ public class HealthUtil {
         }
     }
 
-    /** 反射获取方法，先试 SRG 名再试 MCP 名 */
-    private static Method reflectMethod(Class<?> clz, String srg, String mcp, Class<?>... params) {
+    /**
+     * 反射获取方法，先试 SRG 名再试 MCP 名（已 setAccessible）。
+     * 与 {@link #reflectField} 同模式，失败返回 null。
+     *
+     * @param clz    目标类
+     * @param srg    SRG 名（生产环境）
+     * @param mcp    MCP 开发环境回退名
+     * @param params 方法参数类型
+     * @return 已 setAccessible 的 Method；失败返回 null
+     */
+    public static Method reflectMethod(Class<?> clz, String srg, String mcp, Class<?>... params) {
         try {
             Method m = clz.getDeclaredMethod(srg, params);
             m.setAccessible(true);

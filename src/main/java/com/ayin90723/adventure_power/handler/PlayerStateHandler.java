@@ -1,7 +1,9 @@
 package com.ayin90723.adventure_power.handler;
 
+import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.AdventurePower;
+import com.ayin90723.adventure_power.ability.ResilienceAbility;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
@@ -27,9 +29,14 @@ import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectCategory;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.monster.Monster;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
+import net.minecraftforge.event.entity.player.PlayerEvent.PlayerLoggedOutEvent;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
-import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.living.LivingAttackEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
@@ -206,7 +213,7 @@ public class PlayerStateHandler {
     }
 
     @SubscribeEvent
-    public static void onPlayerLogout(net.minecraftforge.event.entity.player.PlayerEvent.PlayerLoggedOutEvent event) {
+    public static void onPlayerLogout(PlayerLoggedOutEvent event) {
         removeUndyingGearAwakened(event.getEntity());
         // 清理 ATTR_OWNER 中该玩家条目：玩家登出不触发 setRemoved，
         // 否则 value 强引用会阻止 ServerPlayer 被 GC（内存泄漏）
@@ -230,7 +237,7 @@ public class PlayerStateHandler {
      * 它们在当前 displayname 上追加时保留本模组前缀；完全覆盖式的模组
      * （setDisplayname 全新组件丢弃原值）无法防御，属事件机制固有边界。
      */
-    @SubscribeEvent(priority = net.minecraftforge.eventbus.api.EventPriority.HIGH)
+    @SubscribeEvent(priority = EventPriority.HIGH)
     public static void onNameFormat(net.minecraftforge.event.entity.player.PlayerEvent.NameFormat event) {
         Player player = event.getEntity();
         IAdventureProgress progress = ProgressCache.get(player);
@@ -448,23 +455,23 @@ public class PlayerStateHandler {
 
             // 觉醒：周期性给周围敌对生物施加虚弱光环（等级/时长由配置控制）
             if (progress.isFullyUnlocked()
-                && (player.level().getGameTime() + player.getId()) % com.ayin90723.adventure_power.config.ModConfig.AWAKEN_PURIFIED_SOUL_AURA_INTERVAL.get() == 0) {
-                int radius = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_PURIFIED_SOUL_RADIUS.get();
-                int weaknessAmp = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_PURIFIED_SOUL_WEAKNESS_AMPLIFIER.get();
-                int weaknessDur = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_PURIFIED_SOUL_WEAKNESS_DURATION.get();
+                && (player.level().getGameTime() + player.getId()) % ModConfig.AWAKEN_PURIFIED_SOUL_AURA_INTERVAL.get() == 0) {
+                int radius = ModConfig.AWAKEN_PURIFIED_SOUL_RADIUS.get();
+                int weaknessAmp = ModConfig.AWAKEN_PURIFIED_SOUL_WEAKNESS_AMPLIFIER.get();
+                int weaknessDur = ModConfig.AWAKEN_PURIFIED_SOUL_WEAKNESS_DURATION.get();
                 AABB aabb = player.getBoundingBox().inflate(radius);
-                List<net.minecraft.world.entity.LivingEntity> targets = player.level()
-                    .getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class, aabb,
+                List<LivingEntity> targets = player.level()
+                    .getEntitiesOfClass(LivingEntity.class, aabb,
                         e -> e != player && e.isAlive()
                             && e instanceof net.minecraft.world.entity.monster.Monster);
                 // 刷新余量：时长的 60%，且至少覆盖到下一次施加（避免配置短时长时断档）
                 int refreshThreshold = Math.min(weaknessDur * 3 / 5,
-                    com.ayin90723.adventure_power.config.ModConfig.AWAKEN_PURIFIED_SOUL_AURA_INTERVAL.get());
-                for (net.minecraft.world.entity.LivingEntity target : targets) {
-                    net.minecraft.world.effect.MobEffectInstance existing = target.getEffect(MobEffects.WEAKNESS);
+                    ModConfig.AWAKEN_PURIFIED_SOUL_AURA_INTERVAL.get());
+                for (LivingEntity target : targets) {
+                    MobEffectInstance existing = target.getEffect(MobEffects.WEAKNESS);
                     if (existing == null || existing.getAmplifier() < weaknessAmp
                         || existing.getDuration() < refreshThreshold) {
-                        target.addEffect(new net.minecraft.world.effect.MobEffectInstance(
+                        target.addEffect(new MobEffectInstance(
                             MobEffects.WEAKNESS, weaknessDur, weaknessAmp,
                             false, false, true));
                     }
@@ -474,7 +481,10 @@ public class PlayerStateHandler {
 
         // ---- 翱翔 ----
         if (progress.isAbilityEnabled(AbilityIds.SOAR)) {
-            if (!player.getAbilities().mayfly) {
+            // 守卫与其余三处授予路径（changeGameMode/restoreSoarFlight/applySoarState）一致：
+            // 创造/旁观模式已有 mayfly 或不应被授予，避免标记污染
+            if (!player.getAbilities().mayfly && !player.getAbilities().instabuild
+                && !player.isSpectator()) {
                 player.getAbilities().mayfly = true;
                 // 不自动开启 flying，让玩家自己双击空格
                 player.onUpdateAbilities();
@@ -485,7 +495,7 @@ public class PlayerStateHandler {
             // flyingSpeed 的设定）；写入后同步客户端（setFlyingSpeed 不会自动发包，
             // 客户端 LocalPlayer 保持旧速度直到下次 abilities 同步）
             if (progress.isFullyUnlocked()) {
-                double targetSpeed = 0.05 * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SOAR_SPEED.get();
+                double targetSpeed = 0.05 * ModConfig.AWAKEN_SOAR_SPEED.get();
                 if (Math.abs(player.getAbilities().getFlyingSpeed() - targetSpeed) > 0.0001) {
                     player.getAbilities().setFlyingSpeed((float) targetSpeed);
                     player.onUpdateAbilities();
@@ -518,10 +528,10 @@ public class PlayerStateHandler {
         long sanctuaryNow = player.level().getGameTime();
         boolean inSanctuary = progress.getSanctuaryInvulEnd() > sanctuaryNow
             && progress.isAbilityEnabled(AbilityIds.ACTIVE_SKILL);
-        var sanctuarySpeedAttr = player.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED);
+        var sanctuarySpeedAttr = player.getAttribute(Attributes.MOVEMENT_SPEED);
         if (inSanctuary && sanctuarySpeedAttr != null) {
             double target = progress.isFullyUnlocked()
-                ? 0.1 * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SANCTUARY_SPEED.get()
+                ? 0.1 * ModConfig.AWAKEN_SANCTUARY_SPEED.get()
                 : 0.0;
             if (Math.abs(sanctuarySpeedAttr.getBaseValue() - target) > 0.001) {
                 // 首次激活：记录原始移动速度（恢复时还原，不覆盖其他模组修改）
@@ -538,7 +548,7 @@ public class PlayerStateHandler {
                 // 则判定为本模组残留，回归原版默认 0.1；否则视为其他模组的修改，不覆盖。
                 // 与 ExplorationAbilityHandler 的 maxHealth/reach 残留判定同模式。
                 double sanctuaryTarget = progress.isFullyUnlocked()
-                    ? 0.1 * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_SANCTUARY_SPEED.get()
+                    ? 0.1 * ModConfig.AWAKEN_SANCTUARY_SPEED.get()
                     : 0.0;
                 if (Math.abs(sanctuarySpeedAttr.getBaseValue() - sanctuaryTarget) <= 0.001) {
                     sanctuarySpeedAttr.setBaseValue(0.1);
@@ -572,15 +582,19 @@ public class PlayerStateHandler {
             // 基于已有层数减伤
             int stacks = progress.getResilienceStacks();
             if (stacks > 0) {
-                float reduction = stacks * com.ayin90723.adventure_power.config.ModConfig.RESILIENCE_DAMAGE_REDUCTION_PER_STACK.get().floatValue();
+                float reduction = stacks * ModConfig.RESILIENCE_DAMAGE_REDUCTION_PER_STACK.get().floatValue();
                 float newAmount = event.getAmount() * (1.0F - reduction);
                 event.setAmount(Math.max(newAmount, 0.0F));
             }
 
             // 叠层（上限由能力里程碑配置决定，觉醒 +6）
-            int maxStacks = (int) ((com.ayin90723.adventure_power.ability.ResilienceAbility)
-                com.ayin90723.adventure_power.ability.AbilityRegistry.get(AbilityIds.RESILIENCE))
-                .value(AbilityGate.effectiveCount(progress, AbilityIds.RESILIENCE), progress.isFullyUnlocked());
+            // 判空 + instanceof：与 CombatAbilityHandler 淬魂的标准模式一致，
+            // 避免注册表/数据包异常时此处成为全模组唯一 NPE/CCE 路径
+            int maxStacks = 0;
+            var resilienceAbility = AbilityRegistry.get(AbilityIds.RESILIENCE);
+            if (resilienceAbility instanceof ResilienceAbility ra) {
+                maxStacks = (int) ra.value(AbilityGate.effectiveCount(progress, AbilityIds.RESILIENCE), progress.isFullyUnlocked());
+            }
             if (stacks < maxStacks) {
                 progress.setResilienceStacks(stacks + 1);
             }
@@ -595,18 +609,18 @@ public class PlayerStateHandler {
     // ========================================================================
 
     private static void applyUndyingGearAwakened(Player player) {
-        var armorAttr = player.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.ARMOR);
+        var armorAttr = player.getAttribute(Attributes.ARMOR);
         if (armorAttr != null) {
             var existing = armorAttr.getModifier(AWAKEN_UNDYING_ARMOR_UUID);
             // count equipped armor pieces
             int pieces = 0;
-            for (net.minecraft.world.entity.EquipmentSlot slot : net.minecraft.world.entity.EquipmentSlot.values()) {
-                if (slot.getType() == net.minecraft.world.entity.EquipmentSlot.Type.ARMOR
+            for (EquipmentSlot slot : EquipmentSlot.values()) {
+                if (slot.getType() == EquipmentSlot.Type.ARMOR
                     && !player.getItemBySlot(slot).isEmpty()) {
                     pieces++;
                 }
             }
-            double bonus = pieces * com.ayin90723.adventure_power.config.ModConfig.AWAKEN_UNDYING_ARMOR_BONUS.get();
+            double bonus = pieces * ModConfig.AWAKEN_UNDYING_ARMOR_BONUS.get();
             // 注意：值未变时不能 return——武器加成分支仍需检查
             // （否则武器 modifier 被外部移除/配置热重载后永不补挂，直到穿脱甲或 Clone）
             if (existing != null && Math.abs(existing.getAmount() - bonus) <= 0.001) {
@@ -615,34 +629,34 @@ public class PlayerStateHandler {
                 if (existing != null) {
                     armorAttr.removeModifier(AWAKEN_UNDYING_ARMOR_UUID);
                 }
-                armorAttr.addPermanentModifier(new net.minecraft.world.entity.ai.attributes.AttributeModifier(
+                armorAttr.addPermanentModifier(new AttributeModifier(
                     AWAKEN_UNDYING_ARMOR_UUID, "awakened_undying_armor", bonus,
-                    net.minecraft.world.entity.ai.attributes.AttributeModifier.Operation.ADDITION));
+                    AttributeModifier.Operation.ADDITION));
             }
         }
 
-        var atkAttr = player.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.ATTACK_DAMAGE);
+        var atkAttr = player.getAttribute(Attributes.ATTACK_DAMAGE);
         if (atkAttr != null) {
             var existing = atkAttr.getModifier(AWAKEN_UNDYING_WEAPON_UUID);
-            double weaponBonus = com.ayin90723.adventure_power.config.ModConfig.AWAKEN_UNDYING_WEAPON_BONUS.get();
+            double weaponBonus = ModConfig.AWAKEN_UNDYING_WEAPON_BONUS.get();
             if (existing != null && Math.abs(existing.getAmount() - weaponBonus) <= 0.001) {
                 return;
             }
             if (existing != null) {
                 atkAttr.removeModifier(AWAKEN_UNDYING_WEAPON_UUID);
             }
-            atkAttr.addPermanentModifier(new net.minecraft.world.entity.ai.attributes.AttributeModifier(
+            atkAttr.addPermanentModifier(new AttributeModifier(
                 AWAKEN_UNDYING_WEAPON_UUID, "awakened_undying_weapon", weaponBonus,
-                net.minecraft.world.entity.ai.attributes.AttributeModifier.Operation.MULTIPLY_BASE));
+                AttributeModifier.Operation.MULTIPLY_BASE));
         }
     }
 
     private static void removeUndyingGearAwakened(Player player) {
-        var armorAttr = player.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.ARMOR);
+        var armorAttr = player.getAttribute(Attributes.ARMOR);
         if (armorAttr != null && armorAttr.getModifier(AWAKEN_UNDYING_ARMOR_UUID) != null) {
             armorAttr.removeModifier(AWAKEN_UNDYING_ARMOR_UUID);
         }
-        var atkAttr = player.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.ATTACK_DAMAGE);
+        var atkAttr = player.getAttribute(Attributes.ATTACK_DAMAGE);
         if (atkAttr != null && atkAttr.getModifier(AWAKEN_UNDYING_WEAPON_UUID) != null) {
             atkAttr.removeModifier(AWAKEN_UNDYING_WEAPON_UUID);
         }

@@ -4,6 +4,7 @@ import com.ayin90723.adventure_power.ui.ClientHudDataCache;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.level.Level;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.RenderGuiOverlayEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -23,6 +24,9 @@ public class ActiveSkillHudOverlay {
     private static final long SWITCH_DISPLAY_TICKS = 60; // 3 秒
     /** 上次切换的游戏时间 */
     private static long lastSwitchTime = -SWITCH_DISPLAY_TICKS;
+    /** 上次渲染时所在的 level（进入新世界后重置切换标记，防止上一世界残留的
+     *  lastSwitchTime 让新世界前 3 秒误显示技能条） */
+    private static net.minecraft.world.level.Level lastRenderLevel;
 
     /** 由 InputHandler 在切换时调用 */
     public static void onSkillSwitched(long gameTime) {
@@ -32,7 +36,17 @@ public class ActiveSkillHudOverlay {
     @SubscribeEvent
     public static void onRenderOverlay(RenderGuiOverlayEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null || mc.level == null) return;
+        if (mc.player == null || mc.level == null) {
+            // 断线/回主菜单：清空 level 引用，否则其引用的区块/实体大对象图无法 GC
+            lastRenderLevel = null;
+            return;
+        }
+
+        // 跨世界重置：level 实例变化（进新世界/换服）时清掉上一世界的切换标记
+        if (mc.level != lastRenderLevel) {
+            lastRenderLevel = mc.level;
+            lastSwitchTime = -SWITCH_DISPLAY_TICKS;
+        }
 
         if (!ClientHudDataCache.activeSkillReady) return;
 
