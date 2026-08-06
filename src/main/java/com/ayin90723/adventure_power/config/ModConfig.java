@@ -357,9 +357,9 @@ public class ModConfig {
         BUILDER.pop();
 
         BUILDER.push("加速");
-        SWIFT_SPEED_BASE = BUILDER.comment("基础速度等级（SPEED amplifier，里程碑3时的值，0=速度I）")
+        SWIFT_SPEED_BASE = BUILDER.comment("基础移速加成比例（0.05=+5% 移速，经 MULTIPLY_TOTAL 属性 modifier 生效）")
             .defineInRange("swift_speed_base", 0.05, 0.0, 5.0);
-        SWIFT_SPEED_PER_MILESTONE = BUILDER.comment("每额外里程碑增加的速度等级（0.5=每2里程碑+1级）")
+        SWIFT_SPEED_PER_MILESTONE = BUILDER.comment("每额外里程碑增加的移速加成比例（0.02=每里程碑+2% 移速）")
             .defineInRange("swift_speed_per_milestone", 0.02, 0.0, 3.0);
         SWIFT_EXHAUSTION_REDUCTION = BUILDER.comment("疾跑饱食消耗降低比例（0.8=降低80%，1.0=完全免费）")
             .defineInRange("swift_exhaustion_reduction", 0.8, 0.0, 1.0);

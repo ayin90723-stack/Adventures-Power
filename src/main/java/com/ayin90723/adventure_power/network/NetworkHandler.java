@@ -311,12 +311,26 @@ public class NetworkHandler {
             return new AbilityTogglePacket(buf);
         }
 
+        /** 限频表：玩家 UUID -> 上次处理请求的服务端全局 tick。
+         *  每次 toggle 服务端都会回发全量 Capability NBT（含里程碑元数据，KB 级），
+         *  恶意客户端快速来回 toggle 会放大服务器→客户端流量——限 5 tick（0.25s）一次
+         *  （间隔不影响正常 UI 点击节奏）。用全局 tick 而非维度 gameTime：跨维度基准错位。 */
+        private static final java.util.Map<java.util.UUID, Long> TOGGLE_COOLDOWN =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
         public static void handle(AbilityTogglePacket msg, Supplier<NetworkEvent.Context> ctx) {
             if (ctx.get().getDirection() != NetworkDirection.PLAY_TO_SERVER) {
                 ctx.get().setPacketHandled(true);
                 return;
             }
             runOnServer(ctx, player -> {
+                long now = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer().getTickCount();
+                Long last = TOGGLE_COOLDOWN.get(player.getUUID());
+                if (last != null && now - last < 5) return; // 限频，静默丢弃
+                if (TOGGLE_COOLDOWN.size() > 2048) {
+                    TOGGLE_COOLDOWN.values().removeIf(t -> now - t > 6000); // 5 分钟超时清理
+                }
+                TOGGLE_COOLDOWN.put(player.getUUID(), now);
                 if (AdventureProgressCapability.isAdventurer(player)
                     || AdventureProgressCapability.isFullyUnlocked(player)) {
                     AdventureProgressCapability.toggleAbility(player, msg.id);
@@ -412,12 +426,23 @@ public class NetworkHandler {
             return new SkillSwitchPacket(buf);
         }
 
+        /** 限频表：与 AbilityTogglePacket 同理——每次切换都会回发全量同步，限 5 tick 一次 */
+        private static final java.util.Map<java.util.UUID, Long> SWITCH_COOLDOWN =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
         public static void handle(SkillSwitchPacket msg, Supplier<NetworkEvent.Context> ctx) {
             if (ctx.get().getDirection() != NetworkDirection.PLAY_TO_SERVER) {
                 ctx.get().setPacketHandled(true);
                 return;
             }
             runOnServer(ctx, player -> {
+                long now = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer().getTickCount();
+                Long last = SWITCH_COOLDOWN.get(player.getUUID());
+                if (last != null && now - last < 5) return; // 限频，静默丢弃
+                if (SWITCH_COOLDOWN.size() > 2048) {
+                    SWITCH_COOLDOWN.values().removeIf(t -> now - t > 6000); // 5 分钟超时清理
+                }
+                SWITCH_COOLDOWN.put(player.getUUID(), now);
                 if (AdventureProgressCapability.isAdventurer(player)
                     || AdventureProgressCapability.isFullyUnlocked(player)) {
                     AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {

@@ -142,6 +142,8 @@ v1.1.5 起**彻底移除了 Minecraft 成就系统**，里程碑进度通过饰�
 ```
 
 > 容错：即使**忘写** `"merge": true`，只要文件提供了 `disabled_abilities` 而未提供 `milestones`，模组会自动按 merge 语义保留下方内容（否则空数组会回退内置默认，黑名单被清空）。但建议始终显式写 `merge` 表明意图。
+>
+> 注意：非 merge 文件的 `milestones` 数组为空（且未提供 `disabled_abilities`）时，最终空注册表会**回退内置默认 10 个里程碑**——空数组无法用来"清空全部里程碑"，想清空请用顶层 `"enabled": false` 整体禁用整个里程碑系统。
 
 ---
 
@@ -153,7 +155,7 @@ v1.1.5 起**彻底移除了 Minecraft 成就系统**，里程碑进度通过饰�
 |--------|-----|------|
 | 灵巧 | `agility` | 概率闪避伤害 |
 | 大地之力 | `digging_power` | 提升挖掘速度 |
-| 恩赐永驻 | `perpetual_blessing` | 正面效果自动续期 |
+| 恩赐永驻 | `perpetual_blessing` | 正面效果自动续期（觉醒不可驱散） |
 | 虚空踏步 | `void_step` | 二段跳（觉醒·御风：疾跑时朝视角冲刺） |
 | 休养生息 | `rapid_recovery` | 脱战直写回血 + 恢复饱食度 |
 | 灵魂绑定 | `soul_bind` | 死亡保留 Buff（觉醒保留经验） |
@@ -177,7 +179,6 @@ v1.1.5 起**彻底移除了 Minecraft 成就系统**，里程碑进度通过饰�
 | 翱翔 | `soar` | 创造飞行 |
 | 淬魂之力 | `soul_quench` | 真实百分比伤害 |
 | 破敌之眼 | `piercing_gaze` | 穿透无敌 |
-| 恩赐永驻 | `perpetual_blessing` | 正面效果自动续期（觉醒不可驱散） |
 | 影杀 | `shadow_kill` | 影子血量斩杀（觉醒 AOE 链） |
 | 真实血量 | `true_health` | 保护血量 |
 | 拒绝篡改 | `reject_manip` | 拦截非法血量修改 |

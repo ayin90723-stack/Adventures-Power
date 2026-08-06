@@ -3,11 +3,16 @@ package com.ayin90723.adventure_power.ability;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * 能力注册表 — 30 种冒险能力，按面板显示顺序排列。
  * countAtUnlock 由 MilestoneRegistry 在加载 JSON 后写入各 Ability 实例（驱动成长公式）。
  */
 public class AbilityRegistry {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(AbilityRegistry.class);
 
     public static final Map<String, Ability> ALL = new LinkedHashMap<>();
 
@@ -45,7 +50,10 @@ public class AbilityRegistry {
     }
 
     private static void register(Ability ability) {
-        ALL.put(ability.id(), ability);
+        Ability prev = ALL.put(ability.id(), ability);
+        if (prev != null) {
+            LOGGER.warn("[AbilityRegistry] 能力 ID 重复注册：{}（后者覆盖前者，请检查注册表）", ability.id());
+        }
     }
 
     public static Ability get(String id) {

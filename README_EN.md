@@ -9,7 +9,7 @@
 
 > **Power belongs to the adventurer, not the enchantments.**
 >
-> Conquer 10 milestones, unlock 26 inner abilities. When the journey ends, the Awakening transcends you beyond mortality.
+> Conquer 10 milestones, unlock 30 inner abilities. When the journey ends, the Awakening transcends you beyond mortality.
 
 [![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1-80BA15?logo=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAAbwAAAG8B8aLcQwAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAEESURBVDiNpZMxTsNAEEX/rNeOAwUlHVdA4gJcAokLUNDRcAQkLkCBaOgouQIVHReIxCRKApGd2Zn1UsTJIln8p5H+/Pk7OyuEEN5zzjkiss4555xzLggE3vuu67rneZ6P67qeOOc657TWJEmSYNu253meX/M8v5JS3gkhMGstAEBEFCEEcs65n6ZpehzH6+8FSimkaZq/OeeUUgpJkpytta9pmuZRFP1+HMcRIYQQEWGMQSmFaZqO4zi+CiEAAM/zAOccY4xBCOH3fd99338CwO/3ZVm+cM6vtdY/a61vhmH4TJJk4b0H5xze+/8T3G63T8653vt+v2/bdtd13UfTNK88SX13XfcqhPiQUt5LKXe73e6DbNv253k+v91u/xbzPB8ZY5i1Fv8AY60cDO1A9iUAAAAASUVORK5CYII=)](https://www.minecraft.net/)
 [![Forge](https://img.shields.io/badge/Forge-47.4.10-F16436)](https://files.minecraftforge.net/)
@@ -30,135 +30,96 @@
 
 ## Overview
 
-**Adventure's Power** is a Minecraft Forge 1.20.1 mod that ties player progression directly to adventure milestones — not to gear, not to levels, but to the journey itself. Every milestone you reach unlocks new inner abilities. Every ability is yours to toggle freely. At the end of the road, the **Adventurer's Awakening** elevates all 26 abilities to their ultimate form.
+**Adventure's Power** is a Minecraft Forge 1.20.1 mod where **your journey drives your power**. Power does not come from gear enchantments or stat levels — it comes from the paths you walk, the enemies you defeat, and the dimensions you conquer.
 
-- 🎯 **10 Milestones** — From surviving your first night to obtaining the Elytra
-- ⚡ **26 Innate Abilities** — Dodge, flight, lifesteal, death defiance, true damage… all toggleable
-- 🌟 **The Awakening (Stage 11)** — 14 mechanical transformations + 11 numerical amplifications
-- 🔗 **Vanilla Advancement Integration** — Completing vanilla advancements unlocks milestones and vice versa
-- 🎛️ **Full Player Control** — Open the ability panel (K key) and enable/disable any ability at will
-- ⚙️ **Highly Configurable** — Every multiplier, probability, and duration is adjustable via TOML config
+- 🎯 **10 Milestones** — from surviving your first night to obtaining an elytra
+- ⚡ **30 Inner Abilities** — dodge, flight, lifesteal, death defiance, true damage… all freely toggleable
+- 🌟 **Stage 11: Adventurer's Awakening** — all 30 abilities gain awakened enhancements (mechanical or numerical)
+- 🎛️ **Full Ability Toggles** — press **P** for the unified panel, enable what you want
+- 📦 **Data-Driven Milestones** — milestones and unlock conditions are defined by datapack JSON, fully customizable
+- ⚙️ **Highly Configurable** — every multiplier, chance, and duration is adjustable in the TOML config
 
 ---
 
 ## The Journey
 
-### The Curio: Witness to Your Adventure
+### The Adventure Curio: Witness of Your Journey
 
-On first login, you receive **"Adventure's Beginning"** — a Curios body-slot curio that binds to your soul. It cannot be removed (except in Creative mode). Right-click it anytime to review your milestone progress and unlocked abilities.
+On first login you automatically receive the **Adventure's Beginning**, worn in the Curios body slot. While equipped, your adventurer status activates. Track your milestone progress and unlocked abilities via the **P** panel (Progress tab) or the curio tooltip.
 
 ```
 First login
   ↓
-Receive "Adventure's Beginning" → activates Adventurer identity
+Receive "Adventure's Beginning" → Adventurer status activates when equipped
   ↓
-Complete 10 milestones (tracked in the Advancements screen)
+Complete 10 milestones (any order, view progress in the P panel)
   ↓
 All milestones complete → "Adventure's Beginning" evolves into "Adventure's End"
   ↓
-Activate "Adventurer's Awakening" — all 26 abilities + awakening buffs
+"Adventurer's Awakening" activates — all 30 abilities + awakened enhancements
 ```
 
-### 10 Milestones
+### The 10 Milestones
 
-| Stage | ID | Name | Unlock Condition | Abilities |
-|:-----:|-----|------|---------|:--:|
-| 1 | `first_night` | 🌙 First Night | Survive a full night | 3 |
-| 2 | `first_death` | 💀 First Death | Die for the first time | 2 |
-| 3 | `first_trade` | 🤝 First Trade | Trade with a Villager | 2 |
-| 4 | `first_deep` | ⛏️ Into the Depths | Descend below Y=0 | 2 |
-| 5 | `first_enchant` | ✨ First Enchantment | Enchant at an Enchanting Table | 2 |
-| 6 | `nether` | 🔥 Gates of Fire | Enter the Nether | 2 |
-| 7 | `wither` | 💀 Fall of the Wither | Defeat the Wither | 2 |
-| 8 | `warden` | 👁️ Fear of the Sculk | Defeat the Warden | 3 |
-| 9 | `dragon` | 🐉 Wings of the End | Defeat the Ender Dragon | 4 |
-| 10 | `elytra` | 🪶 Proof of the Sky | Obtain Elytra | 4 |
+| # | ID | Name | Unlock Condition | Abilities |
+|:--:|-----|------|------------------|-----------|
+| 1 | `first_night` | 🌙 First Night | Survive through a night | Agility, Digging Power |
+| 2 | `first_death` | 💀 First Fall | Die for the first time | Void Step, Rapid Recovery |
+| 3 | `first_trade` | 🤝 First Trade | Trade with a villager | Soul Bind, Knockback Resist, Swift |
+| 4 | `first_deep` | ⛏️ Deep Dive | Reach the deep world (Y<0) | All-Seeing Eye, Extended Reach, Magnet |
+| 5 | `first_enchant` | ✨ First Enchant | Complete advancement "Enchanter" | Undying Gear, Fortune Favor, XP Boost |
+| 6 | `nether` | 🔥 Gates of Flame | Complete advancement "We Need to Go Deeper" | Environmental Immunity, Lifesteal, Damage Resist |
+| 7 | `wither` | 💀 Wither's Fall | Kill the Wither | Healing Block, Vitality, Death Defy |
+| 8 | `warden` | 👁️ Terror of the Deep Dark | Kill the Warden | Resilience, Purified Soul, Loot All |
+| 9 | `dragon` | 🐉 Wings of the End | Complete advancement "Free the End" | Soar, Soul Quench, Piercing Gaze, Perpetual Blessing |
+| 10 | `elytra` | 🪶 Proof of the Sky | Complete advancement "Sky's the Limit" | Shadow Kill, True Health, Reject Manipulation, Traveler's Might |
+
+> Milestone unlock conditions are driven by the datapack `milestones.json` (vanilla advancements or custom triggers), hot-reloadable with `/reload` and fully customizable via datapacks (`merge` / `enabled:false` / `disabled_abilities`). See `docs/datapack-guide.md`.
 
 ---
 
-## 26 Abilities
+## The 30 Abilities
 
-### 🗡️ Combat (7)
+| Ability | Effect | Awakened Enhancement |
+|---------|--------|----------------------|
+| **Agility** | Chance to fully dodge damage | 95% dodge chance |
+| **Earthly Power** | Faster mining speed | 2.625× mining speed, no water/air mining penalty |
+| **Perpetual Blessing** | Auto-refresh beneficial effects below threshold | Beneficial effects cannot be dispelled |
+| **Void Step** | Double jump in mid-air | Wind Dash: dash toward your view while sprinting |
+| **Rapid Recovery** | Direct heal + food restore out of combat | Direct heal +5 HP per cycle out of combat |
+| **Soul Bind** | Keep beneficial effects on death | Keep XP on death |
+| **Unshakable** | Reduce knockback taken | 100% knockback resistance |
+| **Swift** | Sprint speed + reduced sprint exhaustion | Push hostile mobs away while sprinting |
+| **Damage Resist** | Reduce all damage taken | 45% damage reduction |
+| **Unseen Hand** | Increased block interaction distance | Reach +3.3 blocks |
+| **Magnetism** | Auto-collect nearby drops | +50% radius, XP orbs also attracted |
+| **All-Seeing Eye** | Night vision + fog removal | Threat radar showing nearby hostiles |
+| **Undying Gear** | Equipment never loses durability | +2 armor per piece, +25% weapon damage |
+| **Fortune's Favor** | Boosted Fortune/Looting levels | Fortune/Looting +5 |
+| **XP Boost** | XP multiplier on orb pickup | XP multiplier ×1.5 |
+| **Environmental Immunity** | Immune to fire, lava, and environmental damage | Immune to all sourceless damage |
+| **Lifesteal** | Heal when dealing damage | Overflow healing converts to absorption shield |
+| **Healing Block** | Attacks prevent target from healing/reviving | Healing block + 20% vulnerability |
+| **Iron Constitution** | Increased maximum health | Max HP +15 |
+| **Resilience** | Gain damage reduction stacks when hit | Up to 18 reduction stacks |
+| **Purified Soul** | Immune to all negative effects | Nearby hostiles get Weakness II |
+| **Loot All** | Extra drop of every possible item on kill | Maximum stack size for every item |
+| **Soar** | Creative flight ability | Flight speed +50% |
+| **Soul Quench** | True percentage damage (bypasses armor/invulnerability) | Double damage below 20% HP |
+| **Piercing Gaze** | Attacks pierce all invulnerability (incl. custom boss invuln) | Pierce invulnerability + no i-frames for 3s |
+| **Death Defy** | Negate one death on cooldown, heal + brief invulnerability | Triggers a free Judgment on proc |
+| **Shadow Kill** | Shadow HP system, execute at zero | 8-block AOE on execute |
+| **True Health** | Backup and protect HP from external tampering | Survive fatal hits with 1 HP |
+| **Reject Manipulation** | Block illegal health modifications | Reflect 30% of blocked damage |
+| **Traveler's Power** | Unlocks active skills (Judgment/Sanctuary) | Judgment radius +50%, move while in Sanctuary |
 
-| Ability | Effect | Max Growth | Awakening |
-|---------|--------|-----------|-----------|
-| **Agility** | Chance to completely dodge any damage | 73% dodge | **95%** |
-| **Soul Quench** | Bonus true damage based on target's HP (bypasses armor/iframes) | Scaling | **Double damage below 20% HP** |
-| **Shadow Kill** | Project shadow HP onto target; execute when depleted | 4 flat + 4% HP | **8-block AOE on execute** |
-| **Healing Block** | Attacks prevent target healing & revival | 6s | **8s** |
-| **Piercing Gaze** | Attacks bypass all invulnerability (including boss custom iframes) | Full pierce | **+30% damage vs invulnerable targets** 🆕 |
-| **Lifesteal** | Heal for a percentage of damage dealt | 13% | **Excess healing → absorption shield** |
-| **Traveler's Power** | Active skills: Judgment (AOE) & Sanctuary (invulnerability) | Judgment 6-block / Sanctuary immobile | **9-block Judgment / movable Sanctuary** |
-
-### 🛡️ Defense (7)
-
-| Ability | Effect | Max Growth | Awakening |
-|---------|--------|-----------|-----------|
-| **Damage Resist** | Reduce all incoming damage | 40% reduction | **52%** |
-| **Resilience** | Gain stacking damage reduction per hit taken (5%/stack) | 12 stacks | **18 stacks** |
-| **Unshakable** | Reduce knockback taken | 79% resist | **100% (full immunity)** |
-| **Env. Immunity** | Immune to fire, lava, cactus, etc. | Tag-matched block | **All sourceless damage** 🆕 |
-| **Purified Soul** | Immune to all negative potion effects | Continuous cleanse | **Weakness II aura (16 blocks)** |
-| **Death Defy** | Survive a fatal blow on cooldown; full heal + invuln | 60s invuln / 5min CD | **Free Judgment on proc** |
-| **Iron Constitution** | Increase max health | +12 (+6❤) | **+16 (+8❤)** |
-
-### ⛏️ Exploration (4)
-
-| Ability | Effect | Max Growth | Awakening |
-|---------|--------|-----------|-----------|
-| **Void Step** | Jump again in mid-air | Double jump | **Triple jump** 🆕 |
-| **Soar** | Creative flight | Standard flight | **Flight speed +50%** 🆕 |
-| **Earthly Power** | Increase mining speed for all blocks | 1.75x | **2.28x** |
-| **Unseen Hand** | Increase block interaction range | +2.8 blocks | **+3.6 blocks** |
-
-### 💰 Gathering (2)
-
-| Ability | Effect | Max Growth | Awakening |
-|---------|--------|-----------|-----------|
-| **Fortune's Favor** | Fortune & Looting bonus (stacks with tool enchantments) | +3 levels | **+5 levels** |
-| **Loot All** | Extra drops of all possible items on kill (ignores conditions) | One of each | **Max count per item** 🆕 |
-
-### ✨ Survival (6)
-
-| Ability | Effect | Max Growth | Awakening |
-|---------|--------|-----------|-----------|
-| **Perpetual Blessing** | Auto-refresh beneficial effects below threshold | 60s floor | **Extension ×1.3** |
-| **Soul Bind** | Preserve all buffs and XP on death | Keep buffs + XP | **XP never drops** 🆕 |
-| **Undying Gear** | Equipment never loses durability | No durability loss | **+1 armor per piece / +15% weapon damage** 🆕 |
-| **Rapid Recovery** | Auto-regenerate health after leaving combat | Regen V | **Regen VII** |
-| **True Health** | Backup & auto-repair tampered health values | Backup & repair | **Repair speed doubled** 🆕 |
-| **Reject Manipulation** | Block all illegal health modifications | Intercept | **Reflect 30% blocked damage** 🆕 |
-
-> 🆕 = Mechanical transformation upon Awakening (not just numerical)
+> All abilities can be freely toggled in the P panel. Every number is adjustable in `config/adventure_power.toml`.
 
 ---
 
 ## Stage 11: Adventurer's Awakening
 
-Automatically activates when all 10 milestones are complete and "Adventure's End" is equipped.
-
-### 14 Mechanical Transformations
-
-| Ability | Transformation |
-|---------|---------------|
-| Void Step | Double jump → **Triple jump** |
-| Soul Bind | Death keeps XP (no XP orbs dropped) |
-| Undying Gear | Each armor piece **+1 armor**, weapon **+15% damage** |
-| Soar | Flight speed **×1.5** |
-| Death Defy | Triggers a **free Traveler's Judgment** on proc (ignores cooldown) |
-| Shadow Kill | Execute deals **8-block AOE** to nearby mobs' shadow HP |
-| Soul Quench | Targets ≤20% HP take **double** true damage |
-| Lifesteal | Excess healing → **absorption shield** (max 20% HP) |
-| Purified Soul | Hostile mobs within 16 blocks gain **Weakness II** |
-| Traveler's Power | Judgment range ×1.5 (9 blocks); Sanctuary allows **slow movement** |
-| Piercing Gaze | **+30% damage** vs invulnerable-frame targets |
-| Env. Immunity | Tag-matched block → **all sourceless damage** |
-| Reject Manipulation | **Reflect 30%** of blocked damage back to the attacker |
-| True Health | Repair speed **doubled** (epsilon ×2) |
-
-### 11 Numerical Amplifications
-
-All numerical abilities gain **×1.3 multiplier** (configurable), including Agility, Damage Resist, Unshakable, Earthly Power, Unseen Hand, Healing Block, Iron Constitution, Resilience, Fortune's Favor, Rapid Recovery, Perpetual Blessing.
+Automatically activates when all 10 milestones are complete while holding the **Adventure's End**. **All 30 abilities** gain awakened enhancements (mechanical or numerical, see the table above), and awakened players receive a golden title prefix on their display name.
 
 ---
 
@@ -166,34 +127,33 @@ All numerical abilities gain **×1.3 multiplier** (configurable), including Agil
 
 | Key | Function |
 |-----|----------|
-| **K** | Open "Adventure Abilities" panel — toggle abilities on/off |
-| **B** | Open "Buff Management" panel |
-| **V** | Switch active skill (Judgment ⇄ Sanctuary) |
-| **G** | Activate current skill |
-| **Space (mid-air)** | Void Step — double jump (triple jump when awakened) |
+| **P** | Unified panel (Buff Persistence / Ability Config / Adventure Progress; default: Ability Config) |
+| **Space (mid-air)** | Void Step — double jump (Awakened Wind Dash: sprint-dash toward view) |
+| **Y** | Switch active skill (Judgment ⇄ Sanctuary) |
+| **G** | Release the selected active skill |
 
-All keybindings are customizable in the vanilla Controls menu.
+All keys can be rebind in vanilla Controls settings.
 
 ### Active Skills
 
-- **Traveler's Judgment**: AOE damage (flat + target HP%) to all nearby mobs in 6 blocks (9 awakened). 30s cooldown.
-- **Traveler's Sanctuary**: 5s invulnerability + cleanse all negative effects. 90s cooldown. Awakened: can move at 0.3x speed.
+- **Traveler's Judgment**: AoE damage to all mobs within 6 blocks (9 awakened) — base 10 + 3% of target max HP per milestone. Cooldown 30s.
+- **Traveler's Sanctuary**: Brief 5s invulnerability + clears all negative effects. Cooldown 90s. Awakened: move slowly (0.3× speed) while active.
 
 ---
 
 ## Dependencies
 
 | Dependency | Version |
-|-----------|---------|
+|------------|---------|
 | Minecraft Forge | 47.4.10+ |
-| [Curios API](https://www.curseforge.com/minecraft/mc-mods/curios) | 5.14.1+ |
+| [Curios API](https://www.curseforge.com/minecraft/mc-mods/curios) | 5.14.1+ (body slot) |
 
 ## Installation
 
-1. Install Minecraft Forge for 1.20.1
-2. Download and install [Curios API](https://www.curseforge.com/minecraft/mc-mods/curios)
-3. Place `adventure_power-1.1.1.jar` into your `mods` folder
-4. Launch the game — you'll receive "Adventure's Beginning" automatically on first login
+1. Install Minecraft Forge 1.20.1
+2. Download and install [Curios API](https://www.curseforge.com/minecraft/mc-mods/curios) (5.14.1+)
+3. Put `adventure_power-1.3.5.jar` into the `mods` folder
+4. Launch the game; you will receive the "Adventure's Beginning" after entering a world
 
 ## Building from Source
 
@@ -201,46 +161,52 @@ All keybindings are customizable in the vanilla Controls menu.
 git clone https://github.com/ayin90723-stack/Adventures-Power.git
 cd Adventures-Power
 ./gradlew build -x test
-# Output: build/libs/adventure_power-1.1.1.jar
+# Artifact: build/libs/adventure_power-1.3.5.jar
 ```
 
-**Requirements**: JDK 17, Curios API (place in `libs/` or configure via CurseMaven).
+**Requirements**: JDK 17, Curios API (resolved automatically via CurseMaven, see `build.gradle`).
 
 ## Configuration
 
-All values are adjustable via `config/adventure_power.toml`:
+All values are adjustable in `config/adventure_power.toml`:
 
-- Ability multipliers, probabilities, durations
-- Awakening global multiplier (`awaken_multiplier`, default 1.3)
-- Per-ability awakening overrides
+- Per-ability multipliers, chances, and durations
+- Global awakened multiplier (`awaken_multiplier`, default 1.5)
+- Per-ability awakened configuration entries
 
-Reload config with `/reload` or re-enter the world — no client restart needed.
+Config changes require a game/server restart; datapack milestone changes hot-reload with `/reload`.
 
 ## FAQ
 
-**Q: Too many abilities — can I turn some off?**
-A: Yes. Press K to open the panel and toggle any unlocked ability on/off at any time.
+**Q: Too many abilities — can I disable some?**
+A: Yes. Open the panel with **P** and toggle each ability.
 
 **Q: Do I lose buffs and XP on death?**
-A: With Soul Bind enabled, all beneficial effects and XP are preserved. When awakened, XP doesn't drop at all.
+A: With **Soul Bind**, all beneficial effects are kept on death; with Awakening, XP is kept as well.
 
-**Q: Is this mod compatible with other mods?**
-A: It's designed with mod compatibility in mind. Core mechanics use Mixin at the lowest interception layer. Please report any conflicts.
+**Q: Where is my milestone progress stored?**
+A: Triple-layer backup (Capability → entity NBT → adventure curio item NBT), automatically restored on death, dimension change, and login.
 
-**Q: Server compatible?**
-A: Yes. All ability logic runs server-side; the client only handles UI and key inputs.
+**Q: Compatible with other mods?**
+A: Core mechanics are intercepted at the lowest level via Mixin, designed with modded environments in mind (custom boss invulnerability, combat mods, etc.). Feedback on conflicts is welcome.
+
+**Q: Does it work on servers?**
+A: Yes. All ability logic executes and is validated server-side; the client is only used for UI and input.
+
+**Q: Can I customize milestones or unlock conditions?**
+A: Override `data/adventure_power/adventure_power/milestones.json` via a datapack. Supports `merge` by id, `enabled:false` to disable the whole system, and `disabled_abilities` as an ability blacklist. See `docs/datapack-guide.md`.
 
 ## License
 
-This project is licensed under the **MIT License** — see [LICENSE](LICENSE) for full text.
+This project is open source under the **MIT License** — see [LICENSE](LICENSE).
 
 ---
 
-> *"All ten trials conquered, all twenty-six powers awakened. You have transcended mortality — you are the embodiment of adventure itself."*
+> *"Ten trials conquered, thirty powers awakened. You have transcended mortality — you are the embodiment of adventure."*
 >
 > — Adventure's End
 
 **Author**: [ayin90723-stack](https://github.com/ayin90723-stack)  
-**Version**: v1.1.1  
+**Version**: v1.3.5  
 **Game Version**: Minecraft 1.20.1  
 **License**: MIT

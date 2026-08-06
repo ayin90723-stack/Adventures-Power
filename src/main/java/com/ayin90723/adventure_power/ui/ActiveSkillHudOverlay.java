@@ -22,6 +22,11 @@ public class ActiveSkillHudOverlay {
     private static final int READY_COLOR = 0x55FF55;
     /** 切换后显示持续 tick 数 */
     private static final long SWITCH_DISPLAY_TICKS = 60; // 3 秒
+    // 技能名/就绪文案为固定 key 的 TranslatableComponent（延迟到 getString 时解析，
+    // 静态缓存避免 HUD 可见期间每帧构建新对象）
+    private static final Component JUDGMENT_LABEL = Component.translatable("skill.adventure_power.judgment");
+    private static final Component SANCTUARY_LABEL = Component.translatable("skill.adventure_power.sanctuary");
+    private static final Component READY_LABEL = Component.translatable("skill.adventure_power.ready");
     /** 上次切换的游戏时间 */
     private static long lastSwitchTime = -SWITCH_DISPLAY_TICKS;
     /** 上次渲染时所在的 level（进入新世界后重置切换标记，防止上一世界残留的
@@ -65,12 +70,12 @@ public class ActiveSkillHudOverlay {
 
         // 审判行
         renderSkillRow(graphics, mc, x, y,
-            Component.translatable("skill.adventure_power.judgment"),
+            JUDGMENT_LABEL,
             judgmentCd, currentTime, ClientHudDataCache.activeSkillIndex == 0);
 
         // 庇护行
         renderSkillRow(graphics, mc, x, y + 14,
-            Component.translatable("skill.adventure_power.sanctuary"),
+            SANCTUARY_LABEL,
             sanctuaryCd, currentTime, ClientHudDataCache.activeSkillIndex == 1);
     }
 
@@ -86,7 +91,7 @@ public class ActiveSkillHudOverlay {
         if (onCooldown) {
             text = prefix + name.getString() + " [" + remainingSeconds + "s]";
         } else {
-            text = prefix + name.getString() + " " + Component.translatable("skill.adventure_power.ready").getString();
+            text = prefix + name.getString() + " " + READY_LABEL.getString();
         }
         graphics.drawString(mc.font, text, x, y, color);
     }
