@@ -11,8 +11,6 @@ import net.minecraft.world.effect.MobEffectCategory;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
-import net.minecraft.world.entity.boss.wither.WitherBoss;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingHealEvent;
@@ -156,14 +154,6 @@ public class HealingBlockEffect extends MobEffect {
       return null;
    }
 
-   /** 检查是否应允许二阶段（Boss 实体 + 配置启用） */
-   private static boolean shouldAllowPhaseTwo(LivingEntity entity) {
-      if (!ModConfig.HEALING_BLOCK_ALLOW_BOSS_PHASE_TWO.get()) {
-         return false;
-      }
-      return entity instanceof WitherBoss || entity instanceof EnderDragon;
-   }
-
    @EventBusSubscriber(modid = AdventurePower.MODID, bus = Bus.FORGE)
    public static class EventHandler {
       /** 拦截所有治疗事件 */
@@ -204,15 +194,6 @@ public class HealingBlockEffect extends MobEffect {
       @SubscribeEvent(priority = EventPriority.HIGHEST, receiveCanceled = true)
       public static void onLivingDeathPreMark(LivingDeathEvent event) {
          if (isActive(event.getEntity())) {
-            if (shouldAllowPhaseTwo(event.getEntity())) {
-               // 允许 Boss 进入二阶段，清理追踪记录、觉醒易伤、宽限期与 NBT 标记
-               UUID uuid = event.getEntity().getUUID();
-               TRACKED_HEALTH.remove(uuid);
-               VULN_END.remove(uuid);
-               MISSING_TICKS.remove(uuid);
-               event.getEntity().getPersistentData().remove(NBT_KEY);
-               return;
-            }
             event.getEntity().getPersistentData().putBoolean(FORCE_KILL_KEY, true);
          }
       }
