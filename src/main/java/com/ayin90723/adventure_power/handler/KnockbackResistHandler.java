@@ -48,27 +48,34 @@ public class KnockbackResistHandler {
         UUID uuid = player.getUUID();
 
         double currentVal = attr.getBaseValue();
-        double expected = 0.0;
-        if (shouldHave) {
-            Ability ability = AbilityRegistry.get(AbilityIds.KNOCKBACK_RESIST);
-            if (ability != null) {
-                float percent = AbilityGate.awakenedPercent(ability,
-                    AbilityGate.effectiveCount(progress, AbilityIds.KNOCKBACK_RESIST),
-                    progress.isFullyUnlocked(), ModConfig.KNOCKBACK_RESIST_HARD_CAP.get().floatValue());
-                expected = percent / 100.0;
-            }
+        // 本模组启用时会写入的期望值（残留判定用：关闭分支无记录时判断当前值是否为本模组残留）
+        double own = 0.0;
+        Ability ability = AbilityRegistry.get(AbilityIds.KNOCKBACK_RESIST);
+        if (ability != null) {
+            float percent = AbilityGate.awakenedPercent(ability,
+                AbilityGate.effectiveCount(progress, AbilityIds.KNOCKBACK_RESIST),
+                progress.isFullyUnlocked(), ModConfig.KNOCKBACK_RESIST_HARD_CAP.get().floatValue());
+            own = percent / 100.0;
         }
+        double expected = shouldHave ? own : 0.0;
         if (Math.abs(currentVal - expected) > 0.001) {
             if (shouldHave) {
                 ORIGINAL_KNOCKBACK_RESIST.putIfAbsent(uuid, currentVal);
                 LAST_WRITTEN.put(uuid, expected);
                 attr.setBaseValue(expected);
-            } else if (ORIGINAL_KNOCKBACK_RESIST.containsKey(uuid)) {
-                // 关闭分支残留判定：仅当当前值仍等于本模组最后写入的值时才恢复原值——
-                // 若已被其他模组中途改动（≠ 本模组写入值），尊重其他模组，不覆盖
-                double lastWritten = LAST_WRITTEN.getOrDefault(uuid, expected);
+            } else {
+                // 关闭分支：无记录（从未启用，或服务端重启后静态 Map 清空、player.dat 残留本模组
+                // 写入值）时做残留判定——当前值 ≈ 本模组启用时会写的值则判定为本模组残留，
+                // 恢复默认 0；否则视为其他模组修改，不记录不操作（与 ExplorationAbilityHandler
+                // 对 maxHealth 的残留判定同模式）
+                Double original = ORIGINAL_KNOCKBACK_RESIST.get(uuid);
+                if (original == null) {
+                    if (Math.abs(currentVal - own) > 0.001) return;
+                    original = 0.0;
+                    ORIGINAL_KNOCKBACK_RESIST.put(uuid, original);
+                }
+                double lastWritten = LAST_WRITTEN.getOrDefault(uuid, own);
                 if (Math.abs(currentVal - lastWritten) <= 0.001) {
-                    double original = ORIGINAL_KNOCKBACK_RESIST.get(uuid);
                     if (Math.abs(currentVal - original) > 0.001) {
                         attr.setBaseValue(original);
                     }
@@ -93,6 +100,10 @@ public class KnockbackResistHandler {
 
             var attr = player.getAttribute(Attributes.KNOCKBACK_RESISTANCE);
             if (attr == null) return;
+
+            // 写入前 putIfAbsent 记录原值（Clone 重置后 baseValue=0，记录 0 兜底）：
+            // 与 onTick 启用分支保持一致，保证关闭能力时总能恢复到记录值
+            ORIGINAL_KNOCKBACK_RESIST.putIfAbsent(player.getUUID(), attr.getBaseValue());
 
             float percent = AbilityGate.awakenedPercent(ability,
                 AbilityGate.effectiveCount(progress, AbilityIds.KNOCKBACK_RESIST),

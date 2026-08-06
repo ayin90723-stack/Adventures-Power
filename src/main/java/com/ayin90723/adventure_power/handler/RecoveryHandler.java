@@ -145,6 +145,10 @@ public class RecoveryHandler {
 
         if (FriendlyFireProtection.isOwnerTarget(attacker, target)) return;
 
+        // 同 tick 去重（与淬魂/影杀/禁疗共享 COMBAT_TICK_DEDUP）：破敌之眼穿透三连的
+        // 双重 post 会让嗜血同 tick 双吸血——按 (attacker, target) 同 tick 只吸一次
+        if (!CombatAbilityHandler.tryMarkCombatTick(attacker, target)) return;
+
         AbilityGate.getActiveProgress(attacker, AbilityIds.LIFESTEAL).ifPresent(progress -> {
             Ability ability = AbilityRegistry.get(AbilityIds.LIFESTEAL);
             if (ability == null) return;

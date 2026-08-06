@@ -2,6 +2,7 @@ package com.ayin90723.adventure_power.util;
 
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
+import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.milestone.Milestone;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
@@ -424,6 +425,10 @@ public class MilestoneRegistry {
      *   <li>文件含 {@code "enabled": false}：该文件不贡献任何内容；若为最高优先级文件，整体禁用里程碑系统</li>
      *   <li>{@code "disabled_abilities"} 在所有启用的文件中累加（去重），最终由 loadFromJson 应用</li>
      * </ul>
+     * <p>
+     * 注意：非 merge 文件若 milestones 数组为空且未提供 {@code disabled_abilities}，最终合并结果
+     * 的注册表为空，loadFromJson 会<b>回退内置默认</b>——无法用空数组"清空全部里程碑"，
+     * 想清空请用顶层 {@code "enabled": false} 整体禁用。
      *
      * @return 合并后的根对象；整体禁用时返回 null
      */
@@ -520,6 +525,11 @@ public class MilestoneRegistry {
     public static void onDatapackSync(OnDatapackSyncEvent event) {
         if (event.getPlayer() != null) return;
         for (ServerPlayer p : event.getPlayerList().getPlayers()) {
+            // /reload 缩小注册表后最终阶段自愈：9/10 时数据包删掉第 10 个里程碑 -> 9/9 已满足
+            // 全部解锁，但 activateFinalStageIfReady 的级联（grantMilestone/catchUp）不会再触发
+            // ——在此补跑（幂等：未满足条件或已激活时无操作）
+            AdventureProgressCapability.getAdventureProgress(p).ifPresent(progress ->
+                AdventureProgressCapability.activateFinalStageIfReady(p, progress));
             SyncUtil.syncToClient(p);
         }
     }

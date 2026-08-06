@@ -91,7 +91,7 @@ public class PiercingGazePlayerAttackMixin {
             // 正常环境 hurt() 内 ForgeHooks.onLivingHurt（或 Layer 2.5 手动 post）已发过，
             // 重复补发会让淬魂/嗜血/禁疗等监听器同 tick 双倍结算（影杀已有 SHADOW_KILL_TICKED 去重）。
             // 消费式读取：标记只反映本次 hurt；ASM 跳过 ForgeHooks 的环境（fantasy_ending 等）标记为 false 仍需补发
-            if (!PiercingGazeUtil.consumeVanillaHurtEventPosted()) {
+            if (!PiercingGazeUtil.consumeVanillaHurtEventPosted(living)) {
                 PiercingGazeUtil.postHurtEvent(living, source, amount);
             }
             return true;
@@ -102,7 +102,7 @@ public class PiercingGazePlayerAttackMixin {
         if (!PiercingGazeUtil.shouldPierce(source, living)) {
             // 非破敌之眼/友伤/PVP：穿透不适用，但消费残留标记（本次 hurt 未走原版管线时置 false），
             // 防止下次扣血攻击在 ASM 跳过 ForgeHooks 的环境误判"已 post"而不补发
-            PiercingGazeUtil.consumeVanillaHurtEventPosted();
+            PiercingGazeUtil.consumeVanillaHurtEventPosted(living);
             return hurtResult;
         }
 
@@ -110,9 +110,21 @@ public class PiercingGazePlayerAttackMixin {
         // 1. post LivingHurtEvent（取 max 防限伤，让淬魂/影杀 正常追加伤害）
         // 2. actuallyHurt 直写（绕过 hurt 内护甲/无敌判定）
         // 3. 血量直写兜底 + 清自定义无敌字段（防 Boss 注入 setHealth 恢复 / 锁死影杀 NBT）
-        float effective = PiercingGazeUtil.postHurtEvent(living, source, amount);
-        PiercingGazeUtil.invokeActuallyHurt(living, source, effective);
-        PiercingGazeUtil.afterPierceFallback(living, effective, healthBefore);
+        // 风暴守卫：post 期间第三方监听器递归 target.hurt() 时，递归层 HEAD 压栈
+        // 捕获到本层 IN_PIERCING=true 即可跳过穿透阻断递归（与 Layer 2 情况 A 同款，
+        // 覆盖 Layer 0 手动 post 的补发路径）。
+        // finally 恢复旧值而非硬置 false：本层 post 若发生在外层 Layer 2 情况 A 的
+        // 监听器链内（监听器调 player.attack），硬置 false 会清掉外层风暴守卫
+        // 直到外层弹栈——恢复旧值保持守卫连续
+        boolean prevInPiercing = PiercingGazeUtil.IN_PIERCING.get();
+        PiercingGazeUtil.IN_PIERCING.set(true);
+        try {
+            float effective = PiercingGazeUtil.postHurtEvent(living, source, amount);
+            PiercingGazeUtil.invokeActuallyHurt(living, source, effective);
+            PiercingGazeUtil.afterPierceFallback(living, effective, healthBefore);
+        } finally {
+            PiercingGazeUtil.IN_PIERCING.set(prevInPiercing);
+        }
 
         return true; // 返回 true 让击退/火焰附加等附魔正常执行
     }

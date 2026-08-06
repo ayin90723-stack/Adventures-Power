@@ -33,14 +33,15 @@ public class MagnetHandler {
     /** 门禁后业务（由 PlayerTickDispatcher 调用） */
     public static void onTick(Player player, IAdventureProgress progress) {
         if (!progress.isAbilityEnabled(AbilityIds.MAGNET)) return;
+        if (!(player.level() instanceof ServerLevel serverLevel)) return;
 
-        long currentTime = player.level().getGameTime();
+        // 限频基准用服务器全局 tick：lastScan 是静态 Map，不随 Capability 的 shiftTimers 平移，
+        // 用维度 gameTime 在进入时间轴更小的维度时 current-last<interval 恒成立导致扫描冻结
+        long currentTime = serverLevel.getServer().getTickCount();
         int interval = ModConfig.MAGNET_SCAN_INTERVAL.get();
         long last = lastScan.getOrDefault(player.getUUID(), -1L);
         if (last != -1L && currentTime - last < interval) return;
         lastScan.put(player.getUUID(), currentTime);
-
-        if (!(player.level() instanceof ServerLevel serverLevel)) return;
 
         Float radius = AbilityGate.value(progress, AbilityIds.MAGNET).orElse(null);
         if (radius == null) return;

@@ -73,8 +73,19 @@ public class ShadowKillHelper {
      */
     private static final Set<String> SHADOW_KILL_TICKED = ConcurrentHashMap.newKeySet();
 
-    /** target 有效性检测宽限：跨维度传送时短暂不在任何维度，避免误清 */
-    private static final Map<UUID, Integer> MISSING_TARGET_TICKS = new ConcurrentHashMap<>();
+    /** target 有效性检测宽限：跨维度传送时短暂不在任何维度，避免误清。
+     *  复合 key = attacker:target（v1.3.6）：多人同打一目标时各攻击者独立计数——
+     *  共享计数会被同周期多个攻击者各自 +1 叠加，1 个周期被当成 2 个周期误清影子血量 */
+    private static final Map<String, Integer> MISSING_TARGET_TICKS = new ConcurrentHashMap<>();
+
+    /** MISSING 计数复合 key：attacker:target（String 版，target 直接取 shadowData 的 uuidKey，免解析） */
+    private static String missingKey(UUID attackerId, String targetUuidStr) {
+        return attackerId + ":" + targetUuidStr;
+    }
+
+    private static String missingKey(UUID attackerId, UUID targetId) {
+        return attackerId + ":" + targetId;
+    }
 
     /** dropAllDeathLoot 反射缓存（m_6668_ = dropAllDeathLoot(DamageSource)） */
     private static final java.lang.reflect.Method DROP_ALL_DEATH_LOOT =
@@ -123,7 +134,7 @@ public class ShadowKillHelper {
         long gameTime = attacker.level().getGameTime();
 
         // 懒清理过期条目
-        cleanupExpiredShadowData(shadowData, gameTime);
+        cleanupExpiredShadowData(shadowData, gameTime, attacker.getUUID());
 
         String targetKey = target.getUUID().toString();
         float totalHP, shadowHP;
@@ -172,7 +183,7 @@ public class ShadowKillHelper {
         // 影子血量归零 → 饱和式秒杀
         if (shadowHP <= 0.0F) {
             shadowData.remove(targetKey);
-            MISSING_TARGET_TICKS.remove(target.getUUID());
+            MISSING_TARGET_TICKS.remove(missingKey(attacker.getUUID(), target.getUUID()));
             if (shadowData.isEmpty()) {
                 playerData.remove(NBT_SP_DATA);
             } else {
@@ -283,7 +294,7 @@ public class ShadowKillHelper {
     }
 
     /** 清理 shadowData 中所有已过期的条目及其 BossBar */
-    private static void cleanupExpiredShadowData(CompoundTag shadowData, long gameTime) {
+    private static void cleanupExpiredShadowData(CompoundTag shadowData, long gameTime, UUID attackerId) {
         java.util.List<String> expired = new java.util.ArrayList<>();
         for (String uuidKey : shadowData.getAllKeys()) {
             CompoundTag entry = shadowData.getCompound(uuidKey);
@@ -293,7 +304,7 @@ public class ShadowKillHelper {
         }
         for (String uuidKey : expired) {
             shadowData.remove(uuidKey);
-            MISSING_TARGET_TICKS.remove(UUID.fromString(uuidKey));
+            MISSING_TARGET_TICKS.remove(missingKey(attackerId, uuidKey));
             removeShadowHPBossBarByUUID(uuidKey);
         }
     }
@@ -331,7 +342,7 @@ public class ShadowKillHelper {
         long gameTime = attacker.level().getGameTime();
 
         // 懒清理过期条目（与 handleShadowKill 保持一致）
-        cleanupExpiredShadowData(shadowData, gameTime);
+        cleanupExpiredShadowData(shadowData, gameTime, attacker.getUUID());
 
         long expireTicks = ModConfig.SHADOW_KILL_DATA_EXPIRE_TICKS.get();
         for (LivingEntity target : nearby) {
@@ -361,7 +372,7 @@ public class ShadowKillHelper {
             // 影子血量归零 → 触发斩杀
             if (newShadow <= 0.0F) {
                 shadowData.remove(targetKey);
-                MISSING_TARGET_TICKS.remove(target.getUUID());
+                MISSING_TARGET_TICKS.remove(missingKey(attacker.getUUID(), target.getUUID()));
                 removeShadowHPBossBar(target);
                 executeShadowKill(target, attacker);
                 count++;
@@ -420,12 +431,13 @@ public class ShadowKillHelper {
         if (target.level().isClientSide()) return;
 
         removeShadowHPBossBar(target);
-        MISSING_TARGET_TICKS.remove(target.getUUID());
         String targetKey = target.getUUID().toString();
         for (Player onlinePlayer : target.level().players()) {
             CompoundTag playerData = onlinePlayer.getPersistentData();
             CompoundTag shadowData = playerData.getCompound(NBT_SP_DATA);
             if (shadowData.contains(targetKey)) {
+                // 目标已死：清除该攻击者对应的 MISSING 计数（复合 key 按攻击者独立）
+                MISSING_TARGET_TICKS.remove(missingKey(onlinePlayer.getUUID(), targetKey));
                 shadowData.remove(targetKey);
                 if (shadowData.isEmpty()) {
                     playerData.remove(NBT_SP_DATA);
@@ -466,8 +478,8 @@ public class ShadowKillHelper {
             if (shadowData.isEmpty()) continue;
 
             long gameTime = sp.level().getGameTime();
-            cleanupExpiredShadowData(shadowData, gameTime);
-            cleanupInvalidTargets(shadowData, server);
+            cleanupExpiredShadowData(shadowData, gameTime, sp.getUUID());
+            cleanupInvalidTargets(shadowData, server, sp.getUUID());
 
             if (shadowData.isEmpty()) {
                 playerData.remove(NBT_SP_DATA);
@@ -483,7 +495,7 @@ public class ShadowKillHelper {
      * 本方法只在全局清理里按周期调用，MISSING_TARGET_TICKS 的计数单位是"清理周期"而非 tick，
      * 防跨维度传送时 target 短暂不在任何维度被误清。
      */
-    private static void cleanupInvalidTargets(CompoundTag shadowData, MinecraftServer server) {
+    private static void cleanupInvalidTargets(CompoundTag shadowData, MinecraftServer server, UUID attackerId) {
         Set<UUID> found = new HashSet<>();
         for (ServerLevel level : server.getAllLevels()) {
             for (String uuidKey : shadowData.getAllKeys()) {
@@ -501,16 +513,16 @@ public class ShadowKillHelper {
             try {
                 UUID uuid = UUID.fromString(uuidKey);
                 if (!found.contains(uuid)) {
-                    int missing = MISSING_TARGET_TICKS.getOrDefault(uuid, 0) + 1;
+                    int missing = MISSING_TARGET_TICKS.getOrDefault(missingKey(attackerId, uuid), 0) + 1;
                     if (missing >= 2) {
                         shadowData.remove(uuidKey);
-                        MISSING_TARGET_TICKS.remove(uuid);
+                        MISSING_TARGET_TICKS.remove(missingKey(attackerId, uuid));
                         removeShadowHPBossBarByUUID(uuidKey);
                     } else {
-                        MISSING_TARGET_TICKS.put(uuid, missing);
+                        MISSING_TARGET_TICKS.put(missingKey(attackerId, uuid), missing);
                     }
                 } else {
-                    MISSING_TARGET_TICKS.remove(uuid);
+                    MISSING_TARGET_TICKS.remove(missingKey(attackerId, uuid));
                 }
             } catch (IllegalArgumentException ignored) {}
         }
@@ -530,6 +542,12 @@ public class ShadowKillHelper {
             for (ServerBossEvent bar : inner.values()) {
                 bar.removeAllPlayers();
             }
+        }
+        // 清理该玩家影子数据对应的 MISSING 计数：其目标离线期间不会被访问，
+        // 计数保留只会拖到下轮全局清理才自愈（轻微内存残留）
+        CompoundTag shadowData = event.getEntity().getPersistentData().getCompound(NBT_SP_DATA);
+        for (String uuidKey : shadowData.getAllKeys()) {
+            MISSING_TARGET_TICKS.remove(missingKey(event.getEntity().getUUID(), uuidKey));
         }
     }
 

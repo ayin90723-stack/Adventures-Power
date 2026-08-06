@@ -72,6 +72,9 @@ public final class AdventureItemNbtUtil {
             // 如果所有里程碑都已恢复，也恢复 fullyUnlocked
             if (progress.getUnlockedMilestoneCount() >= all.size()) {
                 progress.activateFullyUnlocked();
+                // 恢复路径同时升级饰品：持有「开始」的全部解锁玩家替换为「终点」
+                //（与 grantMilestone 的级联行为一致；无饰品时 replaceBeginWithEnd 无操作）
+                replaceBeginWithEnd(player);
             }
             syncAllAdventureItemNbt(player, progress);
         }

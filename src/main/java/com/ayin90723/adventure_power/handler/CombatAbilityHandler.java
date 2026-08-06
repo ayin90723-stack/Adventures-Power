@@ -20,6 +20,7 @@ import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.living.LivingAttackEvent;
 import net.minecraftforge.event.entity.living.LivingEvent.LivingTickEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
@@ -27,6 +28,7 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 战斗类能力效果处理器。
@@ -50,6 +52,26 @@ public class CombatAbilityHandler {
      */
     private static final Map<Entity, Long> PIERCING_GAZE_NO_IFRAME_END =
         java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
+    /** 攻击方能力同 tick 结算去重表：(attacker:target) 同 tick 只结算一次。
+     *  防破敌之眼穿透三连的双重 post（手动 postHurtEvent + actuallyHurt 内
+     *  ForgeHooks.onLivingHurt 二次 post）导致淬魂/影杀/禁疗/嗜血同 tick 双结算；
+     *  ServerTickEvent END 每 tick 清空（与影杀 SHADOW_KILL_TICKED 同生命周期）。 */
+    private static final Set<String> COMBAT_TICK_DEDUP = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** 攻击方能力同 tick 去重入口（RecoveryHandler 嗜血等跨类调用）：
+     *  add 成功 = 本 tick 首次结算；失败 = 已结算过，调用方应跳过 */
+    public static boolean tryMarkCombatTick(Player attacker, LivingEntity target) {
+        return COMBAT_TICK_DEDUP.add(attacker.getUUID() + ":" + target.getUUID());
+    }
+
+    /** 每 tick 清空去重表（tick 末，跨 tick 的攻击不受影响） */
+    @SubscribeEvent
+    public static void onServerTick(TickEvent.ServerTickEvent event) {
+        if (event.phase == TickEvent.Phase.END) {
+            COMBAT_TICK_DEDUP.clear();
+        }
+    }
 
     // ==================== 1. 灵巧 — 概率闪避 ====================
 
@@ -85,7 +107,8 @@ public class CombatAbilityHandler {
         // 标记 = 事件已发的直接证据，供 Layer 0（Player.attack）决定是否补发。
         // 不依赖 Layer 2.5 redirect：redirect 注入失败（require=0 静默失效）时
         // 原版事件照常 post，本监听器照常 mark，Layer 0 据此不重复补发（防淬魂/嗜血双结算）。
-        PiercingGazeUtil.markVanillaHurtEventPosted();
+        // v1.3.6：按目标实体记录（per-entity），嵌套 hurt（Boss AOE）不污染本实体判定
+        PiercingGazeUtil.markVanillaHurtEventPosted(event.getEntity());
 
         LivingEntity target = event.getEntity();
         if (target.level().isClientSide()) return;
@@ -111,6 +134,10 @@ public class CombatAbilityHandler {
             // 该职责已由破敌之眼穿透（手动 post 的事件本身未取消）覆盖——
             // 被其他模组 cancel 的伤害（否定类机制）不再强行结算
             if (event.isCanceled()) return;
+            // 同 tick 去重（淬魂/影杀/禁疗/嗜血共享）：穿透三连的手动 post + actuallyHurt 内
+            // ForgeHooks 二次 post 会让攻击方能力同 tick 双结算——按 (attacker, target)
+            // 同 tick 只结算一次（影杀内部另有 SHADOW_KILL_TICKED 双保险）
+            if (!tryMarkCombatTick(attacker, target)) return;
             var progress = AdventureProgressCapability.getAdventureProgress(attacker).orElse(null);
             if (progress == null) return;
             if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
@@ -204,9 +231,13 @@ public class CombatAbilityHandler {
                 target.invulnerableTime = 0;
                 target.setLastHurtByMob(attacker);
                 target.setLastHurtByPlayer(attacker);
-                attacker.awardKillScore(target, 1, target.level().damageSources().mobAttack(attacker));
                 setDeathScoreNegativeOne(target);  // 防止 die() 内部重复计数
                 target.die(source);
+                // 计分移到 die() 之后：死亡被取消（死亡抗拒/真实血量等救回）时不发击杀分，
+                // 避免"击杀分已发放但目标未死"的错位
+                if (!target.isAlive()) {
+                    attacker.awardKillScore(target, 1, target.level().damageSources().mobAttack(attacker));
+                }
             }
         }
     }

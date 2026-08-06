@@ -98,15 +98,19 @@ public class PlayerTickHandler {
      * Buff 延长 / 环境免疫 / 受击坚韧超时 / 庇护无敌过期。
      */
     public static void onTick(Player player, IAdventureProgress progress) {
+        // Capability 时间戳字段（受击坚韧/庇护无敌/死亡抗拒）用维度 gameTime（由 shiftTimers
+        // 跨维度平移）；lastBuffCheck 是静态 Map（不平移），限频基准改用服务器全局 tick 防跨维度冻结
         long currentTime = player.level().getGameTime();
+        long serverTick = player.level().getServer() != null
+            ? player.level().getServer().getTickCount() : currentTime;
 
         // Buff 延长（每 3 秒）
         if (progress.isAbilityEnabled(AbilityIds.PERPETUAL_BLESSING)) {
             long lastCheck = lastBuffCheck.getOrDefault(player.getUUID(), -1L);
             if (lastCheck == -1L) {
-                lastBuffCheck.put(player.getUUID(), currentTime);
-            } else if (currentTime - lastCheck >= BUFF_CHECK_INTERVAL) {
-                lastBuffCheck.put(player.getUUID(), currentTime);
+                lastBuffCheck.put(player.getUUID(), serverTick);
+            } else if (serverTick - lastCheck >= BUFF_CHECK_INTERVAL) {
+                lastBuffCheck.put(player.getUUID(), serverTick);
                 extendBeneficialEffects(player);
             }
         } else {

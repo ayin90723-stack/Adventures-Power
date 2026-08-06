@@ -48,8 +48,11 @@ public class DoubleJumpHandler {
     public static void handleDoubleJump(ServerPlayer player) {
         if (tryApplyJump(player)) {
             playEffects(player);
-        } else {
-            // 拒绝时拉回客户端预测，防独飞
+        } else if (!player.onGround()) {
+            // 拒绝时拉回客户端预测，防独飞。
+            // 落地瞬间的拒绝属于落地竞态（服务端 AIR_JUMPED 在 tick END 清零，客户端
+            // MovementInputUpdateEvent 已先清零）——此时客户端位置已随落地自然收敛，
+            // 拉回包会把客户端预测的 Y 和御风冲刺一起拉掉，产生可见顿挫，故跳过。
             player.connection.send(new ClientboundSetEntityMotionPacket(player));
         }
     }

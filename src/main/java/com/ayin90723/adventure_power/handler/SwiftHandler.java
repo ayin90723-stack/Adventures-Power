@@ -54,7 +54,8 @@ public class SwiftHandler {
         // 觉醒：推开半径内敌对生物
         if (!progress.isFullyUnlocked()) return;
         if (!(player.level() instanceof ServerLevel serverLevel)) return;
-        long currentTime = player.level().getGameTime();
+        // 限频基准用服务器全局 tick（lastPush 静态 Map 不随 shiftTimers 平移，跨维度会冻结）
+        long currentTime = serverLevel.getServer().getTickCount();
         long last = lastPush.getOrDefault(player.getUUID(), -1L);
         if (last != -1L && currentTime - last < 5) return;
         lastPush.put(player.getUUID(), currentTime);

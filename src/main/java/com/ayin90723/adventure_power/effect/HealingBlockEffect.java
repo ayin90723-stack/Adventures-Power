@@ -12,6 +12,7 @@ import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingHealEvent;
 import net.minecraftforge.event.entity.living.LivingUseTotemEvent;
@@ -109,7 +110,7 @@ public class HealingBlockEffect extends MobEffect {
       // NBT 持久化（正常实体重启后可恢复；对重写 getPersistentData 的实体静默无效）
       target.getPersistentData().putLong(NBT_KEY, endTime);
       // 同时施加 MobEffect 作为视觉指示器
-      MobEffect visualEffect = ModEffects.UNDYING_SLASH.get();
+      MobEffect visualEffect = ModEffects.HEALING_BLOCK.get();
       if (visualEffect != null) {
          target.addEffect(new MobEffectInstance(visualEffect, durationTicks, 0, false, true));
       }
@@ -179,6 +180,35 @@ public class HealingBlockEffect extends MobEffect {
             VULN_END.remove(uuid);
             MISSING_TICKS.remove(uuid);
             entity.getPersistentData().remove(VULN_NBT_KEY);
+         }
+      }
+
+      /** 实体加载/生成时从 NBT 回填内存表：区块卸载导致内存条目被 2-tick 宽限清理
+       *  （TRACKED_HEALTH / VULN_END），而正常实体的 NBT 标记仍在——重载/回到已加载
+       *  维度时回填，恢复 tick 末钳制与觉醒易伤（对重写 getPersistentData 的实体
+       *  NBT 已丢、无回填源，属已知限制，下次攻击重新施加） */
+      @SubscribeEvent
+      public static void onEntityJoin(EntityJoinLevelEvent event) {
+         if (!(event.getEntity() instanceof LivingEntity living)) return;
+         if (living.level().isClientSide()) return;
+         long gameTime = living.level().getGameTime();
+         CompoundTag data = living.getPersistentData();
+         if (data != null) {
+            if (data.contains(NBT_KEY)) {
+               long endTime = data.getLong(NBT_KEY);
+               if (endTime > gameTime) {
+                  // putIfAbsent 而非 put：内存条目存活时其钳制线更低更准（tick 末持续下移），
+                  // 覆盖会短暂抬高钳制线（Boss 卸载窗口内自愈 1 tick 的量级）
+                  TRACKED_HEALTH.putIfAbsent(living.getUUID(),
+                     new TrackedEntry(HealthUtil.getEffectiveHealth(living), endTime));
+               }
+            }
+            if (data.contains(VULN_NBT_KEY)) {
+               long endTime = data.getLong(VULN_NBT_KEY);
+               if (endTime > gameTime) {
+                  VULN_END.put(living.getUUID(), endTime);
+               }
+            }
          }
       }
 

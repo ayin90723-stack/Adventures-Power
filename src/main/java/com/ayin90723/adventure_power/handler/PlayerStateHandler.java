@@ -92,19 +92,23 @@ public class PlayerStateHandler {
     /**
      * 玩家死亡前保存正面效果和经验到 persistentData。
      * <p>
-     * 优先级 LOW：让死亡抗拒（DeathDefy，HIGHEST）等可能取消死亡的逻辑先执行，
+     * 优先级 LOWEST：让死亡抗拒（DeathDefy，HIGHEST）等可能取消死亡的逻辑先执行，
      * 仅在死亡确认不被取消时才保存与清零，避免"死亡被救却已清零经验、key 残留"的错乱。
+     * LOWEST 为事件分发最末一级：非 receiveCanceled 的监听器在事件被取消时会被 Forge
+     * 直接跳过（不调用），故本监听器执行时必然未被任何更早优先级取消——LOWEST 只是
+     * 让本监听器相对其他 LOW/NORMAL 监听器更晚执行（它们读经验时尚未清零，语义更优）。
      * <p>
      * 清零经验等级防止死亡掉落经验球（原版 {@code LivingEntity.dropExperience} 对玩家亦生效，
      * 被玩家击杀时会掉落）。经验已先保存到 persistentData，重生时按精确值恢复，故清零不丢数据。
      */
-    @SubscribeEvent(priority = EventPriority.LOW)
+    @SubscribeEvent(priority = EventPriority.LOWEST)
     public static void onPlayerDeath(LivingDeathEvent event) {
         if (!(event.getEntity() instanceof Player player)) return;
         if (player.level().isClientSide()) return;
         // 死亡已被取消（如死亡抗拒 HIGHEST 救回）时不保存/清零：
-        // Forge 事件 cancel 不中断后续监听器分发，本监听器（LOW）在取消后仍会执行，
-        // 否则觉醒分支会把经验清零存入 NBT，而玩家实际存活——经验永久丢失（无消费路径）。
+        // 非 receiveCanceled 的监听器在事件被取消时会被 Forge 直接跳过（不调用本方法），
+        // 本守卫为防御性冗余——确保觉醒分支不会把经验清零存入 NBT 而玩家实际存活
+        // （经验永久丢失，无消费路径）。
         if (event.isCanceled()) return;
 
         AbilityGate.getActiveProgress(player, AbilityIds.SOUL_BIND).ifPresent(progress -> {
@@ -575,6 +579,8 @@ public class PlayerStateHandler {
     public static void onLivingHurt(LivingHurtEvent event) {
         if (!(event.getEntity() instanceof Player player)) return;
         if (player.level().isClientSide()) return;
+        // 已被更高优先级取消的伤害（未实际掉血）不叠层、不减伤——白叠层是免费收益
+        if (event.isCanceled()) return;
 
         AbilityGate.getActiveProgress(player, AbilityIds.RESILIENCE).ifPresent(progress -> {
             long currentTime = player.level().getGameTime();

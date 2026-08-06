@@ -220,10 +220,14 @@ public class AdventureProgressCapability {
     /**
      * 全部里程碑达成时的第 11 阶段「冒险者的觉醒」级联（幂等）。
      * <p>
-     * 所有解锁路径（grantMilestone / catchUpMissedMilestones）必须走此方法，
+     * 所有解锁路径（grantMilestone / catchUpMissedMilestones / reload 广播）必须走此方法，
      * 否则 10/10 里程碑但觉醒永不激活、终点饰品永不替换，且无自愈路径。
      */
     public static void activateFinalStageIfReady(ServerPlayer player, IAdventureProgress progress) {
+        // /reload 后注册表列表已替换，但 validUnlockedCount 是惰性缓存（仅在能力检查时重建）：
+        // 先触发重建（isAbilityUnlocked 检测 registryHash 变更），否则陈旧计数会把
+        // "数据包删除了玩家已解锁的里程碑"（真实 8/9）误判为全解锁——误激活不可撤销
+        progress.isAbilityUnlocked(AbilityIds.AGILITY);
         if (progress.areAllMilestonesUnlocked() && !progress.isFullyUnlocked()) {
             AdventureItemNbtUtil.replaceBeginWithEnd(player);
             progress.activateFullyUnlocked();

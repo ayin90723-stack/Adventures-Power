@@ -60,10 +60,24 @@ public final class PiercingGazeUtil {
     /** Layer 0（Player.attack）的本次攻击作用域基线（begin 时记录，consume 比较增量） */
     private static final ThreadLocal<Long> VANILLA_HURT_SCOPE_BASE = ThreadLocal.withInitial(() -> 0L);
 
+    /** 每个实体最近一次 post 事件时的全局计数（WeakHashMap 弱 key：实体 unload/死亡后自动回收）。
+     *  用途：嵌套 hurt（Boss 在 hurt 管线内对另一实体 AOE）的 post 也会推高全局计数，
+     *  纯计数方案会把嵌套增量误判为本层已 post——按实体隔离后，本层只认"本实体的 post 增量"，
+     *  Layer 0 的 consume 与 Layer 2 的 posted 判定不再被嵌套实体的事件污染 */
+    private static final ThreadLocal<java.util.Map<Entity, Long>> LAST_POSTED_PER_ENTITY =
+        ThreadLocal.withInitial(java.util.WeakHashMap::new);
+
+    /** 风暴守卫（由 PiercingGazeLivingEntityMixin 迁移至此，Layer 0/2 共用）：
+     *  手动 post 事件前置 true——post 期间第三方监听器递归 target.hurt() 时，
+     *  递归层 HEAD 压栈捕获到本层 IN_PIERCING=true 即可跳过穿透阻断递归 */
+    public static final ThreadLocal<Boolean> IN_PIERCING = ThreadLocal.withInitial(() -> false);
+
     /** 由 {@code CombatAbilityHandler.onLivingHurt} 入口调用（事件 post 即触发）：
-     *  本次 hurt 已 post 事件（计数 +1） */
-    public static void markVanillaHurtEventPosted() {
-        VANILLA_HURT_EVENT_POST_COUNT.set(VANILLA_HURT_EVENT_POST_COUNT.get() + 1);
+     *  本次 hurt 已 post 事件（全局计数 +1 并按实体记录，供 per-entity 判定） */
+    public static void markVanillaHurtEventPosted(LivingEntity target) {
+        long next = VANILLA_HURT_EVENT_POST_COUNT.get() + 1;
+        VANILLA_HURT_EVENT_POST_COUNT.set(next);
+        LAST_POSTED_PER_ENTITY.get().put(target, next);
     }
 
     /** 读取当前 post 计数（Layer 2 onHurtEnter 压栈时记录本层基准用） */
@@ -79,12 +93,13 @@ public final class PiercingGazeUtil {
     }
 
     /**
-     * Layer 0（Player.attack 重定向）专用：本次攻击作用域内是否已 post 事件
-     * （当前计数 > 基线）。未走原版管线时（Boss 完全重写 hurt() 不调 super）
+     * Layer 0（Player.attack 重定向）专用：本次攻击作用域内目标是否已 post 事件
+     * （该实体的最近 post 计数 > 基线）。未走原版管线时（Boss 完全重写 hurt() 不调 super）
      * 无新增 post，返回 false。
      */
-    public static boolean consumeVanillaHurtEventPosted() {
-        return VANILLA_HURT_EVENT_POST_COUNT.get() > VANILLA_HURT_SCOPE_BASE.get();
+    public static boolean consumeVanillaHurtEventPosted(LivingEntity self) {
+        Long last = LAST_POSTED_PER_ENTITY.get().get(self);
+        return last != null && last > VANILLA_HURT_SCOPE_BASE.get();
     }
 
     /**
@@ -96,9 +111,11 @@ public final class PiercingGazeUtil {
      * 非消费式：计数单调递增，本层基准由调用方（栈帧）持有，读取不影响后续判定。
      *
      * @param base 本层 hurt 开始时的计数（onHurtEnter 压栈时记录）
+     * @param self 本层 hurt 的目标实体（只认该实体自身的 post 增量，防嵌套实体事件污染）
      */
-    public static boolean peekVanillaHurtEventPosted(long base) {
-        return VANILLA_HURT_EVENT_POST_COUNT.get() > base;
+    public static boolean peekVanillaHurtEventPosted(long base, LivingEntity self) {
+        Long last = LAST_POSTED_PER_ENTITY.get().get(self);
+        return last != null && last > base;
     }
 
     /**

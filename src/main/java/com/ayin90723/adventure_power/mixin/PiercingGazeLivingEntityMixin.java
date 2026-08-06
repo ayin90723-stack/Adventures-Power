@@ -65,8 +65,8 @@ public abstract class PiercingGazeLivingEntityMixin {
 
     // ===== ThreadLocal：本层破敌之眼穿透状态（栈式隔离递归调用） =====
 
-    /** 风暴守卫：本层是否已在破敌之眼穿透内（手动 post 事件前置 true，防事件风暴） */
-    private static final ThreadLocal<Boolean> IN_PIERCING = ThreadLocal.withInitial(() -> false);
+    // 风暴守卫 IN_PIERCING 已迁移至 PiercingGazeUtil（Layer 0/2 共用）：
+    // @Mixin 类禁止非 private static 方法，且 Layer 0（PlayerAttackMixin）需要读写同一标记
     /** 本层伤害结算前的真实血量（onHurtEnter 缓存）——RETURN 注入时 actuallyHurt 已执行，
      *  此时 getHealth() 是扣血后值，若用作 afterPierceFallback 的参照会被判定"血量未恢复"
      *  而对普通命中重复直写（双重扣血） */
@@ -92,7 +92,7 @@ public abstract class PiercingGazeLivingEntityMixin {
         Deque<PiercingStackFrame> stack = PIERCING_STACK.get();
         if (stack.size() > 64) {
             stack.clear();
-            IN_PIERCING.set(false);
+            PiercingGazeUtil.IN_PIERCING.set(false);
             PIERCING_HEALTH_BEFORE.remove();
         }
         // 压栈保存外层状态，重置本层（递归 hurt 不污染外层）。
@@ -100,10 +100,10 @@ public abstract class PiercingGazeLivingEntityMixin {
         // 嵌套 hurt 的新增 post 只影响其自身基准，外层判定不受污染（计数方案天然栈式隔离，
         // 无需清除/恢复布尔——旧布尔方案嵌套未 post 的 hurt 会清掉外层标记导致外层误判）
         stack.push(new PiercingStackFrame(
-            IN_PIERCING.get(), PIERCING_HEALTH_BEFORE.get(),
+            PiercingGazeUtil.IN_PIERCING.get(), PIERCING_HEALTH_BEFORE.get(),
             PiercingGazeUtil.getVanillaHurtEventPostCount()
         ));
-        IN_PIERCING.set(false);
+        PiercingGazeUtil.IN_PIERCING.set(false);
         // 缓存伤害结算前的真实血量（架空参照读数：自定义血条 Boss 原版槽被架空，
         // getHealthDirect 读到不动值会导致兜底检测永远误判"血量未下降"而双重扣血；
         // 防 getHealth 被 ASM/TrueHealth 篡改则靠架空参照的差值判定回退到 DataItem）
@@ -171,8 +171,11 @@ public abstract class PiercingGazeLivingEntityMixin {
                 // hurt() 正常走到 actuallyHurt 即已 post。计数方案天然栈式隔离：
                 // 嵌套 hurt 的 post 只影响其自身基准，本层基准 = 栈帧压栈时记录的值
                 PiercingStackFrame frame = PIERCING_STACK.get().peek();
+                // per-entity 判定：只认本实体自身的 post 增量（v1.3.6）——
+                // 纯计数会被嵌套实体（Boss 在 hurt 内对另一实体 AOE）的事件增量污染，
+                // 导致本层误判"已 post"而跳过补 post + actuallyHurt（淬魂等丢失结算机会）
                 boolean posted = PiercingGazeUtil.peekVanillaHurtEventPosted(
-                    frame != null ? frame.postedBase() : 0L);
+                    frame != null ? frame.postedBase() : 0L, self);
                 // 伤害结算前的真实血量（onHurtEnter 缓存）——RETURN 时 actuallyHurt 已执行，
                 // self.getHealth() 是扣血后值，若用它作参照，普通命中会被判定"血量未恢复"
                 // 而触发 afterPierceFallback 的兜底直写，造成双重扣血。
@@ -196,7 +199,7 @@ public abstract class PiercingGazeLivingEntityMixin {
                         //（任何 post 都触发该监听器），此处不再显式 mark
                         // 风暴守卫：post 期间第三方监听器用同一源递归 target.hurt() 时，
                         // 递归层 HEAD 压栈捕获到本层 IN_PIERCING=true 即可跳过穿透阻断递归
-                        IN_PIERCING.set(true);
+                        PiercingGazeUtil.IN_PIERCING.set(true);
                         float effectiveAmount = PiercingGazeUtil.postHurtEvent(self, source, amount);
                         // actuallyHurt 直写 + 血量兜底 + 清无敌字段
                         PiercingGazeUtil.invokeActuallyHurt(self, source, effectiveAmount);
@@ -214,7 +217,7 @@ public abstract class PiercingGazeLivingEntityMixin {
             Deque<PiercingStackFrame> stack = PIERCING_STACK.get();
             PiercingStackFrame outer = stack.poll();
             if (outer != null) {
-                IN_PIERCING.set(outer.inPiercing());
+                PiercingGazeUtil.IN_PIERCING.set(outer.inPiercing());
                 if (outer.healthBefore() != null) {
                     PIERCING_HEALTH_BEFORE.set(outer.healthBefore());
                 } else {
@@ -222,7 +225,7 @@ public abstract class PiercingGazeLivingEntityMixin {
                 }
             } else {
                 // 栈空（最外层 hurt 退出）-> 彻底清理，防 ThreadLocal 泄漏
-                IN_PIERCING.remove();
+                PiercingGazeUtil.IN_PIERCING.remove();
                 PIERCING_HEALTH_BEFORE.remove();
             }
         }

@@ -109,14 +109,12 @@ public abstract class TrueHealthMixin {
         Player player = (Player) self;
 
         // 重入：修复期间 BanHealing / 其他 Mixin 调了 getHealth() ->
-        // 直接返回备份值，防止读到未修复完成的旧 DataItem 导致修复被抵消
+        // 直接返回备份值，防止读到未修复完成的旧 DataItem 导致修复被抵消。
+        // 不再调 getHealthDirect：其退化路径（反射初始化失败）会回落到 getHealth()
+        // 再次进入本注入点，backup<=0 时形成无限递归——直接返回备份或最大生命
         if (IN_ON_GET_HEALTH.get()) {
             float backup = progress.getBackupHealth();
-            if (backup > 0.0F) {
-                cir.setReturnValue(backup);
-            } else {
-                cir.setReturnValue(HealthUtil.getHealthDirect(player));
-            }
+            cir.setReturnValue(backup > 0.0F ? backup : player.getMaxHealth());
             return;
         }
 

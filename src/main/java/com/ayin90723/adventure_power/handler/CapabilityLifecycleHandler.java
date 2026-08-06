@@ -208,8 +208,14 @@ public class CapabilityLifecycleHandler {
     public static void giveAdventureBeginIfNeeded(Player player) {
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
             if (progress.isFullyUnlocked()) {
-                // 完全解锁 -> 应持有冒险的终点，丢失则补发
-                if (AdventureItemNbtUtil.playerHasAdventureItem(player)) return;
+                // 完全解锁 -> 应持有冒险的终点：已持有终点则 OK；持有「开始」则升级替换
+                //（迁移/恢复路径的玩家仍持开始不升级的自愈，与 grantMilestone 级联行为一致）；
+                // 都无则补发终点
+                if (AdventureItemNbtUtil.playerHasAdventureEnd(player)) return;
+                if (AdventureItemNbtUtil.playerHasAdventureItem(player)) {
+                    AdventureItemNbtUtil.replaceBeginWithEnd(player);
+                    return;
+                }
                 ItemStack endStack = new ItemStack(ModItems.ADVENTURE_END.get());
                 AdventureItemNbtUtil.writeMilestonesToStack(endStack, progress);
                 if (!player.getInventory().add(endStack)) {
