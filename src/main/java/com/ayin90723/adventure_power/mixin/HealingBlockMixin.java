@@ -26,6 +26,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(value = LivingEntity.class, priority = 2000)
 public class HealingBlockMixin {
 
+    /** 测试日志：禁疗钳制追踪（亚波伦测试用，调试完移除） */
+
     /** 跟踪层：{@code setHealth()} RETURN 时同步追踪低点 */
     @Inject(method = "m_21153_", at = @At("RETURN"))
     private void onSetHealthReturn(CallbackInfo ci) {
@@ -41,7 +43,10 @@ public class HealingBlockMixin {
         // 跟踪层必须取真实血量才能正确记录低点
         float current = HealthUtil.getEffectiveHealth(self);
         if (tracked != null) {
-            HealingBlockEffect.updateTrackedHealth(self, Math.min(current, tracked));
+            float newTracked = Math.min(current, tracked);
+            if (newTracked < tracked) {
+            }
+            HealingBlockEffect.updateTrackedHealth(self, newTracked);
         }
     }
 
@@ -68,7 +73,9 @@ public class HealingBlockMixin {
         // 架空参照读数：与 onSetHealthReturn 一致，自定义血条实体取真实血量检测回血
         float current = HealthUtil.getEffectiveHealth(self);
         if (current > tracked) {
-            HealthUtil.setAllHealthLikeRaw(self, tracked);
+            // 分级直写：通用层 → 对象图插针 → DataItem 兜底
+            HealthUtil.setHealthLikeAny(self, tracked);
+            current = tracked;
         }
         HealingBlockEffect.updateTrackedHealth(self, Math.min(current, tracked));
     }

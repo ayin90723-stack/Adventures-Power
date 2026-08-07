@@ -34,6 +34,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 以 NBT 持久化标记为真实判断依据，MobEffect 仅作为视觉指示器
  */
 public class HealingBlockEffect extends MobEffect {
+   /** 测试日志：禁疗标记/钳制追踪（亚波伦测试用，调试完移除） */
    /** NBT 中存储禁疗之触效果到期时间的 key */
    public static final String NBT_KEY = PersistentDataKeys.HEALING_BLOCK_END_TIME;
    /** NBT 中存储强制击杀标记的 key（跨优先级传递） */
@@ -109,6 +110,9 @@ public class HealingBlockEffect extends MobEffect {
       TRACKED_HEALTH.put(target.getUUID(), new TrackedEntry(HealthUtil.getEffectiveHealth(target), endTime));
       // NBT 持久化（正常实体重启后可恢复；对重写 getPersistentData 的实体静默无效）
       target.getPersistentData().putLong(NBT_KEY, endTime);
+      // 验证 NBT 是否真正持久化：重写 getPersistentData() 的实体（亚波伦）再次读取为空，
+      // 只能依赖内存表回退；正常实体返回 true
+      boolean nbtPersist = target.getPersistentData().contains(NBT_KEY);
       // 同时施加 MobEffect 作为视觉指示器
       MobEffect visualEffect = ModEffects.HEALING_BLOCK.get();
       if (visualEffect != null) {
@@ -253,7 +257,8 @@ public class HealingBlockEffect extends MobEffect {
                      // getHealthDirect 读到不动值会导致回血检测永远 false，钳制失效
                      float current = HealthUtil.getEffectiveHealth(living);
                      if (current > entry.health) {
-                        HealthUtil.setAllHealthLikeRaw(living, entry.health);
+                        // 分级直写：通用层 → 对象图插针 → DataItem 兜底
+                        HealthUtil.setHealthLikeAny(living, entry.health);
                         current = entry.health;
                      }
                      entry.health = Math.min(current, entry.health);

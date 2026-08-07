@@ -45,6 +45,7 @@ import java.util.Set;
 @Mod.EventBusSubscriber(modid = AdventurePower.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class CombatAbilityHandler {
 
+
     /**
      * 破敌之眼觉醒禁无敌帧 - 目标侧标记到期时间（gameTime）。
      * 内存表（弱 key）替代 persistentData：标记仅影响当前实体实例，无需持久化，
@@ -225,7 +226,8 @@ public class CombatAbilityHandler {
         float epsilon = Math.max(0.01F, extraDamage * 0.01F);
         if (target.isAlive() && actualDealt < extraDamage - epsilon) {
             float correctedHealth = Math.max(healthBefore - extraDamage, 0.0F);
-            HealthUtil.setAllHealthLikeRaw(target, correctedHealth);
+            // 分级直写：通用层（方法扫描+验证）→ 对象图插针 → DataItem 兜底
+            HealthUtil.setHealthLikeAny(target, correctedHealth);
             if (correctedHealth <= 0.0F) {
                 clearHurtTime(target);
                 target.invulnerableTime = 0;

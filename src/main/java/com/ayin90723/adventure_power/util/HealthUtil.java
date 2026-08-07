@@ -278,6 +278,347 @@ public class HealthUtil {
     }
 
     /**
+     * 通用层直写：方法扫描 + 验证闭环。
+     * <p>
+     * 针对"覆写 getHealth/setHealth + 自建存储"的模组 Boss（血量不在 SynchedEntityData）：
+     * 扫描目标类<b>自身声明</b>的 {@code (F)V} 方法（名含 Health，忽略大小写），逐个调用，
+     * 调用后验证 {@link #getEffectiveHealth} 是否变为目标值——生效即命中。
+     * 验证闭环天然避开诱饵方法（调用无效果的自然失败，如 RevelationFix 的 Idiot 空方法）。
+     * 只扫自身声明方法，排除父类原版方法（不会命中原版 setHealth/setSpeed 等）。
+     *
+     * @return true 表示命中并写入成功
+     */
+    public static boolean setHealthLikeGeneric(LivingEntity target, float health) {
+        for (java.lang.reflect.Method m : target.getClass().getDeclaredMethods()) {
+            Class<?>[] p = m.getParameterTypes();
+            if (p.length != 1 || p[0] != float.class) continue;
+            if (!m.getName().toLowerCase().contains("health")) continue;
+            if (java.lang.reflect.Modifier.isStatic(m.getModifiers())) continue;
+            try {
+                m.setAccessible(true);
+                m.invoke(target, health);
+                if (Math.abs(getEffectiveHealth(target) - health) < 1.0F) {
+                    return true;
+                }
+            } catch (Exception ignored) {
+                // 调用失败（访问控制/类型不符）→ 继续下一候选
+            }
+        }
+        return false;
+    }
+
+    /** 插针命中缓存：实体类 → 写入器（首次插针后直接复用，不再重复诊断） */
+    /**
+     * 插针命中缓存：实体类 → 真血字段写入通路（字段 + 从实体到宿主对象的引用路径链）。
+     * <p>
+     * 路径链避免"每次直写都全对象图搜索宿主"（大对象图实体如弹幕 Boss 会卡）；
+     * 解析失败（对象图结构变化）回退 {@link #searchInstance} 全图搜索兜底。
+     */
+    private static final java.util.Map<Class<?>, WritePath> CAP_WRITE_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 真血字段写入通路：字段 + 从实体根对象到字段宿主的步骤链。 */
+    private static final class WritePath {
+        final java.lang.reflect.Field field;
+        final java.util.List<Object> steps; // Field=对象字段；其余=Map key / Collection index（按当前节点类型解释）
+
+        WritePath(java.lang.reflect.Field field, java.util.List<Object> steps) {
+            this.field = field;
+            this.steps = steps;
+        }
+    }
+
+    /**
+     * DataItem 联动探针：直写 DATA_HEALTH_ID 槽 value = 原值-1（绕过 set() 直改 DataItem.value 字段），
+     * 观察 {@code getHealth()} 是否联动。
+     * <p>
+     * 联动 = {@code getHealth()} 真读该槽（正常实体）→ 返回 true，DataItem 直写足够；
+     * 不联动 = {@code getHealth()} 被重定向/架空（如亚波伦 ASM 改写读 MegaCapability）→ 返回 false，
+     * 必须进插针层找真血存储。扰动同 tick 内还原，客户端无感知。
+     */
+    private static boolean probeDataItemLinked(LivingEntity target) {
+        if (ENTITY_DATA_ITEMS_FIELD == null || DATA_ITEM_VALUE_FIELD == null || DATA_HEALTH_ID == null) {
+            return true; // 无法探测 → 视为正常，不扰动
+        }
+        try {
+            Map<Integer, Object> items = (Map<Integer, Object>) ENTITY_DATA_ITEMS_FIELD.get(target.getEntityData());
+            Object item = items.get(DATA_HEALTH_ID.getId());
+            if (item == null) {
+                return true;
+            }
+            float orig = ((Float) DATA_ITEM_VALUE_FIELD.get(item)).floatValue();
+            DATA_ITEM_VALUE_FIELD.set(item, orig - 1.0F);
+            float after;
+            try {
+                after = target.getHealth();
+            } finally {
+                DATA_ITEM_VALUE_FIELD.set(item, orig); // 还原
+            }
+            boolean linked = Math.abs(after - (orig - 1.0F)) < 1.0F;
+            return linked;
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    /**
+     * 对象图插针深度上限：Entity → capability → dispatcher → provider → DATA → Wrapped 约 6 层。
+     */
+    private static final int GRAPH_DEPTH_LIMIT = 10;
+
+    /**
+     * 通用对象图插针层：当 DataItem 直写无效（{@link #probeDataItemLinked} 判定
+     * getHealth 被重定向）时，从实体自身出发<b>递归遍历全部可达对象</b>，
+     * 对每个 float 字段写测试值并观察 {@code getHealth()} 是否联动 → 解明真血存储位置并完成写入。
+     * <p>
+     * 纯对象图遍历，无任何模组 API/包名耦合：真血容器（如 Capability provider 实例）
+     * 必然在实体可达对象图内，任意层级都能被摸到。安全性由<b>验证闭环</b>保证——
+     * 写 原值-1 小扰动 → {@code getHealth()} 不联动 → 立即还原，正常实体即使被插也无副作用；
+     * 只有"写它 getHealth 就变"的真血字段才会落笔。对象图遍历自带 visited 防环 +
+     * 深度上限 + 世界/注册表等全局巨对象跳过（通用性能边界，非模组耦合）。
+     * <p>
+     * 命中后按实体类缓存写入通路，后续直写零开销。
+     *
+     * @return true 表示插针命中并完成写入
+     */
+    public static boolean probeCapabilityHealth(LivingEntity target, float targetValue) {
+        // 缓存命中：直接走已解明的通路（路径链直达宿主，零全图搜索）
+        WritePath cached = CAP_WRITE_CACHE.get(target.getClass());
+        if (cached != null) {
+            try {
+                Object owner = resolvePath(target, cached.steps, 0);
+                cached.field.setFloat(owner, targetValue);
+                return true;
+            } catch (Exception e) {
+                // 路径失效（对象图结构变化）→ 回退全图搜索一次
+                Object owner = searchByClass(target, cached.field.getDeclaringClass());
+                try {
+                    cached.field.setFloat(owner, targetValue);
+                    return true;
+                } catch (Exception e2) {
+                    CAP_WRITE_CACHE.remove(target.getClass());
+                }
+            }
+        }
+        // 门禁：DataItem 扰动后 getHealth 联动 = 正常实体（getHealth 真读槽 9），
+        // DataItem 直写足够且更高效，不插针。门禁仅为性能优化，安全性仍由验证闭环保证。
+        if (probeDataItemLinked(target)) {
+            return false;
+        }
+        // 通用对象图插针：从实体自身递归全部可达对象
+        try {
+            java.util.Set<Object> visited =
+                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+            float hit = probeGraph(target, target, 0, targetValue, visited, new java.util.ArrayList<>());
+            if (hit >= 0.0F) {
+                return true;
+            }
+        } catch (Exception e) {
+        }
+        return false;
+    }
+
+    /**
+     * 沿路径链从实体根对象解析宿主：steps 中 Field=对象字段，其余元素按当前节点
+     * 类型解释为 Map key（节点是 Map）或 Collection index（节点是 Collection）。
+     * 路径失效返回 null。
+     */
+    private static Object resolvePath(Object cur, java.util.List<Object> steps, int i) {
+        if (cur == null) return null;
+        for (; i < steps.size(); i++) {
+            Object step = steps.get(i);
+            if (step instanceof java.lang.reflect.Field f) {
+                try {
+                    cur = f.get(cur);
+                } catch (Exception e) {
+                    return null;
+                }
+            } else if (cur instanceof java.util.Map<?, ?> m) {
+                cur = m.get(step);
+            } else if (cur instanceof java.util.Collection<?> col) {
+                int idx = (Integer) step;
+                int j = 0;
+                Object found = null;
+                for (Object o : col) {
+                    if (j++ == idx) {
+                        found = o;
+                        break;
+                    }
+                }
+                cur = found;
+            } else {
+                return null;
+            }
+            if (cur == null) return null;
+        }
+        return cur;
+    }
+
+    /**
+     * 递归插针单个对象：扫描 float 字段（值≈当前真血）写测试值验证；
+     * 命中写入目标值并缓存通路（字段 + 从实体到宿主的引用路径链），未命中还原并递归全部引用字段/容器。
+     * {@code visited} 防环；深度上限 {@link #GRAPH_DEPTH_LIMIT}。
+     * {@code path} 记录从实体根到当前对象的步骤链（Field=对象字段；Map 记录 key；Collection 记录 index）。
+     * 返回命中字段原值，未命中返回 -1。
+     */
+    private static float probeGraph(LivingEntity target, Object obj, int depth, float targetValue,
+                                    java.util.Set<Object> visited, java.util.List<Object> path) {
+        if (obj == null || depth > GRAPH_DEPTH_LIMIT) return -1.0F;
+        if (obj instanceof Class<?> || obj instanceof Thread || obj instanceof ClassLoader) return -1.0F;
+        // 通用性能边界：世界/注册表等全局巨对象（不含实体血量，跳过防对象图爆炸）
+        if (obj instanceof net.minecraft.world.level.Level) return -1.0F;
+        if (obj instanceof net.minecraft.core.Registry) return -1.0F;
+        if (!visited.add(obj)) return -1.0F; // 防环：同 tick 内同一对象只插一次
+        // 参照 = getHealth()（真血读数：正常实体读槽9；重定向实体读真血源）
+        float currentHealth = target.getHealth();
+        Class<?> cls = obj.getClass();
+        // ① float 字段插针
+        for (Class<?> c = cls; c != null && c != Object.class; c = c.getSuperclass()) {
+            for (java.lang.reflect.Field f : c.getDeclaredFields()) {
+                if (f.getType() != float.class && f.getType() != Float.class) continue;
+                if (java.lang.reflect.Modifier.isStatic(f.getModifiers())) continue;
+                try {
+                    f.setAccessible(true);
+                    float orig = f.getFloat(obj);
+                    // 值域过滤：候选必须接近当前真血（血条特征），避免扰动无关 float
+                    if (Math.abs(orig - currentHealth) > Math.max(1.0F, currentHealth * 0.2F)) continue;
+                    // 插针：快照 → 写 原值-1 小扰动 → 无条件还原
+                    float before = target.getHealth();
+                    f.setFloat(obj, orig - 1.0F);
+                    float after;
+                    try {
+                        after = target.getHealth();
+                    } finally {
+                        f.setFloat(obj, orig); // 无条件还原（异常也不残留）
+                    }
+                    // 判据①：写入前后 getHealth 必须真实变化（防"恒定读数 + 碰巧≈血量"的无关字段误判）
+                    if (Math.abs(after - before) < 0.5F) continue;
+                    // 判据②：变化量必须指向测试值（真血字段特征）
+                    if (Math.abs(after - (orig - 1.0F)) < 1.0F) {
+                        // 命中：写入目标值并缓存通路（字段 + 实体→宿主路径链）
+                        f.setFloat(obj, targetValue);
+                        CAP_WRITE_CACHE.put(target.getClass(), new WritePath(f, new java.util.ArrayList<>(path)));
+                        return orig;
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        // ② 递归全部引用字段（含 Map/Collection/数组/自定义对象）
+        for (Class<?> c = cls; c != null && c != Object.class; c = c.getSuperclass()) {
+            for (java.lang.reflect.Field f : c.getDeclaredFields()) {
+                if (java.lang.reflect.Modifier.isStatic(f.getModifiers())) continue;
+                Class<?> ft = f.getType();
+                if (ft.isPrimitive() || ft == String.class || ft.isEnum() || ft.isArray()) continue;
+                try {
+                    f.setAccessible(true);
+                    Object child = f.get(obj);
+                    if (child == null) continue;
+                    if (child instanceof java.util.Map<?, ?> m) {
+                        for (java.util.Map.Entry<?, ?> e : m.entrySet()) {
+                            path.add(f);
+                            path.add(e.getKey());
+                            float r = probeGraph(target, e.getValue(), depth + 1, targetValue, visited, path);
+                            path.remove(path.size() - 1);
+                            path.remove(path.size() - 1);
+                            if (r >= 0.0F) return r;
+                        }
+                    } else if (child instanceof java.util.Collection<?> col) {
+                        int idx = 0;
+                        for (Object v : col) {
+                            path.add(f);
+                            path.add(idx);
+                            float r = probeGraph(target, v, depth + 1, targetValue, visited, path);
+                            path.remove(path.size() - 1);
+                            path.remove(path.size() - 1);
+                            if (r >= 0.0F) return r;
+                            idx++;
+                        }
+                    } else if (!child.getClass().isPrimitive()) {
+                        path.add(f);
+                        float r = probeGraph(target, child, depth + 1, targetValue, visited, path);
+                        path.remove(path.size() - 1);
+                        if (r >= 0.0F) return r;
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        return -1.0F;
+    }
+
+    /**
+     * 缓存路径失效兜底：从实体对象图重新解析字段宿主（按字段声明类匹配）。
+     * 纯对象图遍历，无模组耦合；找不到时返回 null（调用方移除缓存）。
+     */
+    private static Object searchByClass(LivingEntity target, Class<?> want) {
+        try {
+            java.util.Set<Object> visited =
+                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+            Object[] found = new Object[1];
+            searchInstance(target, 0, want, visited, found);
+            return found[0];
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    /** 对象图搜索：找第一个与 {@code want} 同类（isInstance）的对象，写入 {@code found}。 */
+    private static void searchInstance(Object obj, int depth, Class<?> want,
+                                       java.util.Set<Object> visited, Object[] found) {
+        if (found[0] != null || obj == null || depth > GRAPH_DEPTH_LIMIT) return;
+        if (obj instanceof Class<?> || obj instanceof Thread || obj instanceof ClassLoader) return;
+        if (obj instanceof net.minecraft.world.level.Level) return;
+        if (obj instanceof net.minecraft.core.Registry) return;
+        if (!visited.add(obj)) return;
+        if (want.isInstance(obj)) {
+            found[0] = obj;
+            return;
+        }
+        Class<?> cls = obj.getClass();
+        for (Class<?> c = cls; c != null && c != Object.class; c = c.getSuperclass()) {
+            for (java.lang.reflect.Field f : c.getDeclaredFields()) {
+                if (java.lang.reflect.Modifier.isStatic(f.getModifiers())) continue;
+                Class<?> ft = f.getType();
+                if (ft.isPrimitive() || ft == String.class || ft.isEnum() || ft.isArray()) continue;
+                try {
+                    f.setAccessible(true);
+                    Object child = f.get(obj);
+                    if (child == null) continue;
+                    if (child instanceof java.util.Map<?, ?> m) {
+                        for (Object v : m.values()) {
+                            searchInstance(v, depth + 1, want, visited, found);
+                            if (found[0] != null) return;
+                        }
+                    } else if (child instanceof java.util.Collection<?> col) {
+                        for (Object v : col) {
+                            searchInstance(v, depth + 1, want, visited, found);
+                            if (found[0] != null) return;
+                        }
+                    } else if (!child.getClass().isPrimitive()) {
+                        searchInstance(child, depth + 1, want, visited, found);
+                        if (found[0] != null) return;
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        }
+    }
+
+    /**
+     * 分级直写统一入口：通用层 → Capability 插针层 → DataItem 兜底。
+     * <p>
+     * ① 通用层：方法扫描 + 验证闭环（覆盖"自定义 setter 无保护"的模组 Boss）
+     * ② 插针层：Capability 递归扫描（覆盖"血量藏在实体 Capability"的 Boss，如亚波伦）
+     * ③ DataItem 直写：原版血条/自定义 DataItem 槽（覆盖正常实体与架空血条）
+     */
+    public static void setHealthLikeAny(LivingEntity target, float health) {
+        if (setHealthLikeGeneric(target, health)) return;
+        if (probeCapabilityHealth(target, health)) return;
+        setAllHealthLikeRaw(target, health);
+    }
+
+
+    /**
      * 原始数据直写 — 在 {@link #setAllHealthLikeDirect} 基础上，
      * 直接遍历 {@link SynchedEntityData} 内部所有 {@code DataItem}，
      * 绕过 {@code SynchedEntityData.set()} 方法直接写入 DataItem 的 value 字段。
