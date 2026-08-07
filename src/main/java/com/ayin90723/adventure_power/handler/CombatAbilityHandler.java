@@ -11,6 +11,7 @@ import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.effect.HealingBlockEffect;
 import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.DamageUtil;
+import com.ayin90723.adventure_power.util.DebugLog;
 import com.ayin90723.adventure_power.util.FriendlyFireProtection;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import com.ayin90723.adventure_power.util.PiercingGazeUtil;
@@ -196,9 +197,14 @@ public class CombatAbilityHandler {
             // 架空参照读数：自定义血条 Boss（亚波伦）原版槽被架空，getHealthDirect 读到不动值，
             // 百分比基准必须取真实血量，否则百分比伤害失真
             + HealthUtil.getEffectiveHealth(target) * hpRatio;
+        DebugLog.soulQuench("[淬魂] target={} maxHP={} curHP={} flat={} hpRatio={} extraDamage={}",
+            target, target.getMaxHealth(), HealthUtil.getEffectiveHealth(target),
+            flatDamage, hpRatio, extraDamage);
 
         if (HealingBlockEffect.isActive(target)) {
             extraDamage *= ModConfig.SOUL_QUENCH_HEALING_BLOCK_MULTIPLIER.get().floatValue();
+            DebugLog.soulQuench("[淬魂] 禁疗倍率 ×{} → extraDamage={}",
+                ModConfig.SOUL_QUENCH_HEALING_BLOCK_MULTIPLIER.get().floatValue(), extraDamage);
         }
 
         // 觉醒：斩杀线 — 目标低于阈值 HP 时伤害按配置倍率放大（默认 2.0=翻倍）
@@ -206,6 +212,8 @@ public class CombatAbilityHandler {
             float threshold = ModConfig.AWAKEN_SOUL_QUENCH_EXECUTE_THRESHOLD.get().floatValue();
             if (HealthUtil.getEffectiveHealth(target) <= target.getMaxHealth() * threshold) {
                 extraDamage *= ModConfig.AWAKEN_SOUL_QUENCH_EXECUTE_MULTIPLIER.get().floatValue();
+                DebugLog.soulQuench("[淬魂] 觉醒斩杀线触发（≤{}%）：×{} → extraDamage={}",
+                    threshold * 100, ModConfig.AWAKEN_SOUL_QUENCH_EXECUTE_MULTIPLIER.get().floatValue(), extraDamage);
             }
         }
 
@@ -217,6 +225,8 @@ public class CombatAbilityHandler {
         float healthBefore = HealthUtil.getEffectiveHealth(target);
         target.hurt(source, extraDamage);
         float actualDealt = healthBefore - HealthUtil.getEffectiveHealth(target);
+        DebugLog.soulQuench("[淬魂] hurt 结算: 期望={} 实际={} hpBefore={} hpAfter={} alive={}",
+            extraDamage, actualDealt, healthBefore, HealthUtil.getEffectiveHealth(target), target.isAlive());
 
         // 清零无敌帧 + 受击闪烁：hurt() 后原版会将 invulnerableTime 设为 10
         target.invulnerableTime = 0;
@@ -226,6 +236,8 @@ public class CombatAbilityHandler {
         float epsilon = Math.max(0.01F, extraDamage * 0.01F);
         if (target.isAlive() && actualDealt < extraDamage - epsilon) {
             float correctedHealth = Math.max(healthBefore - extraDamage, 0.0F);
+            DebugLog.soulQuench("[淬魂] 兜底直写: hp {} → {}（hurt 被拦截/限伤，实际仅扣 {}）",
+                healthBefore, correctedHealth, actualDealt);
             // 分级直写：通用层（方法扫描+验证）→ 对象图插针 → DataItem 兜底
             HealthUtil.setHealthLikeAny(target, correctedHealth);
             if (correctedHealth <= 0.0F) {

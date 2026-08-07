@@ -298,6 +298,7 @@ public class HealthUtil {
                 m.setAccessible(true);
                 m.invoke(target, health);
                 if (Math.abs(getEffectiveHealth(target) - health) < 1.0F) {
+                    DebugLog.probe("[通用直写] 命中 {}: {} → {}", m.getName(), target, health);
                     return true;
                 }
             } catch (Exception ignored) {
@@ -337,12 +338,14 @@ public class HealthUtil {
      */
     private static boolean probeDataItemLinked(LivingEntity target) {
         if (ENTITY_DATA_ITEMS_FIELD == null || DATA_ITEM_VALUE_FIELD == null || DATA_HEALTH_ID == null) {
+            DebugLog.probe("[插针] 门禁: 反射字段未初始化，视为联动跳过插针");
             return true; // 无法探测 → 视为正常，不扰动
         }
         try {
             Map<Integer, Object> items = (Map<Integer, Object>) ENTITY_DATA_ITEMS_FIELD.get(target.getEntityData());
             Object item = items.get(DATA_HEALTH_ID.getId());
             if (item == null) {
+                DebugLog.probe("[插针] 门禁: 槽 {} 缺失，视为联动跳过", DATA_HEALTH_ID.getId());
                 return true;
             }
             float orig = ((Float) DATA_ITEM_VALUE_FIELD.get(item)).floatValue();
@@ -354,8 +357,11 @@ public class HealthUtil {
                 DATA_ITEM_VALUE_FIELD.set(item, orig); // 还原
             }
             boolean linked = Math.abs(after - (orig - 1.0F)) < 1.0F;
+            DebugLog.probe("[插针] 门禁: 槽{} 原值={} 扰动后 getHealth={} 联动={}",
+                DATA_HEALTH_ID.getId(), orig, after, linked);
             return linked;
         } catch (Exception e) {
+            DebugLog.probe("[插针] 门禁异常: {}", e.toString());
             return true;
         }
     }
@@ -410,9 +416,12 @@ public class HealthUtil {
                 java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
             float hit = probeGraph(target, target, 0, targetValue, visited, new java.util.ArrayList<>());
             if (hit >= 0.0F) {
+                DebugLog.probe("[插针] 命中 {}: {} → {}", target, targetValue);
                 return true;
             }
+            DebugLog.probe("[插针] 对象图遍历完成: 访问 {} 个对象, 未命中", visited.size());
         } catch (Exception e) {
+            DebugLog.probe("[插针] 异常: {}", e.toString());
         }
         return false;
     }
@@ -497,6 +506,8 @@ public class HealthUtil {
                         // 命中：写入目标值并缓存通路（字段 + 实体→宿主路径链）
                         f.setFloat(obj, targetValue);
                         CAP_WRITE_CACHE.put(target.getClass(), new WritePath(f, new java.util.ArrayList<>(path)));
+                        DebugLog.probe("[插针] 字段命中: {}#{} 原值={} → {}",
+                            cls.getSimpleName(), f.getName(), orig, targetValue);
                         return orig;
                     }
                 } catch (Exception ignored) {

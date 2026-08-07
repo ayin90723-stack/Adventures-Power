@@ -8,6 +8,7 @@ import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.ability.ShadowKillAbility;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.util.DamageUtil;
+import com.ayin90723.adventure_power.util.DebugLog;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.PersistentDataKeys;
@@ -155,6 +156,8 @@ public class ShadowKillHelper {
         // 削减影子血量
         float damage = flatDamage + totalHP * hpRatio;
         shadowHP = Math.max(0.0F, shadowHP - damage);
+        DebugLog.shadowKill("[影杀] target={} 影子血量 {} → {}（伤害 {}，{}）",
+            target, shadowHP + damage, shadowHP, damage, isNew ? "新目标" : "续削");
 
         // 写回攻击者侧 NBT（复用 entry，已有条目不需新建）
         entry.putFloat(NBT_SP_TOTAL_HP, totalHP);
@@ -182,6 +185,7 @@ public class ShadowKillHelper {
 
         // 影子血量归零 → 饱和式秒杀
         if (shadowHP <= 0.0F) {
+            DebugLog.shadowKill("[影杀] 影子归零 → 饱和式秒杀 target={} attacker={}", target, attacker);
             shadowData.remove(targetKey);
             MISSING_TARGET_TICKS.remove(missingKey(attacker.getUUID(), target.getUUID()));
             if (shadowData.isEmpty()) {

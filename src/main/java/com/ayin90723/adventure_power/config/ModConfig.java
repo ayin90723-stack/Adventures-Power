@@ -8,7 +8,22 @@ public class ModConfig {
     public static final ForgeConfigSpec SPEC;
 
     // === 调试 ===
-    public static final BooleanValue TRUE_HEALTH_DEBUG_LOG;
+    /** 全局调试日志总开关：关闭时所有能力日志一律不输出 */
+    public static final BooleanValue DEBUG_LOG;
+    /** 淬魂之力调试日志 */
+    public static final BooleanValue DEBUG_LOG_SOUL_QUENCH;
+    /** 禁疗之触调试日志 */
+    public static final BooleanValue DEBUG_LOG_HEALING_BLOCK;
+    /** 插针/通用直写调试日志（门禁判定/字段命中/对象图遍历） */
+    public static final BooleanValue DEBUG_LOG_PROBE;
+    /** 影杀调试日志 */
+    public static final BooleanValue DEBUG_LOG_SHADOW_KILL;
+    /** 破敌之眼调试日志 */
+    public static final BooleanValue DEBUG_LOG_PIERCING_GAZE;
+    /** 嗜血调试日志 */
+    public static final BooleanValue DEBUG_LOG_LIFESTEAL;
+    /** 真实血量调试日志 */
+    public static final BooleanValue DEBUG_LOG_TRUE_HEALTH;
 
     // ==================== 能力数值 ====================
 
@@ -162,8 +177,22 @@ public class ModConfig {
         BUILDER.push("冒险能力配置");
 
         BUILDER.push("调试");
-        TRUE_HEALTH_DEBUG_LOG = BUILDER.comment("真实血量调试日志")
-            .define("true_health_debug_log", false);
+        DEBUG_LOG = BUILDER.comment("全局调试日志总开关（关闭时所有能力日志一律不输出，默认关闭）")
+            .define("debug_log", false);
+        DEBUG_LOG_SOUL_QUENCH = BUILDER.comment("淬魂之力调试日志（需 debug_log 开启）")
+            .define("debug_log_soul_quench", false);
+        DEBUG_LOG_HEALING_BLOCK = BUILDER.comment("禁疗之触调试日志（需 debug_log 开启）")
+            .define("debug_log_healing_block", false);
+        DEBUG_LOG_PROBE = BUILDER.comment("插针/通用直写调试日志：门禁判定/字段命中/对象图遍历（需 debug_log 开启）")
+            .define("debug_log_probe", false);
+        DEBUG_LOG_SHADOW_KILL = BUILDER.comment("影杀调试日志（需 debug_log 开启）")
+            .define("debug_log_shadow_kill", false);
+        DEBUG_LOG_PIERCING_GAZE = BUILDER.comment("破敌之眼调试日志（需 debug_log 开启）")
+            .define("debug_log_piercing_gaze", false);
+        DEBUG_LOG_LIFESTEAL = BUILDER.comment("嗜血调试日志（需 debug_log 开启）")
+            .define("debug_log_lifesteal", false);
+        DEBUG_LOG_TRUE_HEALTH = BUILDER.comment("真实血量调试日志（需 debug_log 开启）")
+            .define("debug_log_true_health", false);
         BUILDER.pop();
 
         // ==================== 能力数值 ====================

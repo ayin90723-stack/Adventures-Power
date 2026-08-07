@@ -4,6 +4,7 @@ import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
+import com.ayin90723.adventure_power.util.DebugLog;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.LivingEntity;
@@ -60,9 +61,9 @@ public abstract class TrueHealthMixin {
 
     private static final float EPSILON = 0.001F;
 
-    /** 调试日志开关（由冒险能力配置文件中 true_health_debug_log 控制，默认关闭） */
+    /** 调试日志开关（由冒险能力配置文件中 debug_log + debug_log_true_health 控制，默认关闭） */
     private static boolean debugLog() {
-        return ModConfig.TRUE_HEALTH_DEBUG_LOG.get();
+        return ModConfig.DEBUG_LOG.get() && ModConfig.DEBUG_LOG_TRUE_HEALTH.get();
     }
 
     /**
@@ -127,7 +128,7 @@ public abstract class TrueHealthMixin {
             if (Float.isNaN(rawHealth) || Float.isInfinite(rawHealth)) {
                 float restore = backup > 0.0F ? backup : player.getMaxHealth();
                 if (debugLog()) {
-                    System.err.println("[MME-TrueHealth] 检测到异常血量！" +
+                    DebugLog.trueHealth("[MME-TrueHealth] 检测到异常血量！" +
                         " rawHealth=" + rawHealth + " -> setAllHealthLikeRaw 修复为 " + restore);
                 }
                 repairHealth(player, restore);
@@ -144,7 +145,7 @@ public abstract class TrueHealthMixin {
                     cir.setReturnValue(rawHealth);
                 } else {
                     if (debugLog()) {
-                        System.err.println("[MME-TrueHealth] 假死检测触发！" +
+                        DebugLog.trueHealth("[MME-TrueHealth] 假死检测触发！" +
                             " DataItem=" + rawHealth + " backup=" + backup +
                             " -> setAllHealthLikeRaw 修复 -> 返回 " + backup);
                     }
@@ -159,7 +160,7 @@ public abstract class TrueHealthMixin {
                 backup = rawHealth;
                 progress.setBackupHealth(backup);
                 if (debugLog()) {
-                    System.err.println("[MME-TrueHealth] 备份初始化: backup=" + backup +
+                    DebugLog.trueHealth("[MME-TrueHealth] 备份初始化: backup=" + backup +
                         " (从 DataItem=" + rawHealth + " 同步)");
                 }
             }
@@ -178,7 +179,7 @@ public abstract class TrueHealthMixin {
                 } else {
                     // DataItem < 备份：非法降血直写 -> 修复
                     if (debugLog()) {
-                        System.err.println("[MME-TrueHealth] 非法降血检测！" +
+                        DebugLog.trueHealth("[MME-TrueHealth] 非法降血检测！" +
                             " DataItem=" + rawHealth + " backup=" + backup +
                             " diff=" + diff + " -> setAllHealthLikeRaw 修复为 " + backup);
                     }
@@ -221,7 +222,7 @@ public abstract class TrueHealthMixin {
             progress.setBackupHealth(1.0F);
             repairHealth(player, 1.0F);
             if (debugLog()) {
-                System.err.println("[MME-TrueHealth] 觉醒防秒杀！" +
+                DebugLog.trueHealth("[MME-TrueHealth] 觉醒防秒杀！" +
                     " newHealth=" + newHealth + " actual=" + actual + " -> 强制保留 1HP");
             }
             return;
@@ -236,7 +237,7 @@ public abstract class TrueHealthMixin {
         } else {
             // HURT_DEPTH == 0 && actual < oldBackup -> 外部篡改，拒绝同步
             if (debugLog()) {
-                System.err.println("[MME-TrueHealth] 拒绝外部降血同步！" +
+                DebugLog.trueHealth("[MME-TrueHealth] 拒绝外部降血同步！" +
                     " actual=" + actual + " oldBackup=" + oldBackup +
                     " HURT_DEPTH=" + HealthUtil.HURT_DEPTH.get());
             }
@@ -290,7 +291,7 @@ public abstract class TrueHealthMixin {
         float backup = progress.getBackupHealth();
         if (backup > 0.0F) {
             if (debugLog()) {
-                System.err.println("[MME-TrueHealth] 拦截外部 die() 调用！" +
+                DebugLog.trueHealth("[MME-TrueHealth] 拦截外部 die() 调用！" +
                     " backup=" + backup + " -> cancel");
             }
             ci.cancel();
@@ -344,7 +345,7 @@ public abstract class TrueHealthMixin {
         // ① 已移除复活：removalReason 被外部字段直写
         if (player.isRemoved()) {
             if (debugLog()) {
-                System.err.println("[MME-TrueHealth] 存活性自检：实体已移除！" +
+                DebugLog.trueHealth("[MME-TrueHealth] 存活性自检：实体已移除！" +
                     " removalReason=" + player.getRemovalReason() +
                     " backup=" + backup + " -> clearRemovedFlag + 血量恢复");
             }
@@ -357,7 +358,7 @@ public abstract class TrueHealthMixin {
         float rawHealth = HealthUtil.getHealthDirect(player);
         if (!repaired && rawHealth <= 0.0F) {
             if (debugLog()) {
-                System.err.println("[MME-TrueHealth] 存活性自检：零血量！" +
+                DebugLog.trueHealth("[MME-TrueHealth] 存活性自检：零血量！" +
                     " DataItem=" + rawHealth + " backup=" + backup +
                     " -> setAllHealthLikeRaw 修复");
             }
@@ -368,7 +369,7 @@ public abstract class TrueHealthMixin {
         // ③ 死亡状态否决：isDeadOrDying 被 ASM 绕过
         if (player.isDeadOrDying() && backup > 0.0F) {
             if (debugLog()) {
-                System.err.println("[MME-TrueHealth] 存活性自检：isDeadOrDying=true！" +
+                DebugLog.trueHealth("[MME-TrueHealth] 存活性自检：isDeadOrDying=true！" +
                     " backup=" + backup + " -> clearRemovedFlag + 血量恢复");
             }
             HealthUtil.clearRemovedFlag(player);

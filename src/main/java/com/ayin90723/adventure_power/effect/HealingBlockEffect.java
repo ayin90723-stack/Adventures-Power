@@ -2,6 +2,7 @@ package com.ayin90723.adventure_power.effect;
 
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.config.ModConfig;
+import com.ayin90723.adventure_power.util.DebugLog;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import com.ayin90723.adventure_power.util.PersistentDataKeys;
 import net.minecraft.nbt.CompoundTag;
@@ -113,6 +114,8 @@ public class HealingBlockEffect extends MobEffect {
       // 验证 NBT 是否真正持久化：重写 getPersistentData() 的实体（亚波伦）再次读取为空，
       // 只能依赖内存表回退；正常实体返回 true
       boolean nbtPersist = target.getPersistentData().contains(NBT_KEY);
+      DebugLog.healingBlock("[禁疗] 标记写入: 内存表={}hp NBT持久={} endTime={}（gameTime={}）",
+         HealthUtil.getEffectiveHealth(target), nbtPersist, endTime, target.level().getGameTime());
       // 同时施加 MobEffect 作为视觉指示器
       MobEffect visualEffect = ModEffects.HEALING_BLOCK.get();
       if (visualEffect != null) {
@@ -132,6 +135,21 @@ public class HealingBlockEffect extends MobEffect {
       if (entry != null) {
          entry.health = health;
       }
+   }
+
+   /**
+    * 钳制写入（tick 末 / ServerTickEnd 终极防线共用）：先直写真血
+    * （对象图插针路径，覆盖不走 setHealth 的 Boss），再走完整
+    * {@code setHealth()} 链——触发覆写 Boss（如妖怪的归家灵梦：
+    * setHealth → setCombatProgress → 原版槽 + progress 字段 + 网络同步包）
+    * 自己的字段写入与客户端同步，血条稳定在低点而非停在回满值。
+    * <p>
+    * 完整链会再经过 {@code HealingBlockMixin} 的 HEAD 注入，但 tracked
+    * 不满足 {@code health > tracked}，自然放行，无递归。
+    */
+   public static void clampBack(LivingEntity self, float tracked) {
+      HealthUtil.setHealthLikeAny(self, tracked);
+      self.setHealth(tracked);
    }
 
    /** 记录觉醒易伤到期时间（内存 + NBT 双源，与禁疗标记同理） */
@@ -257,8 +275,11 @@ public class HealingBlockEffect extends MobEffect {
                      // getHealthDirect 读到不动值会导致回血检测永远 false，钳制失效
                      float current = HealthUtil.getEffectiveHealth(living);
                      if (current > entry.health) {
-                        // 分级直写：通用层 → 对象图插针 → DataItem 兜底
-                        HealthUtil.setHealthLikeAny(living, entry.health);
+                        DebugLog.healingBlock("[禁疗] 终极钳制(ServerTickEnd): {} > {} → 直写 {}",
+                           current, entry.health, entry.health);
+                        // 钳制写入：直写真血 + 走完整 setHealth 链（触发覆写 Boss
+                        // 自己的字段写入与客户端网络同步，血条稳定在低点）
+                        clampBack(living, entry.health);
                         current = entry.health;
                      }
                      entry.health = Math.min(current, entry.health);

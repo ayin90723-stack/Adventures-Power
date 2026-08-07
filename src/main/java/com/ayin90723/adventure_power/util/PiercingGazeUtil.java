@@ -230,6 +230,9 @@ public final class PiercingGazeUtil {
         // 架空参照读数：自定义血条 Boss（亚波伦）原版槽被架空，getHealthDirect 读到不动值，
         // 会导致"血量未下降"检测恒成立而每击触发直写兜底（数值错位）；取真实血量判断
         if (effectiveAmount > 0.0F && HealthUtil.getEffectiveHealth(target) >= healthBefore && target.isAlive()) {
+            DebugLog.piercingGaze("[破敌] 穿透后血量未降（{} >= {}）→ 直写兜底 {}",
+                HealthUtil.getEffectiveHealth(target), healthBefore,
+                Math.max(0.0F, healthBefore - effectiveAmount));
             HealthUtil.setAllHealthLikeRaw(target, Math.max(0.0F, healthBefore - effectiveAmount));
         }
         InvulClearUtil.clearCustomInvulTimers(target);

@@ -9,6 +9,7 @@ import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.DamageUtil;
+import com.ayin90723.adventure_power.util.DebugLog;
 import com.ayin90723.adventure_power.util.FriendlyFireProtection;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import net.minecraft.world.entity.LivingEntity;
@@ -162,6 +163,7 @@ public class RecoveryHandler {
                 // 直写血量绕过 heal() — 避免被外部模组（如泽林变体）在 heal() HEAD cancel 拦截
                 float healthBeforeHeal = HealthUtil.getHealthDirect(attacker);
                 float newHealth = Math.min(attacker.getMaxHealth(), healthBeforeHeal + healAmount);
+                DebugLog.lifesteal("[嗜血] {} 吸血 {}（伤害 {} × {}%）→ {}", attacker, healAmount, event.getAmount(), percentage * 100, newHealth);
                 HealthUtil.setAllHealthLikeRaw(attacker, newHealth);
                 // 觉醒：过量治疗转为吸收护盾（满血时全部吸血量转护盾）
                 if (progress.isFullyUnlocked()) {
