@@ -217,8 +217,15 @@ public class ShadowKillHelper {
         Level level = target.level();
         if (!(level instanceof ServerLevel serverLevel)) return;
 
-        // ① 直写血量归零 — 写入所有血量条目（原版 + 自定义），直写 DataItem.value 绕一切 setHealth() 覆写
-        HealthUtil.setAllHealthLikeRaw(target, 0.0F);
+        // ① 插针归零 — setHealthLikeAny 三级链：自定义 setter 扫描 → 对象图插针
+        //     （覆盖普通字段真血，如亚波伦 FloatWrapped / 灵梦 CombatProgress，带 WritePath 缓存）
+        //     → DataItem 按值匹配兜底。精准归零，无副作用
+        HealthUtil.setHealthLikeAny(target, 0.0F);
+
+        // ①b 全 float 同步数据保险丝 — 砧板之刃[神]同款：清空所有 float 同步条目，
+        //     覆盖"不联动 getHealth 的隐藏 float 条目"（插针发现不了的旁路）。
+        //     目标即将被删除，副作用（缩放/动画清零）随实体消失
+        HealthUtil.zeroAllSynchedFloats(target);
 
         // ② 强制掉落全套装备
         for (EquipmentSlot slot : EquipmentSlot.values()) {
@@ -260,6 +267,13 @@ public class ShadowKillHelper {
 
         // ⑧ 内部结构抹除 — 从 EntityLookup/EntityTickList/EntitySection 中直接删除实体
         HealthUtil.eradicateFromWorld(target);
+
+        // ⑨ 最终确认 — 若防护 Boss 在移除链中清除了标记（极端场景），兜底重写 removalReason
+        if (!target.isRemoved()) {
+            DebugLog.shadowKill("[影杀] 移除标记被清除，兜底重写 target={}", target);
+            HealthUtil.setRemovedFieldDirect(target, Entity.RemovalReason.KILLED);
+        }
+        DebugLog.shadowKill("[影杀] 饱和式秒杀完成 target={} removed={}", target, target.isRemoved());
     }
 
     // ==================== 影杀辅助：BossBar ====================

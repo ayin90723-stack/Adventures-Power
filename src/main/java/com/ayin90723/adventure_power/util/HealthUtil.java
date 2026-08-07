@@ -9,6 +9,8 @@ import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.boss.EnderDragonPart;
+import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.food.FoodData;
 
@@ -713,6 +715,45 @@ public class HealthUtil {
     }
 
     /**
+     * 遍历实体 SynchedEntityData 中<b>所有</b> float 类型条目并归零
+     * （砧板之刃[神]同款招式）。
+     * <p>
+     * 与 {@link #setAllHealthLikeRaw} 的值匹配策略不同，本方法不依赖血量快照、
+     * 不依赖已知 key——无论 Boss 把血量/无敌值藏在哪个 float 同步条目
+     * （animation/size 等旁路 DataItem），一律清零，从 synched data 通道
+     * 彻底断掉隐藏血量。
+     * <p>
+     * 仅用于必杀场景（影杀饱和式秒杀）。副作用：目标的缩放/动画等 float
+     * 同步数据一并归零——目标即将被删除，无实际影响。
+     * <p>
+     * 与 {@link #clearNegativeFloatDeltas} 的区别：后者只清负值 Float（防御侧，
+     * 防止误伤 Boss 正常 float 数据）；本方法清全部 float（攻击侧必杀，无保留）。
+     *
+     * @param target 目标实体（即将被删除的必杀对象）
+     */
+    public static void zeroAllSynchedFloats(LivingEntity target) {
+        if (ENTITY_DATA_ITEMS_FIELD == null || DATA_ITEM_VALUE_FIELD == null) return;
+        try {
+            SynchedEntityData data = target.getEntityData();
+            @SuppressWarnings("unchecked")
+            Map<Integer, Object> items = (Map<Integer, Object>) ENTITY_DATA_ITEMS_FIELD.get(data);
+            if (items == null) return;
+            for (Object item : items.values()) {
+                try {
+                    Object rawValue = DATA_ITEM_VALUE_FIELD.get(item);
+                    if (rawValue instanceof Float) {
+                        DATA_ITEM_VALUE_FIELD.set(item, 0.0F);
+                    }
+                } catch (IllegalAccessException ignored) {
+                    // 单个 DataItem 写入失败，继续处理下一个
+                }
+            }
+        } catch (IllegalAccessException | ClassCastException e) {
+            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
+        }
+    }
+
+    /**
      * 清除目标实体 SynchedEntityData 中所有负值 Float 型 DataItem（归零）。
      *
      * <h3>用途</h3>
@@ -931,6 +972,12 @@ public class HealthUtil {
         ServerLevel.class, "f_143244_", "entityManager");
     private static final Field SL_ENTITY_TICK_LIST = reflectField(
         ServerLevel.class, "f_143243_", "entityTickList");
+    private static final Field SL_DRAGON_PARTS = reflectField(
+        ServerLevel.class, "f_143247_", "dragonParts");
+
+    // --- EnderDragonPart.parentMob ---
+    private static final Field DRAGON_PART_PARENT = reflectField(
+        EnderDragonPart.class, "f_31010_", "parentMob");
 
     // --- SectionPos.asLong(BlockPos) : long ---
     private static final Method SP_AS_LONG = reflectMethod(
@@ -1197,6 +1244,25 @@ public class HealthUtil {
                 } catch (Exception ignored) {}
             }
 
+            // ⑦ 龙部件清理 — 末影龙被秒杀时 part 不走原版死亡流程，
+            // 若残留于 dragonParts，part 会持续引用死龙并存活于世界中
+            if (SL_DRAGON_PARTS != null && target instanceof EnderDragon) {
+                try {
+                    Object parts = SL_DRAGON_PARTS.get(sl);
+                    if (parts instanceof Set) {
+                        for (Object o : ((Set<?>) parts).toArray()) {
+                            if (o == null) continue;
+                            Object parent = DRAGON_PART_PARENT != null ? DRAGON_PART_PARENT.get(o) : null;
+                            if (parent == target && o instanceof Entity partEntity) {
+                                ((Set<?>) parts).remove(o);
+                                // 写 removalReason，让 ESM 下个 tick 自动把 part 从世界容器摘除
+                                writeRemovalReasonDirect(partEntity, Entity.RemovalReason.KILLED);
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+
         } catch (Exception ignored) {
             // 静默处理 —— 这是最终兜底手段，不应因反射失败而中断主流程
         }
@@ -1253,6 +1319,20 @@ public class HealthUtil {
      * @param reason 移除原因（通常为 {@code KILLED}）
      */
     public static void setRemovedFieldDirect(LivingEntity target, Entity.RemovalReason reason) {
+        writeRemovalReasonDirect(target, reason);
+    }
+
+    /**
+     * 直接反射写入任意 {@code Entity} 的 {@code removalReason} 字段 (SRG: {@code f_146795_})，
+     * 绕过<b>所有</b>方法调用——包括 Mixin 注入和子类覆写。
+     * <p>
+     * 与 {@link #setRemovedFieldDirect} 相同，但参数泛化为 {@code Entity}，
+     * 供非 LivingEntity（如 {@code EnderDragonPart}）共用。
+     *
+     * @param target 目标实体
+     * @param reason 移除原因（通常为 {@code KILLED}）
+     */
+    public static void writeRemovalReasonDirect(Entity target, Entity.RemovalReason reason) {
         try {
             if (ENTITY_REMOVAL_REASON_FIELD == null) {
                 try {
