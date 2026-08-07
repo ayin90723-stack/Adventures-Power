@@ -17,6 +17,7 @@
         "DeathDefyMixin",
         "LegacyHurtAndBreakMixin",
         "PurifiedSoulMixin",
+        "RapidRecoveryEatMixin",
         "FortuneFavorMixin",
         "LootPoolEntryContainerMixin",
         "LootPoolMixin",

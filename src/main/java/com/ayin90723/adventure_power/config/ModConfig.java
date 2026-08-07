@@ -72,6 +72,7 @@ public class ModConfig {
     public static final IntValue RAPID_RECOVERY_DELAY_TICKS;
     public static final IntValue RAPID_RECOVERY_CHECK_INTERVAL;
     public static final DoubleValue RAPID_RECOVERY_HEAL_PER_AMPLIFIER;
+    public static final BooleanValue RAPID_RECOVERY_ALLOW_EAT_AT_FULL;
 
     // --- 不动如山 ---
     public static final IntValue KNOCKBACK_RESIST_BASE;
@@ -279,6 +280,8 @@ public class ModConfig {
             .defineInRange("rapid_recovery_check_interval", 60, 10, 200);
         RAPID_RECOVERY_HEAL_PER_AMPLIFIER = BUILDER.comment("每级 amplifier 折算的回血量（HP/周期），默认1.0")
             .defineInRange("rapid_recovery_heal_per_amplifier", 1.0, 0.1, 10.0);
+        RAPID_RECOVERY_ALLOW_EAT_AT_FULL = BUILDER.comment("饱食度满时仍可食用食物（兼容农夫乐事等通过进食成长的模组，默认开启）")
+            .define("rapid_recovery_allow_eat_at_full", true);
         BUILDER.pop();
 
         BUILDER.push("不动如山");
