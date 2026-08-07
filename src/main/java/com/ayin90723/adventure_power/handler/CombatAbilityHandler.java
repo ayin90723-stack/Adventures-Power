@@ -185,6 +185,10 @@ public class CombatAbilityHandler {
      * mod 拦截则通过 HealthUtil 直写血量兜底。
      */
     private static void handleSoulQuench(LivingHurtEvent event, LivingEntity target, Player attacker, IAdventureProgress progress) {
+        // PVP 禁用：淬魂按真实血量（getEffectiveHealth）计算百分比伤害，
+        // 对玩家目标会扫到冒险者自身的真实血条备份（true_health 通道），
+        // 且兜底直写（setHealthLikeAny 含对象图插针）与玩家侧防御体系冲突
+        if (target instanceof Player) return;
         int milestones = AbilityGate.effectiveCount(progress, AbilityIds.SOUL_QUENCH);
         Ability raw = AbilityRegistry.get(AbilityIds.SOUL_QUENCH);
         if (!(raw instanceof SoulQuenchAbility ability)) return;

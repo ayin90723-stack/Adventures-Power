@@ -112,10 +112,12 @@ public abstract class TrueHealthMixin {
         // 重入：修复期间 BanHealing / 其他 Mixin 调了 getHealth() ->
         // 直接返回备份值，防止读到未修复完成的旧 DataItem 导致修复被抵消。
         // 不再调 getHealthDirect：其退化路径（反射初始化失败）会回落到 getHealth()
-        // 再次进入本注入点，backup<=0 时形成无限递归——直接返回备份或最大生命
+        // 再次进入本注入点，backup<=0 时形成无限递归——直接返回备份或最大生命。
+        // backup 必须同时是有限值：NaN 比较全 false 落到 maxHealth（安全），
+        // +Infinity 会被误当作有效备份返回（污染读数）——isFinite 兜底。
         if (IN_ON_GET_HEALTH.get()) {
             float backup = progress.getBackupHealth();
-            cir.setReturnValue(backup > 0.0F ? backup : player.getMaxHealth());
+            cir.setReturnValue(backup > 0.0F && Float.isFinite(backup) ? backup : player.getMaxHealth());
             return;
         }
 
@@ -124,9 +126,11 @@ public abstract class TrueHealthMixin {
             float backup = progress.getBackupHealth();
             float rawHealth = HealthUtil.getHealthDirect(player);
 
-            // DataItem 被写入 NaN/Infinity -> 用备份值覆盖修复
+            // DataItem 被写入 NaN/Infinity -> 用备份值覆盖修复。
+            // restore 必须同时是有限值：backup=+Infinity 且 rawHealth 也非法（双重污染）时，
+            // 若直接选中 +Inf 会把 DataItem 永久修复成 Infinity（循环固化）——isFinite 兜底
             if (Float.isNaN(rawHealth) || Float.isInfinite(rawHealth)) {
-                float restore = backup > 0.0F ? backup : player.getMaxHealth();
+                float restore = backup > 0.0F && Float.isFinite(backup) ? backup : player.getMaxHealth();
                 if (debugLog()) {
                     DebugLog.trueHealth("[MME-TrueHealth] 检测到异常血量！" +
                         " rawHealth=" + rawHealth + " -> setAllHealthLikeRaw 修复为 " + restore);
@@ -135,6 +139,25 @@ public abstract class TrueHealthMixin {
                 progress.setBackupHealth(restore);
                 cir.setReturnValue(restore);
                 return;
+            }
+
+            // backup 被外部写入 NaN/Infinity -> 从 DataItem 重建。
+            // NaN 时所有比较（backup>0 / backup<=0）全 false，会跳过初始化分支直接
+            // 返回 NaN；+Infinity 时 diff=-Inf 被误判"非法降血"，repairHealth(Inf)
+            // 会把玩家血量修复成 Infinity（永久数据损坏）。
+            // 合法路径 backup 恒为正常 float（setHealth RETURN 同步/初始化分支），
+            // 检测到异常必然来自外部字段直写（如插针直写 Capability 备份字段）。
+            // 权衡披露：backup 污染 + DataItem<=0（伪造死亡 + 备份污染双写）时，
+            // 重建后 backup=0，后续假死分支按"确实死了"放行死亡——备份失效时以
+            // DataItem 为唯一事实来源（改动前 NaN 会经 repairHealth(NaN) 自愈，
+            // 但代价是 DataItem 被短暂污染，且依赖下一次 getHealth 触发修复）。
+            if (Float.isNaN(backup) || Float.isInfinite(backup)) {
+                if (debugLog()) {
+                    DebugLog.trueHealth("[MME-TrueHealth] 备份被污染！" +
+                        " backup=" + backup + " -> 从 DataItem=" + rawHealth + " 重建");
+                }
+                progress.setBackupHealth(rawHealth);
+                backup = rawHealth;
             }
 
             // rawHealth ≤ 0 有两种情况：
@@ -338,7 +361,18 @@ public abstract class TrueHealthMixin {
         if (progress == null) return;
         Player player = (Player) self;
         float backup = progress.getBackupHealth();
-        if (backup <= 0.0F) return;  // 备份无效，玩家确实应死
+        // backup 被外部写入 NaN/Infinity -> 先重建再检测（镜像 onGetHealth 重建逻辑）：
+        // 直接跳过会让 isRemoved 救援（下方①分支）失效——实体在 backup 污染窗口内
+        // 被字段直写标记移除后无人清除 removalReason。
+        // DataItem 也非法（双重污染）时才放弃自检，交给 getHealth 层兜底。
+        if (Float.isNaN(backup) || Float.isInfinite(backup)) {
+            float raw = HealthUtil.getHealthDirect(player);
+            if (Float.isNaN(raw) || Float.isInfinite(raw)) return;
+            progress.setBackupHealth(raw);
+            backup = raw;
+        }
+        // 备份无效（玩家确实应死）或重建后仍为 0
+        if (backup <= 0.0F) return;
 
         boolean repaired = false;
 

@@ -310,12 +310,13 @@ public class HealthUtil {
         return false;
     }
 
-    /** 插针命中缓存：实体类 → 写入器（首次插针后直接复用，不再重复诊断） */
+    /** 插针命中缓存：实体类 → 真血字段写入通路（字段 + 从实体到宿主对象的引用路径链）。 */
     /**
      * 插针命中缓存：实体类 → 真血字段写入通路（字段 + 从实体到宿主对象的引用路径链）。
      * <p>
      * 路径链避免"每次直写都全对象图搜索宿主"（大对象图实体如弹幕 Boss 会卡）；
-     * 解析失败（对象图结构变化）回退 {@link #searchInstance} 全图搜索兜底。
+     * 写值前验证字段当前值仍接近真血读数，失效时缓存作废并回退全图插针重探测
+     * （见 {@link #probeCapabilityHealth}）。
      */
     private static final java.util.Map<Class<?>, WritePath> CAP_WRITE_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -394,19 +395,37 @@ public class HealthUtil {
         if (cached != null) {
             try {
                 Object owner = resolvePath(target, cached.steps, 0);
+                if (owner == null) {
+                    CAP_WRITE_CACHE.remove(target.getClass());
+                    return probeFresh(target, targetValue);
+                }
+                // 写值前验证：对象图结构变化可能让路径链指向错误宿主（同类多实例/索引漂移），
+                // 校验字段当前值仍接近真血读数（与 probeGraph 值域过滤同容差）；
+                // 不匹配视为路径失效 → 缓存作废 + 全图重探测（有验证闭环，不盲写）
+                float cur = cached.field.getFloat(owner);
+                float ref = target.getHealth();
+                if (Math.abs(cur - ref) > Math.max(1.0F, ref * 0.2F)) {
+                    CAP_WRITE_CACHE.remove(target.getClass());
+                    DebugLog.probe("[插针] 缓存路径失效（字段值 {} ≠ 真血读数 {}），回退全图重探测", cur, ref);
+                    return probeFresh(target, targetValue);
+                }
                 cached.field.setFloat(owner, targetValue);
                 return true;
             } catch (Exception e) {
-                // 路径失效（对象图结构变化）→ 回退全图搜索一次
-                Object owner = searchByClass(target, cached.field.getDeclaringClass());
-                try {
-                    cached.field.setFloat(owner, targetValue);
-                    return true;
-                } catch (Exception e2) {
-                    CAP_WRITE_CACHE.remove(target.getClass());
-                }
+                // 路径失效（对象图结构变化/字段不可访问）→ 缓存作废 + 全图重探测
+                CAP_WRITE_CACHE.remove(target.getClass());
+                return probeFresh(target, targetValue);
             }
         }
+        return probeFresh(target, targetValue);
+    }
+
+    /**
+     * 插针全量探测：门禁（DataItem 联动检查）→ 通用对象图插针。
+     * 与 {@link #probeCapabilityHealth} 的区别：不做缓存读取，仅用于缓存缺失/失效后的
+     * 首次探测——命中后自行写入并重建缓存。
+     */
+    private static boolean probeFresh(LivingEntity target, float targetValue) {
         // 门禁：DataItem 扰动后 getHealth 联动 = 正常实体（getHealth 真读槽 9），
         // DataItem 直写足够且更高效，不插针。门禁仅为性能优化，安全性仍由验证闭环保证。
         if (probeDataItemLinked(target)) {
@@ -560,64 +579,6 @@ public class HealthUtil {
     }
 
     /**
-     * 缓存路径失效兜底：从实体对象图重新解析字段宿主（按字段声明类匹配）。
-     * 纯对象图遍历，无模组耦合；找不到时返回 null（调用方移除缓存）。
-     */
-    private static Object searchByClass(LivingEntity target, Class<?> want) {
-        try {
-            java.util.Set<Object> visited =
-                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
-            Object[] found = new Object[1];
-            searchInstance(target, 0, want, visited, found);
-            return found[0];
-        } catch (Exception ignored) {
-        }
-        return null;
-    }
-
-    /** 对象图搜索：找第一个与 {@code want} 同类（isInstance）的对象，写入 {@code found}。 */
-    private static void searchInstance(Object obj, int depth, Class<?> want,
-                                       java.util.Set<Object> visited, Object[] found) {
-        if (found[0] != null || obj == null || depth > GRAPH_DEPTH_LIMIT) return;
-        if (obj instanceof Class<?> || obj instanceof Thread || obj instanceof ClassLoader) return;
-        if (obj instanceof net.minecraft.world.level.Level) return;
-        if (obj instanceof net.minecraft.core.Registry) return;
-        if (!visited.add(obj)) return;
-        if (want.isInstance(obj)) {
-            found[0] = obj;
-            return;
-        }
-        Class<?> cls = obj.getClass();
-        for (Class<?> c = cls; c != null && c != Object.class; c = c.getSuperclass()) {
-            for (java.lang.reflect.Field f : c.getDeclaredFields()) {
-                if (java.lang.reflect.Modifier.isStatic(f.getModifiers())) continue;
-                Class<?> ft = f.getType();
-                if (ft.isPrimitive() || ft == String.class || ft.isEnum() || ft.isArray()) continue;
-                try {
-                    f.setAccessible(true);
-                    Object child = f.get(obj);
-                    if (child == null) continue;
-                    if (child instanceof java.util.Map<?, ?> m) {
-                        for (Object v : m.values()) {
-                            searchInstance(v, depth + 1, want, visited, found);
-                            if (found[0] != null) return;
-                        }
-                    } else if (child instanceof java.util.Collection<?> col) {
-                        for (Object v : col) {
-                            searchInstance(v, depth + 1, want, visited, found);
-                            if (found[0] != null) return;
-                        }
-                    } else if (!child.getClass().isPrimitive()) {
-                        searchInstance(child, depth + 1, want, visited, found);
-                        if (found[0] != null) return;
-                    }
-                } catch (Exception ignored) {
-                }
-            }
-        }
-    }
-
-    /**
      * 分级直写统一入口：通用层 → Capability 插针层 → DataItem 兜底。
      * <p>
      * ① 通用层：方法扫描 + 验证闭环（覆盖"自定义 setter 无保护"的模组 Boss）
@@ -732,6 +693,9 @@ public class HealthUtil {
      * @param target 目标实体（即将被删除的必杀对象）
      */
     public static void zeroAllSynchedFloats(LivingEntity target) {
+        // Player 守卫：与 setAllHealthLikeRaw 对称——玩家的饱食度/吸收等 float 同步条目
+        // 会被误清（血量归零是必杀本意，饱食度/吸收是纯误伤）。调用方须自行排除玩家。
+        if (target instanceof Player) return;
         if (ENTITY_DATA_ITEMS_FIELD == null || DATA_ITEM_VALUE_FIELD == null) return;
         try {
             SynchedEntityData data = target.getEntityData();
@@ -974,10 +938,6 @@ public class HealthUtil {
         ServerLevel.class, "f_143243_", "entityTickList");
     private static final Field SL_DRAGON_PARTS = reflectField(
         ServerLevel.class, "f_143247_", "dragonParts");
-
-    // --- EnderDragonPart.parentMob ---
-    private static final Field DRAGON_PART_PARENT = reflectField(
-        EnderDragonPart.class, "f_31010_", "parentMob");
 
     // --- SectionPos.asLong(BlockPos) : long ---
     private static final Method SP_AS_LONG = reflectMethod(
@@ -1244,19 +1204,19 @@ public class HealthUtil {
                 } catch (Exception ignored) {}
             }
 
-            // ⑦ 龙部件清理 — 末影龙被秒杀时 part 不走原版死亡流程，
-            // 若残留于 dragonParts，part 会持续引用死龙并存活于世界中
+            // ⑦ 龙部件清理 — 末影龙被秒杀时 part 不走原版死亡流程，dragonParts
+            //     （Int2ObjectMap<part.id, EnderDragonPart>）中的 part 会持续引用死龙并存活于世界。
+            //     part 不注册进 ESM（不在 EntityLookup/EntitySection），按 part.id 从表摘除
+            //     即完成清理（对应原版 ServerLevel$EntityCallbacks.onTickingEnd）；再写
+            //     removalReason 作保险带（isRemoved() 为真），防止按 id 查询残留。
             if (SL_DRAGON_PARTS != null && target instanceof EnderDragon) {
                 try {
                     Object parts = SL_DRAGON_PARTS.get(sl);
-                    if (parts instanceof Set) {
-                        for (Object o : ((Set<?>) parts).toArray()) {
-                            if (o == null) continue;
-                            Object parent = DRAGON_PART_PARENT != null ? DRAGON_PART_PARENT.get(o) : null;
-                            if (parent == target && o instanceof Entity partEntity) {
-                                ((Set<?>) parts).remove(o);
-                                // 写 removalReason，让 ESM 下个 tick 自动把 part 从世界容器摘除
-                                writeRemovalReasonDirect(partEntity, Entity.RemovalReason.KILLED);
+                    if (parts instanceof Map<?, ?> m) {
+                        for (Object o : m.values().toArray()) {
+                            if (o instanceof EnderDragonPart part && part.parentMob == target) {
+                                m.remove(part.getId());
+                                writeRemovalReasonDirect(part, Entity.RemovalReason.KILLED);
                             }
                         }
                     }

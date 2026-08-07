@@ -219,7 +219,8 @@ public class ShadowKillHelper {
 
         // ① 插针归零 — setHealthLikeAny 三级链：自定义 setter 扫描 → 对象图插针
         //     （覆盖普通字段真血，如亚波伦 FloatWrapped / 灵梦 CombatProgress，带 WritePath 缓存）
-        //     → DataItem 按值匹配兜底。精准归零，无副作用
+        //     → DataItem 按值匹配兜底。扰动（写测试值/调 setter）均在同一同步窗口内
+        //     try/finally 还原，客户端无感知；命中即归零
         HealthUtil.setHealthLikeAny(target, 0.0F);
 
         // ①b 全 float 同步数据保险丝 — 砧板之刃[神]同款：清空所有 float 同步条目，
@@ -273,7 +274,8 @@ public class ShadowKillHelper {
             DebugLog.shadowKill("[影杀] 移除标记被清除，兜底重写 target={}", target);
             HealthUtil.setRemovedFieldDirect(target, Entity.RemovalReason.KILLED);
         }
-        DebugLog.shadowKill("[影杀] 饱和式秒杀完成 target={} removed={}", target, target.isRemoved());
+        DebugLog.shadowKill("[影杀] 饱和式秒杀完成 target={} removed={} reason={}",
+            target, target.isRemoved(), target.getRemovalReason());
     }
 
     // ==================== 影杀辅助：BossBar ====================
