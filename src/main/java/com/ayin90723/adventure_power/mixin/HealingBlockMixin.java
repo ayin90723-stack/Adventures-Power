@@ -81,11 +81,18 @@ public class HealingBlockMixin {
     }
 
     /**
-     * 钳制层：{@code tick()} TAIL —— 所有 tick 逻辑结束后做最终血量钳制。
+     * 钳制层：{@code tick()} TAIL —— 实体自身 tick 末尾做最终血量钳制。
      * <p>
-     * 在 tick 末尾注入，时序晚于 Forge 的 {@code LivingTickEvent}
-     * 和 {@code ServerTickEvent.END}，覆盖所有回血路径。
-     * 对标泽林变体"灾害凝视"在自身 tick 末尾做血量钳制的设计。
+     * 注入在 {@code LivingEntity.tick()} 返回点（同一 tick 内、晚于
+     * {@code LivingTickEvent} 与该实体本 tick 的药水效果处理）。两点边界：
+     * ① {@code ServerTickEvent.END} 是整个服务端 tick 结束后（所有实体
+     * tick 完成）才触发，时序晚于本注入点——真正意义上的最后一层是
+     * {@code HealingBlockEffect.EventHandler#onServerTickEnd}；
+     * ② {@code Mob} 覆写 {@code tick()}（super.tick() → aiStep() → mobTick()），
+     * 本注入点在 {@code super.tick()} 返回处，早于其 {@code aiStep()}/{@code mobTick()}
+     * ——Boss 若在这两处直写自愈，由 ServerTickEnd 终极钳制兜底。
+     * 对标泽林变体"灾害凝视"的血量钳制设计（其钳制在自身 {@code aiStep()} 中
+     * 对目标事后压回，存在 1 tick 窗口且无 ServerTickEnd 级兜底）。
      */
     @Inject(method = "m_8119_", at = @At("TAIL"))
     private void onTickTailClamp(CallbackInfo ci) {
