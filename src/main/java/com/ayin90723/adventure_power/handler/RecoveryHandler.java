@@ -12,8 +12,11 @@ import com.ayin90723.adventure_power.util.DamageUtil;
 import com.ayin90723.adventure_power.util.DebugLog;
 import com.ayin90723.adventure_power.util.FriendlyFireProtection;
 import com.ayin90723.adventure_power.util.HealthUtil;
+import com.ayin90723.adventure_power.util.PiercingGazeUtil;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
@@ -122,6 +125,46 @@ public class RecoveryHandler {
         lastHurtTimestamps.remove(id);
     }
 
+    // ==================== 嗜血 — 击杀回馈 ====================
+
+    /**
+     * 嗜血：击杀生物时额外回馈固定血量（"吸干"收割感）。
+     * <p>
+     * 与吸血不同，击杀回馈不区分伤害来源——影杀斩杀/淬魂补刀/审判击杀都算
+     * （"击杀就是胜利"）。PVP 击杀排除（与嗜血 PVP 无效一致）、友伤保护
+     * （杀自家驯服生物不触发）。回血量 lifesteal_kill_heal，觉醒叠加
+     * AWAKEN_LIFESTEAL_KILL_HEAL。直写血量绕过 heal() 拦截。
+     */
+    @SubscribeEvent
+    public static void onLivingDeath(LivingDeathEvent event) {
+        if (event.isCanceled()) return;
+        LivingEntity target = event.getEntity();
+        if (target.level().isClientSide()) return;
+        if (target instanceof Player) return; // PVP 击杀无效
+
+        // 弹射物击杀（弓/弩/三叉戟）的 getEntity() 是弹射物本身，走 resolveAttacker 回溯
+        Entity rawAttacker = PiercingGazeUtil.resolveAttacker(event.getSource());
+        if (!(rawAttacker instanceof Player attacker)) return;
+        if (attacker == target) return; // 自杀不算
+
+        if (FriendlyFireProtection.isOwnerTarget(attacker, target)) return;
+
+        AbilityGate.getActiveProgress(attacker, AbilityIds.LIFESTEAL).ifPresent(progress -> {
+            float healAmount = ModConfig.LIFESTEAL_KILL_HEAL.get().floatValue();
+            if (progress.isFullyUnlocked()) {
+                healAmount += ModConfig.AWAKEN_LIFESTEAL_KILL_HEAL.get().floatValue();
+            }
+            if (healAmount <= 0.0F) return;
+
+            float current = HealthUtil.getHealthDirect(attacker);
+            float newHealth = Math.min(attacker.getMaxHealth(), current + healAmount);
+            if (newHealth > current) {
+                DebugLog.lifesteal("[嗜血] {} 击杀回馈 {} → {}", attacker, healAmount, newHealth);
+                HealthUtil.setAllHealthLikeRaw(attacker, newHealth);
+            }
+        });
+    }
+
     // ==================== 嗜血 — 攻击吸血 ====================
 
     /**
@@ -138,7 +181,9 @@ public class RecoveryHandler {
         if (event.isCanceled()) return;
         LivingEntity target = event.getEntity();
         if (target.level().isClientSide()) return;
-        if (!(event.getSource().getEntity() instanceof Player attacker)) return;
+        // 弹射物击杀（弓/弩/三叉戟）的 getEntity() 是弹射物本身，走 resolveAttacker 回溯
+        //（v1.3.7 与击杀回馈 onLivingDeath 统一，弓/弩/三叉戟伤害也能吸血）
+        if (!(PiercingGazeUtil.resolveAttacker(event.getSource()) instanceof Player attacker)) return;
         if (target instanceof Player) return; // PVP 无效
 
         // 跳过内部穿透伤害，防递归

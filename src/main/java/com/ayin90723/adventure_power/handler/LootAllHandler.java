@@ -6,12 +6,16 @@ import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.FriendlyFireProtection;
 import com.ayin90723.adventure_power.util.PiercingGazeUtil;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.tags.TagKey;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.RecordItem;
 import net.minecraft.world.level.storage.loot.BuiltInLootTables;
 import net.minecraft.world.level.storage.loot.LootParams;
 import net.minecraft.world.level.storage.loot.LootTable;
@@ -21,8 +25,10 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.event.entity.living.LivingDropsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.Collection;
+import java.util.List;
 
 /**
  * 满载而归 - 击杀生物后，在原版掉落基础上额外按掉落表"每样一份"追加掉落。
@@ -111,6 +117,8 @@ public class LootAllHandler {
             for (int i = 0; i < copies; i++) {
                 for (ItemStack stack : table.getRandomItems(params)) {
                     if (stack.isEmpty()) continue;
+                    // 额外掉落过滤（黑名单/唱片/头颅，配置默认关闭 = 不过滤，保持原行为）
+                    if (isFiltered(stack)) continue;
                     ItemEntity itemEntity = new ItemEntity(level, pos.x, pos.y, pos.z, stack);
                     // 随机散落速度，避免所有额外掉落叠在同一点
                     itemEntity.setDeltaMovement(
@@ -127,5 +135,49 @@ public class LootAllHandler {
             BYPASS.set(prevBypass);
             AWAKEN.set(prevAwaken);
         }
+    }
+
+    /**
+     * 满载而归额外掉落过滤（v1.3.7）：黑名单 / 唱片 / 头颅，三项独立配置。
+     * <p>
+     * 仅过滤额外掉落，原版掉落流程不受影响。三个开关默认关闭（不过滤），
+     * 保持与旧版本完全一致的行为——需要过滤的玩家自行开启。
+     * <ul>
+     *   <li>黑名单：物品注册 ID 列表（`loot_all_blacklist`，如 "minecraft:player_head"）</li>
+     *   <li>唱片：`loot_all_drop_music_discs`（false = 过滤所有 {@link RecordItem}，含模组唱片）</li>
+     *   <li>头颅：`loot_all_drop_skulls`（false = 过滤 skulls 物品 tag（数据包扩展点）+ 注册名 *_skull、*_head 后缀）</li>
+     * </ul>
+     */
+    private static boolean isFiltered(ItemStack stack) {
+        // ① 黑名单（物品注册 ID）
+        List<? extends String> blacklist = ModConfig.LOOT_ALL_BLACKLIST.get();
+        if (!blacklist.isEmpty()) {
+            ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
+            if (id != null && blacklist.contains(id.toString())) {
+                return true;
+            }
+        }
+        // ② 唱片：1.20.1 类名为 RecordItem（原版 + 模组唱片统一拦截，不依赖注册名）
+        if (!ModConfig.LOOT_ALL_DROP_MUSIC_DISCS.get() && stack.getItem() instanceof RecordItem) {
+            return true;
+        }
+        // ③ 头颅：skulls 物品 tag 为准（原版 6 种头），注册名后缀兜底（模组头，1.20.1 无 SkullItem 类）
+        if (!ModConfig.LOOT_ALL_DROP_SKULLS.get() && isSkull(stack)) {
+            return true;
+        }
+        return false;
+    }
+
+    /** 头颅物品 tag（minecraft:skulls，1.20.1 原版无此 tag，由数据包定义时生效——仅作扩展点） */
+    private static final TagKey<Item> SKULLS_TAG = TagKey.create(Registries.ITEM, new ResourceLocation("minecraft:skulls"));
+
+    /** 头颅判断：minecraft:skulls 物品 tag（数据包扩展点，1.20.1 原版无此 tag）为主，
+     *  注册名 *_skull / *_head 后缀兜底（覆盖原版 6 种头与大部分模组头） */
+    private static boolean isSkull(ItemStack stack) {
+        if (stack.is(SKULLS_TAG)) return true;
+        ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        if (id == null) return false;
+        String path = id.getPath();
+        return path.endsWith("_skull") || path.endsWith("_head");
     }
 }

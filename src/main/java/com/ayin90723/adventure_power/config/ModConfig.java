@@ -3,6 +3,8 @@ package com.ayin90723.adventure_power.config;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.common.ForgeConfigSpec.*;
 
+import java.util.List;
+
 public class ModConfig {
     public static final Builder BUILDER = new Builder();
     public static final ForgeConfigSpec SPEC;
@@ -59,6 +61,11 @@ public class ModConfig {
     public static final DoubleValue SOUL_QUENCH_HP_RATIO_9;
     public static final DoubleValue SOUL_QUENCH_HP_RATIO_10;
     public static final DoubleValue SOUL_QUENCH_HEALING_BLOCK_MULTIPLIER;
+    public static final IntValue SOUL_QUENCH_PARTICLE_COUNT;
+
+    // --- 破敌之眼 ---
+    public static final BooleanValue PIERCING_GAZE_FEEDBACK_ENABLED;
+    public static final IntValue PIERCING_GAZE_FEEDBACK_PARTICLE_COUNT;
 
     // --- 影杀 ---
     public static final IntValue SHADOW_KILL_FLAT_DAMAGE;
@@ -83,6 +90,7 @@ public class ModConfig {
     public static final IntValue LIFESTEAL_BASE;
     public static final IntValue LIFESTEAL_PER_MILESTONE;
     public static final DoubleValue LIFESTEAL_CAP_RATIO;
+    public static final DoubleValue LIFESTEAL_KILL_HEAL;
 
     // --- 大地之力 ---
     public static final DoubleValue DIGGING_POWER_BASE;
@@ -95,14 +103,20 @@ public class ModConfig {
     // --- 鸿运当头 ---
     public static final IntValue FORTUNE_FAVOR_BONUS_BASE;
     public static final IntValue FORTUNE_FAVOR_BONUS_STEP;
+    public static final DoubleValue FORTUNE_FAVOR_LUCK_SCALE;
 
     // --- 坚韧之躯 ---
     public static final DoubleValue VITALITY_BASE;
     public static final DoubleValue VITALITY_PER_MILESTONE;
+    public static final DoubleValue VITALITY_HEAL_BONUS_BASE;
+    public static final DoubleValue VITALITY_HEAL_BONUS_PER_MILESTONE;
 
     // --- 满载而归 ---
     public static final IntValue LOOT_ALL_COPIES;
     public static final IntValue LOOT_ALL_MAX_ITEMS;
+    public static final ForgeConfigSpec.ConfigValue<List<? extends String>> LOOT_ALL_BLACKLIST;
+    public static final BooleanValue LOOT_ALL_DROP_MUSIC_DISCS;
+    public static final BooleanValue LOOT_ALL_DROP_SKULLS;
 
     // --- 死亡抗拒 ---
     public static final IntValue DEATH_DEFY_INVUL_DURATION;
@@ -148,6 +162,7 @@ public class ModConfig {
     public static final DoubleValue AWAKEN_SHADOW_KILL_AOE_RATIO;
     public static final IntValue AWAKEN_SHADOW_KILL_AOE_MAX_TARGETS;
     public static final DoubleValue AWAKEN_LIFESTEAL_SHIELD_CAP;
+    public static final DoubleValue AWAKEN_LIFESTEAL_KILL_HEAL;
     public static final IntValue AWAKEN_PURIFIED_SOUL_RADIUS;
     public static final IntValue AWAKEN_PURIFIED_SOUL_AURA_INTERVAL;
     public static final IntValue AWAKEN_PURIFIED_SOUL_WEAKNESS_AMPLIFIER;
@@ -162,6 +177,7 @@ public class ModConfig {
     public static final DoubleValue AWAKEN_HEALING_BLOCK_VULN;
     public static final IntValue AWAKEN_PIERCING_GAZE_NO_IFRAME_TICKS;
     public static final IntValue AWAKEN_RAPID_RECOVERY_BONUS;
+    public static final DoubleValue AWAKEN_VITALITY_HEAL_MULTIPLIER;
     public static final BooleanValue LOOT_ALL_AWAKENED_MAX_COUNT;
     public static final IntValue LOOT_ALL_AWAKENED_COPIES;
     public static final DoubleValue AWAKEN_MAGNET_RADIUS_MULT;
@@ -256,6 +272,15 @@ public class ModConfig {
             .defineInRange("soul_quench_hp_ratio_10", 0.02, 0.0, 1.0);
         SOUL_QUENCH_HEALING_BLOCK_MULTIPLIER = BUILDER.comment("对禁疗之触标记目标的额外伤害倍率")
             .defineInRange("soul_quench_healing_block_multiplier", 1.5, 1.0, 10.0);
+        SOUL_QUENCH_PARTICLE_COUNT = BUILDER.comment("命中时灵魂蓝火粒子数量（0=关闭粒子反馈）")
+            .defineInRange("soul_quench_particle_count", 6, 0, 100);
+        BUILDER.pop();
+
+        BUILDER.push("破敌之眼");
+        PIERCING_GAZE_FEEDBACK_ENABLED = BUILDER.comment("穿透成功时播放屏障破碎音效+粒子反馈")
+            .define("piercing_gaze_feedback_enabled", true);
+        PIERCING_GAZE_FEEDBACK_PARTICLE_COUNT = BUILDER.comment("穿透反馈粒子数量")
+            .defineInRange("piercing_gaze_feedback_particle_count", 10, 0, 100);
         BUILDER.pop();
 
         BUILDER.push("影杀");
@@ -300,6 +325,8 @@ public class ModConfig {
             .defineInRange("lifesteal_per_milestone", 2, 0, 20);
         LIFESTEAL_CAP_RATIO = BUILDER.comment("单次吸血上限（最大生命值比例）")
             .defineInRange("lifesteal_cap_ratio", 0.2, 0.0, 1.0);
+        LIFESTEAL_KILL_HEAL = BUILDER.comment("击杀回馈固定回血量（HP，0=关闭；觉醒后叠加 AWAKEN_LIFESTEAL_KILL_HEAL）")
+            .defineInRange("lifesteal_kill_heal", 3.0, 0.0, 20.0);
         BUILDER.pop();
 
         BUILDER.push("大地之力");
@@ -321,6 +348,8 @@ public class ModConfig {
             .defineInRange("fortune_favor_bonus_base", 1, 0, 10);
         FORTUNE_FAVOR_BONUS_STEP = BUILDER.comment("每2个里程碑增加的等级")
             .defineInRange("fortune_favor_bonus_step", 1, 0, 5);
+        FORTUNE_FAVOR_LUCK_SCALE = BUILDER.comment("幸运属性倍率（乘在时运/抢夺等级上写入 Attributes.LUCK，0=关闭幸运加成）")
+            .defineInRange("fortune_favor_luck_scale", 1.0, 0.0, 10.0);
         BUILDER.pop();
 
         BUILDER.push("坚韧之躯");
@@ -328,6 +357,10 @@ public class ModConfig {
             .defineInRange("vitality_base", 4.0, 0.0, 100.0);
         VITALITY_PER_MILESTONE = BUILDER.comment("每额外里程碑增加的生命值")
             .defineInRange("vitality_per_milestone", 2.0, 0.0, 50.0);
+        VITALITY_HEAL_BONUS_BASE = BUILDER.comment("治疗量加成基础比例（0.1=+10%），里程碑7时的值（作用于外部治疗，自家直写回血不受影响）")
+            .defineInRange("vitality_heal_bonus_base", 0.1, 0.0, 2.0);
+        VITALITY_HEAL_BONUS_PER_MILESTONE = BUILDER.comment("每额外里程碑增加的治疗加成比例")
+            .defineInRange("vitality_heal_bonus_per_milestone", 0.05, 0.0, 1.0);
         BUILDER.pop();
 
         BUILDER.push("满载而归");
@@ -335,6 +368,12 @@ public class ModConfig {
             .defineInRange("loot_all_copies", 1, 0, 64);
         LOOT_ALL_MAX_ITEMS = BUILDER.comment("单次击杀额外掉落物总数量上限（防极端配置卡服）")
             .defineInRange("loot_all_max_items", 100, 1, 1000);
+        LOOT_ALL_BLACKLIST = BUILDER.comment("黑名单：满载而归额外掉落中过滤的物品（物品注册 ID，如 \"minecraft:player_head\"；仅过滤额外掉落，原版掉落不受影响）")
+            .defineListAllowEmpty("loot_all_blacklist", List.of(), obj -> obj instanceof String);
+        LOOT_ALL_DROP_MUSIC_DISCS = BUILDER.comment("是否允许满载而归额外掉落唱片（false = 过滤所有唱片类物品，含模组唱片）")
+            .define("loot_all_drop_music_discs", true);
+        LOOT_ALL_DROP_SKULLS = BUILDER.comment("是否允许满载而归额外掉落头颅（false = 过滤所有头颅类物品，如骷髅头/玩家头/龙首）")
+            .define("loot_all_drop_skulls", true);
         BUILDER.pop();
 
         BUILDER.push("死亡抗拒");
@@ -420,6 +459,8 @@ public class ModConfig {
             .defineInRange("awaken_shadow_kill_aoe_max_targets", 16, 1, 200);
         AWAKEN_LIFESTEAL_SHIELD_CAP = BUILDER.comment("觉醒嗜血 - 吸收护盾上限（生命比例）")
             .defineInRange("awaken_lifesteal_shield_cap", 0.2, 0.0, 1.0);
+        AWAKEN_LIFESTEAL_KILL_HEAL = BUILDER.comment("觉醒嗜血 - 击杀回馈额外回血量（HP，叠加在 lifesteal_kill_heal 上）")
+            .defineInRange("awaken_lifesteal_kill_heal", 2.0, 0.0, 20.0);
         AWAKEN_PURIFIED_SOUL_RADIUS = BUILDER.comment("觉醒净魂 - 虚弱光环半径（格）")
             .defineInRange("awaken_purified_soul_radius", 16, 1, 128);
         AWAKEN_PURIFIED_SOUL_AURA_INTERVAL = BUILDER.comment("觉醒净魂 - 虚弱光环施加间隔（tick，默认40=2秒）")
@@ -448,6 +489,8 @@ public class ModConfig {
             .defineInRange("awaken_piercing_gaze_no_iframe_ticks", 60, 1, 200);
         AWAKEN_RAPID_RECOVERY_BONUS = BUILDER.comment("觉醒休养生息 - 每周期额外回血量（HP）")
             .defineInRange("awaken_rapid_recovery_bonus", 5, 0, 20);
+        AWAKEN_VITALITY_HEAL_MULTIPLIER = BUILDER.comment("觉醒坚韧之躯 - 治疗量加成倍率")
+            .defineInRange("awaken_vitality_heal_multiplier", 1.5, 1.0, 5.0);
         LOOT_ALL_AWAKENED_MAX_COUNT = BUILDER.comment("觉醒满载而归 - 每样取掉落表最大数量")
             .define("loot_all_awakened_max_count", true);
         LOOT_ALL_AWAKENED_COPIES = BUILDER.comment("觉醒满载而归 - 每样份数")

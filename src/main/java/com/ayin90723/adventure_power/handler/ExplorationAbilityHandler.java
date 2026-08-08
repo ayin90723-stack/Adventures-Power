@@ -6,6 +6,7 @@ import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
+import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import net.minecraft.tags.FluidTags;
@@ -17,6 +18,7 @@ import java.util.UUID;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraftforge.common.ForgeMod;
+import net.minecraftforge.event.entity.living.LivingHealEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -273,6 +275,42 @@ public class ExplorationAbilityHandler {
         } else if (existing != null) {
             attr.removeModifier(SWIFT_SPEED_MODIFIER_UUID);
         }
+    }
+
+    // ==================== 坚韧之躯 — 治疗量加成 ====================
+
+    /**
+     * 坚韧之躯：收到的治疗量加成。
+     * <p>
+     * 只加成外部治疗（LivingHealEvent 链路：药水/再生效果/其他模组 heal()）；
+     * 自家直写回血（休养生息/嗜血 setAllHealthLikeRaw）不走 heal()，不受加成，
+     * 避免模组内部回血互相膨胀。成长曲线独立于 maxHealth 加成：
+     * base + per_milestone × (effectiveCount - countAtUnlock)，觉醒 ×倍率。
+     */
+    @SubscribeEvent
+    public static void onLivingHeal(LivingHealEvent event) {
+        if (event.isCanceled()) return;
+        if (!(event.getEntity() instanceof Player player)) return;
+        if (player.level().isClientSide()) return;
+        float amount = event.getAmount();
+        if (amount <= 0.0F) return;
+
+        AbilityGate.getActiveProgress(player, AbilityIds.VITALITY).ifPresent(progress -> {
+            Ability ability = AbilityRegistry.get(AbilityIds.VITALITY);
+            if (ability == null) return;
+
+            // 独立成长曲线：base + per_milestone × (effectiveCount - countAtUnlock)
+            //（Math.max(0, ...) 下限保护与 LinearGrowthAbility 语义对齐——/reload 删里程碑
+            //  等场景差值可为负时保底 base 而非整体失效）
+            double bonus = ModConfig.VITALITY_HEAL_BONUS_BASE.get()
+                + ModConfig.VITALITY_HEAL_BONUS_PER_MILESTONE.get()
+                * Math.max(0, AbilityGate.effectiveCount(progress, AbilityIds.VITALITY) - ability.getCountAtUnlock());
+            if (bonus <= 0.0) return;
+            if (progress.isFullyUnlocked()) {
+                bonus *= ModConfig.AWAKEN_VITALITY_HEAL_MULTIPLIER.get();
+            }
+            event.setAmount(amount * (1.0F + (float) bonus));
+        });
     }
 
     // ==================== 维度切换/重生恢复 ====================

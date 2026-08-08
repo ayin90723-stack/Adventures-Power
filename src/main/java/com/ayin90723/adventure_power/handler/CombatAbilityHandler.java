@@ -258,6 +258,14 @@ public class CombatAbilityHandler {
                 }
             }
         }
+
+        // 命中反馈：灵魂蓝火粒子（服务端广播，附近玩家可见；0 = 关闭）
+        int particleCount = ModConfig.SOUL_QUENCH_PARTICLE_COUNT.get();
+        if (particleCount > 0 && target.level() instanceof ServerLevel serverLevel) {
+            serverLevel.sendParticles(ParticleTypes.SOUL_FIRE_FLAME,
+                target.getX(), target.getY() + target.getBbHeight() * 0.5, target.getZ(),
+                particleCount, 0.3, 0.3, 0.3, 0.02);
+        }
     }
 
     /** 清零实体 hurtTime（反射方式），防止个别 Boss 将 hurtTime>0 作为额外无敌判据 */

@@ -18,8 +18,8 @@ import net.minecraftforge.fml.common.Mod.EventBusSubscriber.Bus;
  * Capability 解析 + 5 次门禁），减少到 1 次。
  * <p>
  * 执行顺序：PlayerTickHandler -> PlayerStateHandler -> ExplorationAbilityHandler
- * -> RecoveryHandler -> KnockbackResistHandler。各 handler 的 onTick 不再做
- * 门禁检查（由本分发器统一做），仅保留业务逻辑。
+ * -> RecoveryHandler -> KnockbackResistHandler -> FortuneFavorHandler。各 handler 的
+ * onTick 不再做门禁检查（由本分发器统一做），仅保留业务逻辑。
  * <p>
  * 开局安全网（补发饰品 + 测试入口）需对非冒险者执行，在门禁前调用。
  * 首次激活冒险者/全解锁后，本次 tick 用激活前 progress 快照，延迟 1 tick 进入
@@ -47,6 +47,7 @@ public class PlayerTickDispatcher {
         ExplorationAbilityHandler.onTick(player, progress);
         RecoveryHandler.onTick(player, progress);
         KnockbackResistHandler.onTick(player, progress);
+        FortuneFavorHandler.onTick(player, progress);
         MagnetHandler.onTick(player, progress);
         AllSeeingHandler.onTick(player, progress);
         SwiftHandler.onTick(player, progress);

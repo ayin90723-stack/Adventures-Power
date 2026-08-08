@@ -122,6 +122,8 @@ public class PiercingGazePlayerAttackMixin {
             float effective = PiercingGazeUtil.postHurtEvent(living, source, amount);
             PiercingGazeUtil.invokeActuallyHurt(living, source, effective);
             PiercingGazeUtil.afterPierceFallback(living, effective, healthBefore);
+            // 穿透反馈（穿透三连 = 真穿透；同目标同 tick 节流防三连刷屏）
+            PiercingGazeUtil.pierceFeedback(living);
         } finally {
             PiercingGazeUtil.IN_PIERCING.set(prevInPiercing);
         }

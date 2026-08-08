@@ -192,6 +192,8 @@ public abstract class PiercingGazeLivingEntityMixin {
                         //（旧 2.5 redirect 死靶时 posted 恒 false，此分支从不命中导致双倍）。
                         cir.setReturnValue(true);
                         PiercingGazeUtil.afterPierceFallback(self, amount, healthBefore);
+                        // 穿透反馈（posted+blocked = Boss 拦截后原版管线已结算的穿透）
+                        PiercingGazeUtil.pierceFeedback(self);
                     } else {
                         // 情况 A：Boss 完全拦截 hurt()（未走到 actuallyHurt，事件未 post）
                         // -> 补 post LivingHurtEvent（让淬魂等监听器正常处理）+ actuallyHurt 直写。
@@ -205,6 +207,8 @@ public abstract class PiercingGazeLivingEntityMixin {
                         PiercingGazeUtil.invokeActuallyHurt(self, source, effectiveAmount);
                         cir.setReturnValue(true);
                         PiercingGazeUtil.afterPierceFallback(self, effectiveAmount, healthBefore);
+                        // 穿透反馈（情况 A = Boss 完全拦截后的补 post + actuallyHurt 穿透）
+                        PiercingGazeUtil.pierceFeedback(self);
                     }
                 } else {
                     // 情况 B：正常流程，actuallyHurt 已由原版管线执行（事件已按其结算），

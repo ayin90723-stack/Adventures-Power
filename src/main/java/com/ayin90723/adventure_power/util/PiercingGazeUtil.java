@@ -1,14 +1,25 @@
 package com.ayin90723.adventure_power.util;
 
 import com.ayin90723.adventure_power.AdventurePower;
+import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.mixin.PiercingGazeLivingEntityAccessor;
+import net.minecraft.core.particles.ItemParticleOption;
+import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
+
+import java.util.Map;
+import java.util.WeakHashMap;
 
 /**
  * 破敌之眼穿透结算公共工具。
@@ -236,5 +247,41 @@ public final class PiercingGazeUtil {
             HealthUtil.setAllHealthLikeRaw(target, Math.max(0.0F, healthBefore - effectiveAmount));
         }
         InvulClearUtil.clearCustomInvulTimers(target);
+    }
+
+    /**
+     * 穿透反馈：屏障破碎音效 + 玻璃碎片粒子（服务端广播）。
+     * <p>
+     * <b>只由穿透分支显式调用</b>（Layer 0 穿透三连 / Layer 2 情况 A 与 posted+blocked）——
+     * 三个结算收口（postHurtEvent / invokeActuallyHurt / afterPierceFallback）同时被
+     * Layer 2 情况 B（原版管线正常结算的普通命中）调用，不能作为反馈挂载点，
+     * 否则破敌之眼持有者的每次普通命中都会误触发"屏障破碎"。
+     * <p>
+     * 节流：{@link WeakHashMap} 按"同目标同 tick"只反馈一次（一次穿透三连
+     * 多次调用不刷屏），实体 GC/卸载后条目自动释放，不持久化不泄漏。
+     */
+    private static final Map<Entity, Long> LAST_PIERCE_FEEDBACK_TICK =
+        java.util.Collections.synchronizedMap(new WeakHashMap<>());
+
+    /** 穿透反馈（服务端广播，仅穿透分支调用） */
+    public static void pierceFeedback(LivingEntity target) {
+        if (!ModConfig.PIERCING_GAZE_FEEDBACK_ENABLED.get()) return;
+        if (!(target.level() instanceof ServerLevel serverLevel)) return;
+
+        // 同目标同 tick 只反馈一次（穿透三连不刷屏）
+        long now = serverLevel.getGameTime();
+        Long last = LAST_PIERCE_FEEDBACK_TICK.get(target);
+        if (last != null && last == now) return;
+        LAST_PIERCE_FEEDBACK_TICK.put(target, now);
+
+        // "屏障碎了"：玻璃破碎音效 + 玻璃碎片粒子
+        serverLevel.playSound(null, target.getX(), target.getY() + target.getBbHeight() * 0.5, target.getZ(),
+            SoundEvents.GLASS_BREAK, SoundSource.BLOCKS, 1.0F, 1.1F);
+        int count = ModConfig.PIERCING_GAZE_FEEDBACK_PARTICLE_COUNT.get();
+        if (count > 0) {
+            serverLevel.sendParticles(new ItemParticleOption(ParticleTypes.ITEM, new ItemStack(Items.GLASS_PANE)),
+                target.getX(), target.getY() + target.getBbHeight() * 0.5, target.getZ(),
+                count, 0.4, 0.4, 0.4, 0.1);
+        }
     }
 }
