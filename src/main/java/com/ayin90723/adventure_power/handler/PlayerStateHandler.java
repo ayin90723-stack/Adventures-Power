@@ -11,6 +11,7 @@ import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.PersistentDataKeys;
 import com.ayin90723.adventure_power.util.ProgressCache;
 import com.ayin90723.adventure_power.util.RejectHealthManipUtil;
+import com.mojang.logging.LogUtils;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -453,7 +454,9 @@ public class PlayerStateHandler {
             }
             if (toRemove != null) {
                 for (MobEffect effect : toRemove) {
-                    player.removeEffect(effect);
+                    // 绕过 Remove 事件强制清除（见 removeHarmfulBypassEvents 注释）：
+                    // 整合包其他模组取消事件时 removeEffect 会静默失败，负面效果清不掉
+                    removeHarmfulBypassEvents(player, effect);
                 }
             }
 
@@ -564,6 +567,44 @@ public class PlayerStateHandler {
     // ========================================================================
     //  4. 受击坚韧 (Resilience) — 受伤叠层 + 减伤
     // ========================================================================
+
+    /**
+     * 净魂强制移除负面效果 —— 绕过可被取消的 {@code MobEffectEvent.Remove} 事件。
+     * <p>
+     * 整合包中部分模组会取消效果移除/过期事件（自然到期的效果走同样可取消的
+     * {@code MobEffectEvent.Expired}，被取消后会以 0 时长永久残留在效果表，
+     * 客户端显示 0:00 且牛奶 / effect clear 均无法清除），导致
+     * {@code player.removeEffect()} 静默失败、负面效果（如凋零）清不掉。
+     * 净魂语义为"免疫所有负面效果"，理应最强：走 {@code removeEffectNoUpdate}
+     * 直删效果表 + 反射调用 {@code onEffectRemoved}（SRG {@code m_7285_}，虚方法
+     * 多态到 ServerPlayer 覆写）——与原版 removeEffect 的差异仅为不经过可被
+     * 取消的 Remove 事件，其余副作用（属性修饰符清除 / 自身与乘客的客户端
+     * 移除包 / EFFECTS_CHANGED 触发器）完整保留。
+     */
+    private static void removeHarmfulBypassEvents(Player player, MobEffect effect) {
+        MobEffectInstance removed = player.removeEffectNoUpdate(effect);
+        if (removed == null) return;
+        try {
+            if (EFFECT_REMOVED_METHOD == null) {
+                try {
+                    EFFECT_REMOVED_METHOD = LivingEntity.class.getDeclaredMethod("m_7285_", MobEffectInstance.class);
+                } catch (NoSuchMethodException e) {
+                    EFFECT_REMOVED_METHOD = LivingEntity.class.getDeclaredMethod("onEffectRemoved", MobEffectInstance.class);
+                }
+                EFFECT_REMOVED_METHOD.setAccessible(true);
+            }
+            EFFECT_REMOVED_METHOD.invoke(player, removed);
+        } catch (Exception e) {
+            // 效果已从效果表删除（removeEffectNoUpdate 先行），反射仅负责副作用同步；
+            // 失败时客户端可能残留旧图标，重启自清
+            LOGGER.error("[净魂] 强制移除 {} 时反射 onEffectRemoved 失败", effect, e);
+        }
+    }
+
+    /** LivingEntity.onEffectRemoved（SRG m_7285_，MCP 回退 onEffectRemoved）反射缓存 */
+    private static java.lang.reflect.Method EFFECT_REMOVED_METHOD;
+
+    private static final org.slf4j.Logger LOGGER = LogUtils.getLogger();
 
     /**
      * 玩家受伤时：
