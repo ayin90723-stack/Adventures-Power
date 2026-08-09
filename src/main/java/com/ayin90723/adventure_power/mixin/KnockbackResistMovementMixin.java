@@ -10,6 +10,8 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+import java.util.Set;
+
 /**
  * 不动如山 —— 位移控制防御（拉拽/传送拽回免疫）。
  * <p>
@@ -71,9 +73,46 @@ public abstract class KnockbackResistMovementMixin {
         double moved = Math.abs(player.getX() - player.xo) + Math.abs(player.getZ() - player.zo);
         if (moved < MOVING_THRESHOLD) return false;
 
-        // 目标坐标 = 上 tick 位置：被拽回原位
-        return Math.abs(x - player.xo) < RESET_EPSILON
+        // 目标坐标 = 上 tick 位置：疑似被拽回原位
+        boolean reset = Math.abs(x - player.xo) < RESET_EPSILON
             && Math.abs(y - player.yo) < RESET_EPSILON
             && Math.abs(z - player.zo) < RESET_EPSILON;
+        if (!reset) return false;
+
+        // 调用栈豁免：正常移动链（Entity.move/travel/aiStep/absMoveTo/moveTo 内部
+        // 的 setPos）放行——服务端 aiStep 模拟位置落后/偏离客户端包位置时，move()
+        // 的 setPos 目标可能恰好等于玩家上 tick 位置（跑跳/二段跳客户端预测场景
+        // 实测顿挫），必须放行否则玩家被反复拉回/位置漂移。
+        // 栈检查仅在疑似回溯时执行（低频），正常移动路径零开销。
+        if (isNormalMovementCaller()) return false;
+
+        // 外部直调 setPos 拽回 -> cancel
+        return true;
+    }
+
+    /** 正常移动链方法白名单（SRG 名，运行时栈帧方法名） */
+    private static final Set<String> NORMAL_MOVEMENT_METHODS = Set.of(
+        "m_6478_",   // Entity.move
+        "m_7023_",   // Entity/LivingEntity/Player.travel
+        "m_8107_",   // LivingEntity/Player.aiStep
+        "m_19890_",  // Entity.absMoveTo(DDDFF)
+        "m_20248_",  // Entity.absMoveTo(DDD)
+        "m_6027_",   // Entity.moveTo(DDD)
+        "m_7678_",   // Entity.moveTo(DDDFF)
+        "m_20219_",  // Entity.moveTo(Vec3)
+        "m_20035_"   // Entity.moveTo(BlockPos, FF)
+    );
+
+    private static boolean isNormalMovementCaller() {
+        StackTraceElement[] stack = Thread.currentThread().getStackTrace();
+        // 跳过本类自身帧（getStackTrace / isNormalMovementCaller / 调用者）
+        int start = Math.min(4, stack.length);
+        int limit = Math.min(stack.length, start + 12);
+        for (int i = start; i < limit; i++) {
+            if (NORMAL_MOVEMENT_METHODS.contains(stack[i].getMethodName())) {
+                return true;
+            }
+        }
+        return false;
     }
 }
