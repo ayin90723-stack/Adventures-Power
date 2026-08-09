@@ -5,6 +5,13 @@
         },
         "com/ayin90723/adventure_power/mixin/LootPoolAccessor": {
             "entries": "Lnet/minecraft/world/level/storage/loot/LootPool;f_79023_"
+        },
+        "com/ayin90723/adventure_power/mixin/SynchedEntityDataAccessor": {
+            "entity": "Lnet/minecraft/network/syncher/SynchedEntityData;f_135344_"
+        },
+        "com/ayin90723/adventure_power/mixin/LivingEntityFieldsAccessor": {
+            "dead": "Lnet/minecraft/world/entity/LivingEntity;f_20890_",
+            "deathTime": "Lnet/minecraft/world/entity/LivingEntity;f_20919_"
         }
     }
 }

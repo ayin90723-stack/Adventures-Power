@@ -4,9 +4,11 @@ import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
+import com.ayin90723.adventure_power.util.ClassPointerGuard;
 import com.ayin90723.adventure_power.util.DebugLog;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import org.spongepowered.asm.mixin.Mixin;
@@ -289,6 +291,77 @@ public abstract class TrueHealthMixin {
         }
     }
 
+    // ===== 存活性：isAlive() HEAD =====
+
+    /**
+     * 拦截 {@code isAlive()}，当备份血量 &gt; 0 时强制返回 true。
+     * <p>
+     * 与 {@link #onIsDeadOrDying} 配套：存活判定以 Capability 备份为准，
+     * 外部通过字段直写把玩家标记为死亡（{@code dead} 字段直写、removalReason
+     * 直写）时，只要备份表明玩家应存活就不允许被判为"非存活"——防止
+     * {@code tickDeath -> remove(KILLED)} 死亡流程推进。正常死亡（备份 ≤ 0）
+     * 放行原版判定。
+     * <p>
+     * <b>覆盖边界</b>：本注入落在 {@code LivingEntity} 声明的方法体上，若外部
+     * 通过类指针替换换入覆写 isAlive 的隐藏类（子类覆写后调用直达覆写版，
+     * 注入点不在分派链上），本注入不触发——该场景由 {@link #onTickLivenessCheck}
+     * 的类指针守卫（ClassPointerGuard 换回原类）处理。</p>
+     */
+    @Inject(method = "m_6084_", at = @At("HEAD"), cancellable = true)
+    private void onIsAlive(CallbackInfoReturnable<Boolean> cir) {
+        LivingEntity self = (LivingEntity) (Object) this;
+        IAdventureProgress progress = gatedProgress(self);
+        if (progress == null) return;
+        if (progress.getBackupHealth() > 0.0F) {
+            cir.setReturnValue(true);
+        }
+    }
+
+    // ===== 防移除：remove() HEAD =====
+
+    /**
+     * 拦截 {@code Entity.remove(RemovalReason)} (SRG {@code m_142687_})，
+     * 当备份血量 &gt; 0 时取消实体移除。注意 {@code m_142687_} 是 {@code remove()}
+     * 而非 {@code setRemoved()}（后者为 {@code m_142467_}）——原版死亡推进链
+     * {@code tickDeath -> remove(KILLED)} 与秒杀路径走的都是 {@code remove()}。
+     * <p>
+     * 对抗「绕过 die()/LivingDeathEvent 直接移除玩家」的击杀路径
+     * （如 killPlayer 的 {@code tickDeath -> remove(KILLED)}，其隐藏类覆写
+     * isAlive/isDeadOrDying 让原版死亡流程推进，但 remove 未被覆写、本注入
+     * 仍在分派链上）。配合 {@link #onTickLivenessCheck} 的类指针守卫，
+     * 先保实体不被移除，再由 tick 自检把方法分派恢复原状。
+     * <p>
+     * <b>原因门禁</b>：仅拦截 {@code KILLED}（死亡推进/击杀）与 {@code DISCARDED}
+     * （discard 型击杀）。正常流程不误伤：
+     * <ul>
+     *   <li>登出/踢出/封禁：{@code PlayerList.remove -> ServerLevel.removePlayerImmediately(UNLOADED_WITH_PLAYER)}——放行</li>
+     *   <li>维度切换：{@code removePlayerImmediately(CHANGED_DIMENSION)}——放行</li>
+     *   <li>重生 respawn：{@code remove(DISCARDED)} 但正常死亡备份 ≤ 0 已在上方放行</li>
+     * </ul>
+     * 若不加原因门禁，登出/换维度会被 cancel 导致幽灵实体（实体永留世界、
+     * knownUuids 未清除，重登失败）与双维度重复实体。
+     * {@code RejectHealthManipMixin} 同位置的 ATTR_OWNER 清理注入不受 cancel 影响
+     * （Mixin 多注入互不阻断），玩家存活时条目保留无泄漏。</p>
+     */
+    @Inject(method = "m_142687_", at = @At("HEAD"), cancellable = true)
+    private void onSetRemoved(Entity.RemovalReason reason, CallbackInfo ci) {
+        // 只拦击杀/丢弃型移除；登出(UNLOADED_WITH_PLAYER)/维度切换(CHANGED_DIMENSION)
+        // 等正常流程放行，避免幽灵实体与双维度重复实体
+        if (reason != Entity.RemovalReason.KILLED && reason != Entity.RemovalReason.DISCARDED) {
+            return;
+        }
+        LivingEntity self = (LivingEntity) (Object) this;
+        IAdventureProgress progress = gatedProgress(self);
+        if (progress == null) return;
+        if (progress.getBackupHealth() > 0.0F) {
+            if (debugLog()) {
+                DebugLog.trueHealth("[MME-TrueHealth] 拦截实体移除！" +
+                    " reason=" + reason + " backup=" + progress.getBackupHealth() + " -> cancel");
+            }
+            ci.cancel();
+        }
+    }
+
     // ===== 防直接死亡：die(DamageSource) HEAD =====
     // SRG m_6667_ = die(DamageSource)。注意勿写成 m_6668_（= dropAllDeathLoot，仅掉落不触发死亡事件）。
 
@@ -374,6 +447,9 @@ public abstract class TrueHealthMixin {
         // 备份无效（玩家确实应死）或重建后仍为 0
         if (backup <= 0.0F) return;
 
+        // 类指针守卫：首次通过门禁时记录玩家类（之后空操作）
+        ClassPointerGuard.record(player);
+
         boolean repaired = false;
 
         // ① 已移除复活：removalReason 被外部字段直写
@@ -408,6 +484,41 @@ public abstract class TrueHealthMixin {
             }
             HealthUtil.clearRemovedFlag(player);
             repairHealth(player, backup);
+        }
+
+        // ④ 死亡字段归位：dead/deathTime 被外部字段直写（不走 die()/remove）。
+        //    dead 参与 die() 的幂等守卫（!isRemoved() && !dead），被直写 true 后
+        //    后续 die() 调用会被跳过；deathTime 残留会让死亡动画持续播放。
+        //    必须强制归位。备份 ≤ 0 的正常死亡在上面已放行。
+        //    字段经 LivingEntityFieldsAccessor 访问（@Shadow 字段生产环境映射不可靠）。
+        LivingEntityFieldsAccessor fields = (LivingEntityFieldsAccessor) (Object) player;
+        if (fields.adventure_power$isDead()) {
+            if (debugLog()) {
+                DebugLog.trueHealth("[MME-TrueHealth] 存活性自检：dead 字段被直写！" +
+                    " deathTime=" + fields.adventure_power$getDeathTime() + " -> 归位");
+            }
+            fields.adventure_power$setDead(false);
+            fields.adventure_power$setDeathTime(0);
+        } else if (fields.adventure_power$getDeathTime() > 0 && !player.isDeadOrDying()) {
+            // 死亡动画残留：外部把 deathTime 推进但死亡状态已被否决，归位
+            fields.adventure_power$setDeathTime(0);
+        }
+
+        // ⑤ 类指针守卫：实体类被替换（killPlayer 类指针替换）——换回原类恢复
+        //    方法分派（getHealth/isAlive/isDeadOrDying 覆写全部失效），并清
+        //    死亡状态残留。此时 setRemoved 拦截（onSetRemoved）已保证实体未被
+        //    从世界中移除，本步是功能恢复的关键。
+        if (ClassPointerGuard.isReplaced(player)) {
+            if (debugLog()) {
+                DebugLog.trueHealth("[MME-TrueHealth] 存活性自检：检测到实体类被替换！" +
+                    " class=" + player.getClass().getName() + " -> 换回 " +
+                    ClassPointerGuard.expectedClassName());
+            }
+            if (ClassPointerGuard.restore(player)) {
+                fields.adventure_power$setDead(false);
+                fields.adventure_power$setDeathTime(0);
+                HealthUtil.clearRemovedFlag(player);
+            }
         }
     }
 }

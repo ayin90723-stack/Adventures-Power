@@ -157,31 +157,66 @@ public class HealthUtil {
     }
 
     /**
+     * 原版血量条目 accessor（{@code DATA_HEALTH_ID}，懒初始化缓存）。
+     * <p>
+     * 供 {@code RejectHealthManipDataMixin} 等数据同步层拦截做 key 引用比较——
+     * 该字段在 {@code LivingEntity} 是 private，Mixin @Shadow 无法跨类解析
+     * （@Shadow 只能在目标类及其父类内找字段），统一经本 getter 取缓存实例。
+     *
+     * @return 缓存的 {@code EntityDataAccessor<Float>}；反射初始化失败时返回 null
+     */
+    public static EntityDataAccessor<Float> getDataHealthId() {
+        if (DATA_HEALTH_ID == null && DATA_HEALTH_ID_FIELD != null) {
+            try {
+                Object rawId = DATA_HEALTH_ID_FIELD.get(null);
+                if (rawId instanceof EntityDataAccessor<?> accessor) {
+                    DATA_HEALTH_ID = (EntityDataAccessor<Float>) accessor;
+                }
+            } catch (IllegalAccessException e) {
+                LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
+            }
+        }
+        return DATA_HEALTH_ID;
+    }
+
+    /**
      * 直接写入血量字段（绕过 setHealth() 所有覆写，包括硬上限/适应性减伤/免疫帧）。
      * <p>
      * 写入目标为 {@code SynchedEntityData} 中 {@code DATA_HEALTH_ID} 对应的条目，
      * 后续 {@code entity.getHealth()} 将返回写入值。
+     * <p>
+     * 本方法整体包 {@link #INTERNAL_HEALTH_WRITE} 标记：内部路径（真血修复、
+     * 死亡抗拒恢复等）调用时会被 {@code RejectHealthManipDataMixin}（数据同步层
+     * 降值拦截）与 {@code RejectHealthManipMixin}（setHealth 方法级拦截）放行，
+     * 避免模组自愈/恢复与防御拦截互相死锁。外部对玩家的直写（未包标记）仍被拦截；
+     * 攻击侧写 Boss（非玩家）不受数据层拦截影响（拦截只对玩家 owner 生效）。
      *
      * @param target 目标实体
      * @param health 目标血量值
      */
     @SuppressWarnings("unchecked")
     public static void setHealthDirect(LivingEntity target, float health) {
-        if (DATA_HEALTH_ID_FIELD == null) {
-            return;
-        }
+        boolean prevInternal = INTERNAL_HEALTH_WRITE.get();
+        INTERNAL_HEALTH_WRITE.set(true);
         try {
-            if (DATA_HEALTH_ID == null) {
-                Object rawId = DATA_HEALTH_ID_FIELD.get(null);
-                if (rawId instanceof EntityDataAccessor<?> accessor) {
-                    DATA_HEALTH_ID = (EntityDataAccessor<Float>) accessor;
+            if (DATA_HEALTH_ID_FIELD == null) {
+                return;
+            }
+            try {
+                if (DATA_HEALTH_ID == null) {
+                    Object rawId = DATA_HEALTH_ID_FIELD.get(null);
+                    if (rawId instanceof EntityDataAccessor<?> accessor) {
+                        DATA_HEALTH_ID = (EntityDataAccessor<Float>) accessor;
+                    }
                 }
+                if (DATA_HEALTH_ID != null) {
+                    target.getEntityData().set(DATA_HEALTH_ID, health);
+                }
+            } catch (IllegalAccessException | ClassCastException e) {
+                LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
             }
-            if (DATA_HEALTH_ID != null) {
-                target.getEntityData().set(DATA_HEALTH_ID, health);
-            }
-        } catch (IllegalAccessException | ClassCastException e) {
-            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
+        } finally {
+            INTERNAL_HEALTH_WRITE.set(prevInternal);
         }
     }
 
@@ -261,21 +296,30 @@ public class HealthUtil {
      * @param health 目标血量值
      */
     public static void setAllHealthLikeDirect(LivingEntity target, float health) {
-        // ① 原版血条
-        setHealthDirect(target, health);
+        // 整体包内部写入标记：内部路径（真血修复等）的 data.set 会被
+        // RejectHealthManipDataMixin 放行（否则自愈与防御拦截死锁）；
+        // 攻击侧写 Boss（非玩家）不受数据层拦截影响
+        boolean prevInternal = INTERNAL_HEALTH_WRITE.get();
+        INTERNAL_HEALTH_WRITE.set(true);
+        try {
+            // ① 原版血条
+            setHealthDirect(target, health);
 
-        // ② 自定义血条 — 首次命中该实体类型时扫描，之后走缓存
-        Set<EntityDataAccessor<Float>> customKeys =
-            CUSTOM_HEALTH_KEYS_CACHE.computeIfAbsent(target.getClass(), clz -> scanCustomHealthKeys(target));
+            // ② 自定义血条 — 首次命中该实体类型时扫描，之后走缓存
+            Set<EntityDataAccessor<Float>> customKeys =
+                CUSTOM_HEALTH_KEYS_CACHE.computeIfAbsent(target.getClass(), clz -> scanCustomHealthKeys(target));
 
-        // ③ 全部写入
-        net.minecraft.network.syncher.SynchedEntityData data = target.getEntityData();
-        for (EntityDataAccessor<Float> key : customKeys) {
-            try {
-                data.set(key, health);
-            } catch (Exception ignored) {
-                // 极少见：entity 销毁后调用 / 类型不匹配 —— 静默跳过
+            // ③ 全部写入
+            net.minecraft.network.syncher.SynchedEntityData data = target.getEntityData();
+            for (EntityDataAccessor<Float> key : customKeys) {
+                try {
+                    data.set(key, health);
+                } catch (Exception ignored) {
+                    // 极少见：entity 销毁后调用 / 类型不匹配 —— 静默跳过
+                }
             }
+        } finally {
+            INTERNAL_HEALTH_WRITE.set(prevInternal);
         }
     }
 
