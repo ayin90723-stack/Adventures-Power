@@ -115,8 +115,6 @@ public class CapabilityLifecycleHandler {
         // 死亡/换维度后若持有冒险饰品但未激活，自动激活
         checkAndActivateAdventurer(newPlayer);
 
-        // v1.3.9 容器抹除防线：登记守护线程（重生换新玩家对象需重新登记）
-        com.ayin90723.adventure_power.util.GuardianThread.register(newPlayer);
 
         // 重生/穿越末地后客户端 Capability 不会自动同步，
         // 需要手动推送 AdventureSyncPacket 确保面板和 tooltip 状态正确
@@ -179,8 +177,6 @@ public class CapabilityLifecycleHandler {
         giveAdventureBeginIfNeeded(player);
         checkAndActivateAdventurer(player);
 
-        // v1.3.9 容器抹除防线：已激活玩家登录补登记守护线程
-        com.ayin90723.adventure_power.util.GuardianThread.register(player);
 
         // 已激活冒险者登录：补跑成就追赶（catchUpMissedMilestones 仅由 checkAndActivateAdventurer
         // 在首次激活时调用，已激活玩家登录/数据包 /reload 新增 advancement 里程碑后
@@ -278,8 +274,6 @@ public class CapabilityLifecycleHandler {
                 progress.activateAdventurer();
                 SyncUtil.syncCapabilityToPersistent(player, progress);
                 SyncUtil.syncToClient(player);
-                // v1.3.9 容器抹除防线：激活成功即登记（覆盖开局安全网 tick 激活路径，M-1 防护）
-                com.ayin90723.adventure_power.util.GuardianThread.register(sp);
                 return;
             }
             if (AdventureItemNbtUtil.playerHasAdventureItem(player)) {
@@ -288,8 +282,6 @@ public class CapabilityLifecycleHandler {
                 AdventureItemNbtUtil.syncAllAdventureItemNbt(player, progress);
                 SyncUtil.syncToClient(player);
                 AdvancementEventHandler.catchUpMissedMilestones(sp);
-                // v1.3.9 容器抹除防线：激活成功即登记（覆盖开局安全网 tick 激活路径，M-1 防护）
-                com.ayin90723.adventure_power.util.GuardianThread.register(sp);
             }
         });
     }
@@ -352,8 +344,6 @@ public class CapabilityLifecycleHandler {
             checkAndActivateAdventurer(player);
         });
 
-        // v1.3.9 容器抹除防线：维度切换后补登记守护线程
-        com.ayin90723.adventure_power.util.GuardianThread.register(player);
 
         // 下界/凋零/监守者/末影龙/鞘翅等里程碑已由 Advancement 系统处理，
         // 无需在此手动检测。

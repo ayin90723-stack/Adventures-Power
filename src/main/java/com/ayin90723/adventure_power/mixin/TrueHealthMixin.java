@@ -469,24 +469,6 @@ public abstract class TrueHealthMixin {
             repaired = true;
         }
 
-        // ①' 容器级抹除（v1.3.9 通道 A）：守护线程检测到实体从 EntityLookup 抹除
-        //    后置 BIT_CONTAINER 标记，本自检消费并重新注册回世界容器。
-        //    实体仍在 tick（isRemoved 强制 false 保 tick）时走此通道；
-        //    实体不 tick 时由 GuardianRepairHandler（ServerTickEvent）兜底。
-        //    ⚠️ 本分支无 reason 门禁（与通道 B 不同）：换维度/登出窗口实体已出
-        //    tick 表不 tick，实际不会触发；若未来敌方实现"保留 tick 但抹容器"的
-        //    变体，本分支会先修复——语义仍正确（backup>0 玩家该活）。
-        if (!repaired && (com.ayin90723.adventure_power.util.GuardianThread.consume(player)
-            & com.ayin90723.adventure_power.util.GuardianThread.BIT_CONTAINER) != 0) {
-            if (debugLog()) {
-                DebugLog.trueHealth("[MME-TrueHealth] 容器抹除防线：检测到容器抹除！" +
-                    " backup=" + backup + " -> addEntityBackToWorld");
-            }
-            ((EntityFieldsAccessor) (Object) player).adventure_power$setAddedToWorld(true);
-            HealthUtil.addEntityBackToWorld(player);
-            repaired = true;
-        }
-
         // ② 零血量修复：tick 之间被外部清零，且 getHealth() 未被调用
         float rawHealth = HealthUtil.getHealthDirect(player);
         if (!repaired && rawHealth <= 0.0F) {

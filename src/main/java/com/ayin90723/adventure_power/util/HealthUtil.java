@@ -79,7 +79,7 @@ public class HealthUtil {
     }
 
     private static Field DATA_HEALTH_ID_FIELD;
-    /** volatile：守护线程（GuardianThread）跨线程读血量条目时需看到主线程初始化结果 */
+    /** volatile：初始化可能在客户端/服务端两条线程发生，保证可见性 */
     private static volatile EntityDataAccessor<Float> DATA_HEALTH_ID;
 
     static {
@@ -1008,15 +1008,6 @@ public class HealthUtil {
     private static final Field ETL_ACTIVE;
     private static final Field ETL_PASSIVE;
 
-    // --- v1.3.9 容器抹除防线（addEntityBackToWorld）专用句柄 ---
-    private static final Field ENTITY_DATA_FIELD;      // Entity.entityData (f_19804_)，守护线程血量直读
-    private static final Field ENTITY_LEVEL_FIELD;     // Entity.level (f_19853_)，守护线程直读（不调 level()）
-    private static final Method ESM_ADD_ENTITY;        // PersistentEntitySectionManager.addEntity (m_157538_, EntityAccess;Z)Z
-    private static final Method SL_ADD_PLAYER;         // ServerLevel.addPlayer (m_8853_, ServerPlayer)V
-    private static final Method ETL_ADD;               // EntityTickList.add (m_156908_, Entity)V
-    private static final Method ESS_GET_OR_CREATE_SECTION; // EntitySectionStorage.getOrCreateSection (m_156893_, J)EntitySection
-    private static final Field SCC_CHUNK_MAP;          // ServerChunkCache.chunkMap (f_8325_)
-    private static final Method CM_UPDATE_PLAYER_STATUS;   // ChunkMap.updatePlayerStatus (m_140192_, ServerPlayer;Z)V
 
     static {
         Field elu = null, ku = null, ss = null;
@@ -1024,17 +1015,11 @@ public class HealthUtil {
         Field cmm = null, ci = null, cb = null;
         Method gs = null;
         Field ea = null, ep = null;
-        Field edf = null, elf = null;
-        Method esmAdd = null, slAddPlayer = null, etlAdd = null, essGetOrCreate = null;
-        Field sccChunkMap = null;
-        Method cmUpdatePlayerStatus = null;
         try {
             Class<?> esmClz = Class.forName("net.minecraft.world.level.entity.PersistentEntitySectionManager");
             elu = reflectField(esmClz, "f_157494_", "visibleEntityStorage");
             ku  = reflectField(esmClz, "f_157491_", "knownUuids");
             ss  = reflectField(esmClz, "f_157495_", "sectionStorage");
-            esmAdd = reflectMethod(esmClz, "m_157538_", "addEntity",
-                Class.forName("net.minecraft.world.level.entity.EntityAccess"), boolean.class);
 
             Class<?> elClz = Class.forName("net.minecraft.world.level.entity.EntityLookup");
             bi = reflectField(elClz, "f_156807_", "byId");
@@ -1049,20 +1034,11 @@ public class HealthUtil {
 
             Class<?> essClz = Class.forName("net.minecraft.world.level.entity.EntitySectionStorage");
             gs = reflectMethod(essClz, "m_156895_", "getSection", long.class);
-            essGetOrCreate = reflectMethod(essClz, "m_156893_", "getOrCreateSection", long.class);
 
             Class<?> etlClz = Class.forName("net.minecraft.world.level.entity.EntityTickList");
             ea = reflectField(etlClz, "f_156903_", "active");
             ep = reflectField(etlClz, "f_156904_", "passive");
-            etlAdd = reflectMethod(etlClz, "m_156908_", "add", Entity.class);
 
-            edf = reflectField(Entity.class, "f_19804_", "entityData");
-            elf = reflectField(Entity.class, "f_19853_", "level");
-            slAddPlayer = reflectMethod(ServerLevel.class, "m_8853_", "addPlayer", ServerPlayer.class);
-            sccChunkMap = reflectField(ServerChunkCache.class, "f_8325_", "chunkMap");
-            cmUpdatePlayerStatus = reflectMethod(
-                Class.forName("net.minecraft.server.level.ChunkMap"), "m_140192_", "updatePlayerStatus",
-                ServerPlayer.class, boolean.class);
         } catch (ClassNotFoundException e) {
             System.err.println("[AdventurePower] HealthUtil: 内部类反射初始化失败，eradicateFromWorld 将不可用");
             LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
@@ -1078,14 +1054,6 @@ public class HealthUtil {
         ESS_GET_SECTION = gs;
         ETL_ACTIVE = ea;
         ETL_PASSIVE = ep;
-        ENTITY_DATA_FIELD = edf;
-        ENTITY_LEVEL_FIELD = elf;
-        ESM_ADD_ENTITY = esmAdd;
-        SL_ADD_PLAYER = slAddPlayer;
-        ETL_ADD = etlAdd;
-        ESS_GET_OR_CREATE_SECTION = essGetOrCreate;
-        SCC_CHUNK_MAP = sccChunkMap;
-        CM_UPDATE_PLAYER_STATUS = cmUpdatePlayerStatus;
     }
 
     /**
@@ -1310,370 +1278,6 @@ public class HealthUtil {
         }
     }
 
-    // ==================== v1.3.9 容器抹除防线（守护线程 + 世界容器重注册） ====================
-
-    /**
-     * 守护线程专用血量直读 —— 与 {@link #getHealthDirect} 不同，<b>绝不降级调用
-     * {@code getHealth()}</b>（降级会进入 TrueHealthMixin 注入链，跨线程触碰
-     * 非线程安全的 ProgressCache / LazyOptional）。反射句柄不可用时返回 NaN
-     * （调用方跳过该项检测）。
-     * <p>
-     * 读取路径：{@code Entity.entityData}（f_19804_，字段直读）→
-     * {@code SynchedEntityData.get(DATA_HEALTH_ID)}。
-     *
-     * @param target 目标实体
-     * @return 血量值；句柄不可用/读取失败返回 NaN
-     */
-    public static float readHealthForGuardian(LivingEntity target) {
-        if (DATA_HEALTH_ID_FIELD == null || DATA_HEALTH_ID == null || ENTITY_DATA_FIELD == null) {
-            return Float.NaN;
-        }
-        try {
-            Object entityData = ENTITY_DATA_FIELD.get(target);
-            if (entityData instanceof SynchedEntityData sed) {
-                Float value = sed.get(DATA_HEALTH_ID);
-                if (value != null) return value;
-            }
-        } catch (IllegalAccessException ignored) {
-        }
-        return Float.NaN;
-    }
-
-    /**
-     * 守护线程容器检测 —— 实体是否已从 {@code EntityLookup.byId}（f_156807_）
-     * 消失（容器级抹除的核心信号）。正常玩家恒在表中；被 killEntity 链抹除后
-     * 缺失。换维度中间窗口（remove 后 add 前）也会短暂缺失，由消费侧
-     * reason 门禁放行（CHANGED_DIMENSION 不修复）。
-     * <p>
-     * 纯读路径：{@code Entity.level}（f_19853_，字段直读，不调 level()）→
-     * {@code ServerLevel.entityManager}（f_143244_）→ {@code visibleEntityStorage}
-     * （f_157494_）→ {@code byId}（f_156807_）。
-     *
-     * @param target 目标实体
-     * @return true = 不在 byId 表（疑似被容器抹除）
-     */
-    public static boolean isMissingFromEntityLookup(Entity target) {
-        if (SL_ENTITY_MANAGER == null || ESM_VISIBLE_ENTITY_STORAGE == null || EL_BY_ID == null
-            || ENTITY_LEVEL_FIELD == null) {
-            return false;
-        }
-        try {
-            Object level = ENTITY_LEVEL_FIELD.get(target);
-            if (!(level instanceof ServerLevel sl)) return false;
-            Object esm = SL_ENTITY_MANAGER.get(sl);
-            if (esm == null) return false;
-            Object visibleEntityStorage = ESM_VISIBLE_ENTITY_STORAGE.get(esm);
-            if (visibleEntityStorage == null) return false;
-            Object byId = EL_BY_ID.get(visibleEntityStorage);
-            if (byId instanceof it.unimi.dsi.fastutil.ints.Int2ObjectMap) {
-                return !((it.unimi.dsi.fastutil.ints.Int2ObjectMap<?>) byId).containsKey(target.getId());
-            }
-        } catch (IllegalAccessException ignored) {
-        }
-        return false;
-    }
-
-    /**
-     * 把被容器级抹除（killEntity 链：EntitySection/EntityLookup/knownUuids/
-     * EntityTickList/players 直抹，绕过 {@code remove()}）的实体重新注册回
-     * {@code ServerLevel} 世界容器 —— 容器抹除防线的最终修复动作。
-     * <p>
-     * <b>策略</b>（逐级降级，每步独立 try-catch）：
-     * <ol>
-     *   <li>幂等清理残留（镜像 eradicateFromWorld 的 remove 侧，防原版入口
-     *       重复 add 造成 ClassInstanceMultiMap 双份）</li>
-     *   <li>玩家优先走原版入口 {@code ServerLevel.addPlayer}（m_8853_——
-     *       Forge 47.4.10 binpatch 版内部完成 ESM 注册 + tick list + players +
-     *       ServerChunkCache 恢复）</li>
-     *   <li>原版入口 {@code PersistentEntitySectionManager.addEntity}
-     *       （m_157538_，恢复 section/EntityLookup/knownUuids/回调链）</li>
-     *   <li>两者均失败 → 手工镜像（byId/byUuid/knownUuids/EntityTickList.add
-     *       m_156908_/sectionStorage.getOrCreateSection m_156893_ +
-     *       ClassInstanceMultiMap 幂等 add + players 列表）</li>
-     * </ol>
-     * 原版入口（②③）均<b>验证式</b>：invoke 后复查 byId 确认实际注册成功
-     * （addPlayer 可能被其他模组 cancel EntityJoinLevelEvent 提前 return；
-     * addEntity 可能因 knownUuids 重复失败），失败继续降级链。
-     * 完成后 {@code clearRemovedFlag} 清 removalReason；实体恢复 tick 由现有
-     * TrueHealthMixin 自检接管。<b>保留原 id</b>（byId 槽已空、id 计数器不回退，
-     * 重分配会破坏客户端实体关联）。
-     * <p>
-     * <b>已知边界（审查披露）</b>：<ul>
-     *   <li>ChunkMap 玩家区块加载状态经 ⑤ {@code updatePlayerStatus(sp, true)}
-     *       （m_140192_）恢复（PlayerMap/DistanceManager 玩家条目）；TrackedEntity
-     *       由 addPlayer → onTrackingStart → ServerChunkCache.addEntity 链路恢复
-     *       （其他玩家视角重新可见）。该步失败时玩家重登/换维度自愈</li>
-     *   <li>killEntity 玩家分支的经验/食物清零、lastSentHealth 等连接字段
-     *       <b>不恢复</b>（设计边界：防线只保实体存活，数据损失不补）</li>
-     * </ul>
-     *
-     * @param target 需要重新注册的实体
-     */
-    @SuppressWarnings("unchecked")
-    public static void addEntityBackToWorld(Entity target) {
-        if (ENTITY_LEVEL_FIELD == null || SL_ENTITY_MANAGER == null) return;
-        Object levelObj;
-        try {
-            levelObj = ENTITY_LEVEL_FIELD.get(target);
-        } catch (IllegalAccessException e) {
-            return;
-        }
-        if (!(levelObj instanceof ServerLevel sl)) return;
-        try {
-            Object esm = SL_ENTITY_MANAGER.get(sl);
-            if (esm == null) return;
-
-            // ① 幂等清理残留（防双份）
-            clearContainerResidue(sl, esm, target);
-
-            // ② 玩家优先原版入口：ServerLevel.addPlayer（Forge 47.4.10 binpatch 版内部
-            //    完成 ESM 注册 + tick list + players 列表 + ServerChunkCache 恢复）。
-            //    ⚠️ 验证式（M-2 防护）：addPlayer 可能被其他模组 cancel
-            //    EntityJoinLevelEvent 而提前 return（什么都不做）——必须复查 byId
-            //    确认实际注册成功，失败继续降级链，否则玩家停留在半注册态
-            //    且每次重试"先清后败"永久循环。
-            boolean added = false;
-            if (target instanceof ServerPlayer && SL_ADD_PLAYER != null) {
-                try {
-                    SL_ADD_PLAYER.invoke(sl, target);
-                    added = !isMissingFromEntityLookup(target);
-                } catch (Exception ignored) {
-                }
-            }
-
-            // ③ 原版入口：PersistentEntitySectionManager.addEntity(EntityAccess, boolean)
-            if (!added && ESM_ADD_ENTITY != null) {
-                try {
-                    added = Boolean.TRUE.equals(ESM_ADD_ENTITY.invoke(esm, target, false));
-                    // addEntity 同样验证式：返回 true 但可能部分失败（如 knownUuids 已有该 UUID）
-                    if (added) {
-                        added = !isMissingFromEntityLookup(target);
-                    }
-                } catch (Exception ignored) {
-                }
-            }
-
-            // ④ 手工镜像回退
-            if (!added) {
-                mirrorAddToContainers(sl, esm, target);
-            }
-
-            // ⑤ 恢复玩家区块加载状态（H-2 修复）：容器抹除链会调
-            //    ChunkMap.updatePlayerStatus(player, false) 移除玩家的区块 ticket
-            //    （PlayerMap/DistanceManager 条目）——反向恢复，否则周围区块可能
-            //    在无其他玩家时被卸载（世界空白/实体被强制卸载）。
-            //    TrackedEntity 已由 addPlayer → onTrackingStart → ServerChunkCache
-            //    .addEntity 自动恢复（其他玩家视角重新可见），无需手工处理。
-            //    失败静默（不影响主流程，玩家重登/换维度可自愈）。
-            if (target instanceof ServerPlayer && CM_UPDATE_PLAYER_STATUS != null
-                && SCC_CHUNK_MAP != null) {
-                try {
-                    Object chunkSource = sl.getChunkSource();
-                    Object chunkMap = SCC_CHUNK_MAP.get(chunkSource);
-                    if (chunkMap != null) {
-                        CM_UPDATE_PLAYER_STATUS.invoke(chunkMap, target, true);
-                    }
-                } catch (Exception ignored) {
-                }
-            }
-
-            // ⑥ 字段兜底：removalReason 清空（isAddedToWorld 由调用方 Accessor 恢复）
-            clearRemovedFlag(target);
-        } catch (Exception ignored) {
-            // 静默 —— 容器重注册是兜底手段，不应因反射失败而中断主流程
-        }
-    }
-
-    /** 幂等清理：镜像 eradicateFromWorld ②③④⑤ 的 remove 侧，确保实体不在任何容器中（防原版入口重复 add） */
-    private static void clearContainerResidue(ServerLevel sl, Object esm, Entity target) {
-        int entityId = target.getId();
-        UUID entityUuid = target.getUUID();
-        try {
-            if (ESM_VISIBLE_ENTITY_STORAGE != null) {
-                Object visibleEntityStorage = ESM_VISIBLE_ENTITY_STORAGE.get(esm);
-                if (visibleEntityStorage != null) {
-                    if (EL_BY_ID != null) {
-                        try {
-                            Object byId = EL_BY_ID.get(visibleEntityStorage);
-                            if (byId instanceof it.unimi.dsi.fastutil.ints.Int2ObjectMap) {
-                                ((it.unimi.dsi.fastutil.ints.Int2ObjectMap<Object>) byId).remove(entityId);
-                            }
-                        } catch (IllegalAccessException ignored) {}
-                    }
-                    if (EL_BY_UUID != null) {
-                        try {
-                            Object byUuid = EL_BY_UUID.get(visibleEntityStorage);
-                            if (byUuid instanceof Map) {
-                                ((Map<?, ?>) byUuid).remove(entityUuid);
-                            }
-                        } catch (IllegalAccessException ignored) {}
-                    }
-                }
-            }
-            if (ESM_KNOWN_UUIDS != null) {
-                try {
-                    Object knownUuids = ESM_KNOWN_UUIDS.get(esm);
-                    if (knownUuids instanceof Set) {
-                        ((Set<?>) knownUuids).remove(entityUuid);
-                    }
-                } catch (IllegalAccessException ignored) {}
-            }
-            if (SL_ENTITY_TICK_LIST != null) {
-                try {
-                    Object tickList = SL_ENTITY_TICK_LIST.get(sl);
-                    if (tickList != null) {
-                        if (ETL_ACTIVE != null) {
-                            try {
-                                Object active = ETL_ACTIVE.get(tickList);
-                                if (active instanceof it.unimi.dsi.fastutil.ints.Int2ObjectMap) {
-                                    ((it.unimi.dsi.fastutil.ints.Int2ObjectMap<?>) active).remove(entityId);
-                                } else if (active instanceof List) {
-                                    ((List<?>) active).remove(target);
-                                }
-                            } catch (IllegalAccessException ignored) {}
-                        }
-                        if (ETL_PASSIVE != null) {
-                            try {
-                                Object passive = ETL_PASSIVE.get(tickList);
-                                if (passive instanceof List) {
-                                    ((List<?>) passive).remove(target);
-                                }
-                            } catch (IllegalAccessException ignored) {}
-                        }
-                    }
-                } catch (Exception ignored) {}
-            }
-            if (ESM_SECTION_STORAGE != null && ESS_GET_SECTION != null
-                && ES_CLASS_INSTANCE_MULTIMAP != null && CIMM_ALL_INSTANCES != null && SP_AS_LONG != null) {
-                try {
-                    Object sectionStorage = ESM_SECTION_STORAGE.get(esm);
-                    if (sectionStorage != null) {
-                        long sectionKey = (long) SP_AS_LONG.invoke(null, target.blockPosition());
-                        Object section = ESS_GET_SECTION.invoke(sectionStorage, sectionKey);
-                        if (section != null) {
-                            Object cmm = ES_CLASS_INSTANCE_MULTIMAP.get(section);
-                            if (cmm != null) {
-                                Object allInstances = CIMM_ALL_INSTANCES.get(cmm);
-                                if (allInstances instanceof List) {
-                                    ((List<?>) allInstances).remove(target);
-                                }
-                                if (CIMM_BY_CLASS != null) {
-                                    try {
-                                        Object byClass = CIMM_BY_CLASS.get(cmm);
-                                        if (byClass instanceof Map) {
-                                            for (Object list : ((Map<?, ?>) byClass).values()) {
-                                                if (list instanceof List) {
-                                                    ((List<?>) list).remove(target);
-                                                }
-                                            }
-                                        }
-                                    } catch (IllegalAccessException ignored) {}
-                                }
-                            }
-                        }
-                    }
-                } catch (Exception ignored) {}
-            }
-        } catch (Exception ignored) {}
-    }
-
-    /** 手工镜像注册：原版入口（addPlayer/addEntity）不可用时逐容器补回 */
-    @SuppressWarnings("unchecked")
-    private static void mirrorAddToContainers(ServerLevel sl, Object esm, Entity target) {
-        int entityId = target.getId();
-        UUID entityUuid = target.getUUID();
-        try {
-            // EntityLookup.byId / byUuid
-            if (ESM_VISIBLE_ENTITY_STORAGE != null) {
-                Object visibleEntityStorage = ESM_VISIBLE_ENTITY_STORAGE.get(esm);
-                if (visibleEntityStorage != null) {
-                    if (EL_BY_ID != null) {
-                        try {
-                            Object byId = EL_BY_ID.get(visibleEntityStorage);
-                            if (byId instanceof it.unimi.dsi.fastutil.ints.Int2ObjectMap) {
-                                ((it.unimi.dsi.fastutil.ints.Int2ObjectMap<Object>) byId).put(entityId, target);
-                            }
-                        } catch (IllegalAccessException ignored) {}
-                    }
-                    if (EL_BY_UUID != null) {
-                        try {
-                            Object byUuid = EL_BY_UUID.get(visibleEntityStorage);
-                            if (byUuid instanceof Map) {
-                                ((Map<Object, Object>) byUuid).put(entityUuid, target);
-                            }
-                        } catch (IllegalAccessException ignored) {}
-                    }
-                }
-            }
-            // knownUuids
-            if (ESM_KNOWN_UUIDS != null) {
-                try {
-                    Object knownUuids = ESM_KNOWN_UUIDS.get(esm);
-                    if (knownUuids instanceof Set) {
-                        ((Set<Object>) knownUuids).add(entityUuid);
-                    }
-                } catch (IllegalAccessException ignored) {}
-            }
-            // EntityTickList —— 用原版 add（m_156908_），迭代中自动写入 passive 表，直写 active 有迭代破坏风险
-            if (ETL_ADD != null) {
-                try {
-                    Object tickList = SL_ENTITY_TICK_LIST.get(sl);
-                    if (tickList != null) {
-                        ETL_ADD.invoke(tickList, target);
-                    }
-                } catch (Exception ignored) {}
-            }
-            // EntitySection + ClassInstanceMultiMap（幂等 add：allInstances + 按类型 byClass 分列表）
-            if (ESM_SECTION_STORAGE != null && ESS_GET_OR_CREATE_SECTION != null
-                && ES_CLASS_INSTANCE_MULTIMAP != null && CIMM_ALL_INSTANCES != null
-                && CIMM_BY_CLASS != null && SP_AS_LONG != null) {
-                try {
-                    Object sectionStorage = ESM_SECTION_STORAGE.get(esm);
-                    if (sectionStorage != null) {
-                        long sectionKey = (long) SP_AS_LONG.invoke(null, target.blockPosition());
-                        Object section = ESS_GET_OR_CREATE_SECTION.invoke(sectionStorage, sectionKey);
-                        if (section != null) {
-                            Object cmm = ES_CLASS_INSTANCE_MULTIMAP.get(section);
-                            if (cmm != null) {
-                                Object allInstances = CIMM_ALL_INSTANCES.get(cmm);
-                                if (allInstances instanceof List) {
-                                    ((List<Object>) allInstances).add(target);
-                                }
-                                Object byClass = CIMM_BY_CLASS.get(cmm);
-                                if (byClass instanceof Map) {
-                                    for (Map.Entry<?, ?> entry : ((Map<?, ?>) byClass).entrySet()) {
-                                        if (entry.getKey() instanceof Class<?> clz && clz.isInstance(target)
-                                            && entry.getValue() instanceof List) {
-                                            ((List<Object>) entry.getValue()).add(target);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch (Exception ignored) {}
-            }
-            // 玩家级：ServerLevel.players（f_8546_）加回（原版 addPlayer 失败时的兜底）
-            if (target instanceof ServerPlayer && SL_PLAYERS_FIELD != null) {
-                try {
-                    Object players = SL_PLAYERS_FIELD.get(sl);
-                    if (players instanceof List && !((List<?>) players).contains(target)) {
-                        ((List<Object>) players).add(target);
-                    }
-                } catch (IllegalAccessException ignored) {}
-            }
-        } catch (Exception ignored) {}
-    }
-
-    /**
-     * {@link #clearRemovedFlag(LivingEntity)} 的 Entity 重载 —— 容器重注册
-     * （addEntityBackToWorld）的入参是 Entity 泛型。
-     */
-    public static void clearRemovedFlag(Entity target) {
-        if (target instanceof LivingEntity le) {
-            clearRemovedFlag(le);
-        }
-    }
 
     // ==================== 饱食度直写 ====================
 
