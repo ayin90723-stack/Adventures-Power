@@ -394,6 +394,29 @@ public abstract class TrueHealthMixin {
         }
     }
 
+    // ===== 防直接死亡：kill() HEAD =====
+    // SRG m_6074_ = kill()（1.20.1 无参，内部调 die(genericKill)）。
+
+    /**
+     * 拦截 {@code kill()} (SRG {@code m_6074_})——kill 内部走 {@code die()}，
+     * 正常链已被 {@link #onDie} 覆盖；但<b>子类覆写 kill 时调用直达覆写版，
+     * die 注入不在分派链上</b>（与 isAlive 覆写绕过同族，见 ClassPointerGuard）——
+     * 本注入在方法级补防。门禁与 onDie 一致：备份血量 &gt; 0 → cancel。
+     */
+    @Inject(method = "m_6074_", at = @At("HEAD"), cancellable = true)
+    private void onKill(CallbackInfo ci) {
+        LivingEntity self = (LivingEntity) (Object) this;
+        IAdventureProgress progress = gatedProgress(self);
+        if (progress == null) return;
+        if (progress.getBackupHealth() > 0.0F) {
+            if (debugLog()) {
+                DebugLog.trueHealth("[MME-TrueHealth] 拦截外部 kill() 调用！" +
+                    " backup=" + progress.getBackupHealth() + " -> cancel");
+            }
+            ci.cancel();
+        }
+    }
+
     // ===== 存活性自检：tick() HEAD =====
 
     /**

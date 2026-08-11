@@ -396,7 +396,10 @@ public class PlayerStateHandler {
      * 庇护无敌：无敌期内取消所有攻击事件。
      * <p>
      * HIGHEST 优先级——在伤害处理中优先于其他防御（灵巧闪避/伤害抗性等）。
-     * 与原版无敌语义一致，{@code BYPASSES_INVULNERABILITY}（/kill、虚空）不拦截。
+     * v1.4.0 预更新：取消 BYPASSES_INVULNERABILITY 豁免（原与原版无敌语义一致
+     * 放行 /kill、虚空等穿透无敌伤害）——庇护无敌期为绝对无敌，与真血体系的
+     * kill()/die() 拦截语义一致。注：/kill 指令走 kill()→die() 不经攻击事件，
+     * 该事件覆盖不到，由 TrueHealthMixin kill() 拦截兜底。
      */
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onSanctuaryDamage(LivingAttackEvent event) {
@@ -406,7 +409,6 @@ public class PlayerStateHandler {
 
         AbilityGate.getActiveProgress(player, AbilityIds.ACTIVE_SKILL).ifPresent(progress -> {
             if (!progress.isSanctuaryInvulnerable(player.level().getGameTime())) return;
-            if (event.getSource().is(DamageTypeTags.BYPASSES_INVULNERABILITY)) return;
             event.setCanceled(true);
         });
     }
