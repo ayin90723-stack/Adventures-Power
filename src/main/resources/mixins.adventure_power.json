@@ -12,6 +12,8 @@
         "PiercingGazePlayerAttackMixin",
         "HealingBlockMixin",
         "TrueHealthMixin",
+        "EntityLivenessMixin",
+        "EntityFieldsAccessor",
         "LivingEntityFieldsAccessor",
         "RejectHealthManipMixin",
         "RejectHealthManipDataMixin",

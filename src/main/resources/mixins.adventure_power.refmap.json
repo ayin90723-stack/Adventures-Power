@@ -12,6 +12,9 @@
         "com/ayin90723/adventure_power/mixin/LivingEntityFieldsAccessor": {
             "dead": "Lnet/minecraft/world/entity/LivingEntity;f_20890_",
             "deathTime": "Lnet/minecraft/world/entity/LivingEntity;f_20919_"
+        },
+        "com/ayin90723/adventure_power/mixin/EntityFieldsAccessor": {
+            "removalReason": "Lnet/minecraft/world/entity/Entity;f_146795_"
         }
     }
 }

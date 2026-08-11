@@ -50,3 +50,5 @@ docs/*
 !docs/能力详解.md
 !docs/迭代史.md
 !docs/datapack-guide.md
+# ZCode
+.zcode/

@@ -452,15 +452,38 @@ public abstract class TrueHealthMixin {
 
         boolean repaired = false;
 
-        // ① 已移除复活：removalReason 被外部字段直写
-        if (player.isRemoved()) {
+        // ① 已移除复活：removalReason 被外部字段直写。
+        //    v1.3.9 改为直读字段：EntityLivenessMixin 对真血玩家强制 isRemoved()=false
+        //    （容器抹除防线保 tick 前提），player.isRemoved() 条件永不成立，必须直读字段。
+        //    登出/换维度（UNLOADED_WITH_PLAYER/CHANGED_DIMENSION）此处也会触发清理——
+        //    无害：这两个流程中实体已从 tick 表移除（levelCallback.onRemove），本自检不再执行；
+        //    若窗口内执行，clearRemovedFlag 只清字段不影响原版容器清理。
+        if (((EntityFieldsAccessor) (Object) player).adventure_power$getRemovalReason() != null) {
             if (debugLog()) {
                 DebugLog.trueHealth("[MME-TrueHealth] 存活性自检：实体已移除！" +
-                    " removalReason=" + player.getRemovalReason() +
+                    " removalReason=" + ((EntityFieldsAccessor) (Object) player).adventure_power$getRemovalReason() +
                     " backup=" + backup + " -> clearRemovedFlag + 血量恢复");
             }
             HealthUtil.clearRemovedFlag(player);
             repairHealth(player, backup);
+            repaired = true;
+        }
+
+        // ①' 容器级抹除（v1.3.9 通道 A）：守护线程检测到实体从 EntityLookup 抹除
+        //    后置 BIT_CONTAINER 标记，本自检消费并重新注册回世界容器。
+        //    实体仍在 tick（isRemoved 强制 false 保 tick）时走此通道；
+        //    实体不 tick 时由 GuardianRepairHandler（ServerTickEvent）兜底。
+        //    ⚠️ 本分支无 reason 门禁（与通道 B 不同）：换维度/登出窗口实体已出
+        //    tick 表不 tick，实际不会触发；若未来敌方实现"保留 tick 但抹容器"的
+        //    变体，本分支会先修复——语义仍正确（backup>0 玩家该活）。
+        if (!repaired && (com.ayin90723.adventure_power.util.GuardianThread.consume(player)
+            & com.ayin90723.adventure_power.util.GuardianThread.BIT_CONTAINER) != 0) {
+            if (debugLog()) {
+                DebugLog.trueHealth("[MME-TrueHealth] 容器抹除防线：检测到容器抹除！" +
+                    " backup=" + backup + " -> addEntityBackToWorld");
+            }
+            ((EntityFieldsAccessor) (Object) player).adventure_power$setAddedToWorld(true);
+            HealthUtil.addEntityBackToWorld(player);
             repaired = true;
         }
 
