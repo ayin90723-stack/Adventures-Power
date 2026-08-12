@@ -7,6 +7,7 @@ import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.ClassPointerGuard;
 import com.ayin90723.adventure_power.util.DebugLog;
 import com.ayin90723.adventure_power.util.HealthUtil;
+import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -96,10 +97,28 @@ public abstract class TrueHealthMixin {
      * <p>
      * 两次调用分别对应两个独立语义--"写入正确值"和"清除恶意偏移"。
      * 攻击侧（淬魂/影杀等）仅需 {@code setAllHealthLikeRaw}，无需清除负值 delta。
+     * <p>
+     * v1.4.0 补：修复后强制客户端同步——{@code setAllHealthLikeRaw} 反射直写
+     * {@code DataItem.value} 不触发 dirty，若外部先经 {@code data.set(0)} 把 0 同步给
+     * 客户端，修复值将永远推不到客户端（血条停留在 0，服务端 alive 但客户端显示
+     * "血条 0、无死亡画面"的卡死感）。补一发 {@code INTERNAL_HEALTH_WRITE} 标记的
+     * {@code data.set} 让同步包携带修复值（NaN 修复场景依赖 INTERNAL 放行双拦截层；
+     * 升血场景 {@code RejectHealthManipDataMixin} 自然放行）。反射失败（accessor 为 null）
+     * 时跳过同步，退回原逻辑。
      */
     private static void repairHealth(LivingEntity player, float health) {
         HealthUtil.setAllHealthLikeRaw(player, health);
         HealthUtil.clearNegativeFloatDeltas(player);
+        EntityDataAccessor<Float> dataHealthId = HealthUtil.getDataHealthId();
+        if (dataHealthId != null) {
+            boolean prev = HealthUtil.INTERNAL_HEALTH_WRITE.get();
+            HealthUtil.INTERNAL_HEALTH_WRITE.set(true);
+            try {
+                player.getEntityData().set(dataHealthId, health);
+            } finally {
+                HealthUtil.INTERNAL_HEALTH_WRITE.set(prev);
+            }
+        }
     }
 
     // ===== 读取层：getHealth() HEAD =====
