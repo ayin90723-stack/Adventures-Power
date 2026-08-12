@@ -58,8 +58,16 @@ public class RecoveryHandler {
 
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
             if (!AbilityGate.isActive(progress, AbilityIds.RAPID_RECOVERY)) return;
-            lastHurtTimestamps.put(player.getUUID(), player.level().getGameTime());
+            // 全局 tick：lastHurtTimestamps 是静态 Map（不随 Capability shiftTimers 平移），
+            // 用维度 gameTime 在进入时间轴更小的维度时恒判"刚受伤"，脱战判定失效
+            lastHurtTimestamps.put(player.getUUID(), serverTick(player));
         });
+    }
+
+    /** 服务器全局 tick（静态计时基准；无 server 引用时退回维度 gameTime） */
+    private static long serverTick(Player player) {
+        return player.level().getServer() != null
+            ? player.level().getServer().getTickCount() : player.level().getGameTime();
     }
 
     /**
@@ -72,7 +80,10 @@ public class RecoveryHandler {
 
         // ---- 休养生息 ----
         if (progress.isAbilityEnabled(AbilityIds.RAPID_RECOVERY)) {
-            long currentTime = player.level().getGameTime();
+            // 全局 tick 防跨维度冻结：lastRecoveryCheck/lastHurtTimestamps 是静态 Map，
+            // 不随 Capability shiftTimers 平移（v1.4.0 修复——此前用维度 gameTime，
+            // 主世界→下界/末地后 current-last 恒负，脱战再生永不执行）
+            long currentTime = serverTick(player);
 
             // 初始化上次受伤时间（防止启用/登录时误判为"已脱战"而立即回血）
             lastHurtTimestamps.putIfAbsent(player.getUUID(), currentTime);
@@ -191,9 +202,12 @@ public class RecoveryHandler {
 
         if (FriendlyFireProtection.isOwnerTarget(attacker, target)) return;
 
-        // 同 tick 去重（与淬魂/影杀/禁疗共享 COMBAT_TICK_DEDUP）：破敌之眼穿透三连的
-        // 双重 post 会让嗜血同 tick 双吸血——按 (attacker, target) 同 tick 只吸一次
-        if (!CombatAbilityHandler.tryMarkCombatTick(attacker, target)) return;
+        // 同 tick 去重（v1.4.0 改独立 key）：此前与淬魂/影杀/禁疗共享 COMBAT_TICK_DEDUP，
+        // 而 CombatAbilityHandler.onLivingHurt（NORMAL 优先级）对任意玩家攻击者先无条件
+        // 占位——LOW 优先级的本监听器同事件同 (attacker,target) 再占位必然失败，
+        // 攻击吸血永不执行（v1.3.5 引入的失效 bug）。独立前缀 key 只防穿透三连双重
+        // post 下嗜血自身同 tick 双吸血，与攻击方能力组不再互斥
+        if (!CombatAbilityHandler.tryMarkLifestealTick(attacker, target)) return;
 
         AbilityGate.getActiveProgress(attacker, AbilityIds.LIFESTEAL).ifPresent(progress -> {
             Ability ability = AbilityRegistry.get(AbilityIds.LIFESTEAL);

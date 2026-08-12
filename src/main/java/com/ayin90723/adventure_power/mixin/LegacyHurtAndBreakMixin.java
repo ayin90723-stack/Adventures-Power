@@ -18,14 +18,15 @@ import java.util.function.Consumer;
  * 不朽装备 / 受击坚韧 — 双重拦截耐久扣除。
  * <p>
  * <b>原版 hurtAndBreak</b>（{@code m_41622_}）：被原版和部分老模组使用。
- * <b>Forge hurt</b>（{@code m_220157_}）：Forge 1.20.1 新增方法，
+ * <b>原版 hurt</b>（{@code m_220157_}）：1.19.4 引入的新耐久接口（<b>非 Forge 新增</b>，
+ * tsrg 核实为原版 ItemStack.hurt(int, RandomSource, ServerPlayer)），
  * LostEngine 等现代模组通过此方法消耗耐久。两个方法是独立实现，
  * Forge hurt 不会内部调用原版 hurtAndBreak——因此必须双点注入。
  * <p>
  * {@code m_220157_} 返回 {@code boolean}（物品是否损坏），
  * 返回 {@code false} 可阻止调用方（如 LostEngine）的"物品破碎→删除"逻辑。
  * <p>
- * SRG 名:
+ * SRG 名（均为<b>原版</b>方法，注意勿按"Forge 方法需 remap=false"处理）:
  * <ul>
  *   <li>{@code m_41622_ (ILnet/minecraft/world/entity/LivingEntity;Ljava/util/function/Consumer;)V hurtAndBreak}</li>
  *   <li>{@code m_220157_ (ILnet/minecraft/util/RandomSource;Lnet/minecraft/server/level/ServerPlayer;)Z hurt}</li>

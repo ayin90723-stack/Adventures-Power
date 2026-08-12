@@ -394,7 +394,12 @@ public abstract class TrueHealthMixin {
      * 等副作用发生。同时通过 {@link #onIsDeadOrDying} 确保即使 {@code die()}
      * 被绕过，实体也不会被 Minecraft 移除。</p>
      *
-     * <p>事件层兜底：若本 Mixin 注入被 ASM 绕过（die() 照常执行并 post
+     * <p><b>v1.4.0 边界修正</b>：本注入挂在 {@code LivingEntity.die}，对<b>玩家无效</b>——
+     * 1.20.1 的 {@code ServerPlayer.die} 是完整覆写且不调 super（字节码核实），虚拟分派
+     * 直达覆写版。玩家侧由 {@link TrueHealthServerPlayerMixin}（@Mixin(ServerPlayer.class)
+     * HEAD cancel）补防，门禁与本注入一致；本注入保留覆盖其它直接调用 die() 的场景。</p>
+     *
+     * <p>事件层兜底：若 Mixin 层均被 ASM 绕过（die() 照常执行并 post
      * {@code LivingDeathEvent}），由 {@link com.ayin90723.adventure_power.handler.TrueHealthHandler}
      * 在事件层 HIGH 优先级 cancel 死亡事件，作为最后防线。</p>
      */

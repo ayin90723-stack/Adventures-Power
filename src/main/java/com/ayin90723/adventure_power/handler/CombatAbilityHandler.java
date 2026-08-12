@@ -58,13 +58,22 @@ public class CombatAbilityHandler {
     /** 攻击方能力同 tick 结算去重表：(attacker:target) 同 tick 只结算一次。
      *  防破敌之眼穿透三连的双重 post（手动 postHurtEvent + actuallyHurt 内
      *  ForgeHooks.onLivingHurt 二次 post）导致淬魂/影杀/禁疗/嗜血同 tick 双结算；
-     *  ServerTickEvent END 每 tick 清空（与影杀 SHADOW_KILL_TICKED 同生命周期）。 */
+     *  ServerTickEvent END 每 tick 清空（与影杀 SHADOW_KILL_TICKED 同生命周期）。
+     *  v1.4.0：嗜血改走 {@link #tryMarkLifestealTick} 独立前缀 key——本表被
+     *  CombatAbilityHandler（NORMAL 优先级）对任意玩家攻击者无条件先占位，
+     *  共享 key 会让 LOW 优先级的嗜血监听器永远被跳过（v1.3.5 引入的失效 bug） */
     private static final Set<String> COMBAT_TICK_DEDUP = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /** 攻击方能力同 tick 去重入口（RecoveryHandler 嗜血等跨类调用）：
      *  add 成功 = 本 tick 首次结算；失败 = 已结算过，调用方应跳过 */
     public static boolean tryMarkCombatTick(Player attacker, LivingEntity target) {
         return COMBAT_TICK_DEDUP.add(attacker.getUUID() + ":" + target.getUUID());
+    }
+
+    /** 嗜血专用同 tick 去重（v1.4.0 新增）：独立前缀 key，与攻击方能力组不互斥——
+     *  只防嗜血自身在穿透三连的双重 post 下同 tick 双吸血 */
+    public static boolean tryMarkLifestealTick(Player attacker, LivingEntity target) {
+        return COMBAT_TICK_DEDUP.add("lifesteal:" + attacker.getUUID() + ":" + target.getUUID());
     }
 
     /** 每 tick 清空去重表（tick 末，跨 tick 的攻击不受影响） */

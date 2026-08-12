@@ -67,6 +67,11 @@ public class DamageUtil {
      * <p>
      * {@code DamageType} registry 是全局的，首次调用时从 {@code level} 获取
      * {@code registryAccess} 缓存 {@code Holder}，后续调用直接复用。
+     * <p>
+     * <b>已知边界</b>（v1.4.0 注释）：/reload 重建 dynamic registry 后旧 Holder
+     * 仍引用旧条目——判定入口 {@link #isInternalSource} 走 message_id 字符串完全
+     * 不受影响；仅数据包覆盖本模组 damage_type 的 exhaustion 等字段时 /reload
+     * 后不生效（无实际影响，保持缓存避免热路径查 registry）。
      *
      * @param level  目标所在维度
      * @param source 造成伤害的实体（攻击者）

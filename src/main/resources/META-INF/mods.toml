@@ -5,6 +5,9 @@ license="${mod_license}"
 [[mods]]
 modId="${mod_id}"
 version="${mod_version}"
+# displayName 保持英文硬编码：gradle.properties 的 mod_name（中文）经 Gradle expand 时
+# 以 ISO-8859-1 读取会 mojibake 双编码乱码（实测 jar 内 displayName 乱码），
+# 中文展示名由 lang 键 / 描述承担
 displayName="Adventure's Power"
 authors="ayin90723-stack"
 description='''Adventure's Power — 冒险的力量。以冒险旅程驱动成长的 Minecraft 模组。

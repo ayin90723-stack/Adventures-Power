@@ -4,9 +4,12 @@ import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
+import com.ayin90723.adventure_power.handler.CapabilityLifecycleHandler;
 import com.ayin90723.adventure_power.milestone.Milestone;
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.util.AdventureItemNbtUtil;
 import com.ayin90723.adventure_power.util.MilestoneRegistry;
+import com.ayin90723.adventure_power.util.PersistentDataKeys;
 import com.ayin90723.adventure_power.util.SyncUtil;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -30,14 +33,19 @@ import java.util.Set;
 /**
  * 冒险的力量 — 指令后门（op 2 级权限）。
  * <p>
- * 仅提供两个状态变更功能，无法绕过里程碑解锁未被禁用的能力：
+ * 仅提供状态变更功能，无法绕过里程碑解锁未被禁用的能力（一键全解锁除外，属运维功能）：
  * <ul>
  *   <li>{@code /ap unlock milestone <id> [target]} — 解锁里程碑（走 grantMilestone 唯一入口，含觉醒级联）</li>
+ *   <li>{@code /ap unlock all [target]} — 一键全解锁全部里程碑（含觉醒；原持有终点物品的测试入口已移除，
+ *       全解锁能力迁移至此指令，op 专用）</li>
  *   <li>{@code /ap unlock ability <id> [target]} — 解锁一个<b>被数据包禁用</b>的能力（per-player，NBT 持久化；
  *       该能力保持其归属里程碑的 countAtUnlock，成长公式按原设计计算）</li>
+ *   <li>{@code /ap activate [target]} — 补发冒险的开始并激活冒险者身份（应对首次发放物品丢失后的
+ *       GOT_BEGIN_KEY 锁死；已激活玩家返回提示）</li>
  *   <li>{@code /ap disabled} — 列出当前被禁用的能力</li>
  * </ul>
- * 目标省略时默认指令执行者自己。非禁用能力、未知 ID、未佩戴冒险饰品的玩家都会被拒绝。
+ * 目标省略时默认指令执行者自己。非禁用能力、未知 ID、未佩戴冒险饰品的玩家都会被拒绝
+ * （activate 与 unlock all 不要求已佩戴饰品）。
  */
 @Mod.EventBusSubscriber(modid = AdventurePower.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class AdventurePowerCommand {
@@ -79,12 +87,20 @@ public class AdventurePowerCommand {
                         .executes(ctx -> unlockMilestone(ctx, getPlayer(ctx, null)))
                         .then(Commands.argument(ARG_TARGET, EntityArgument.player())
                             .executes(ctx -> unlockMilestone(ctx, getPlayer(ctx, ARG_TARGET))))))
+                .then(Commands.literal("all")
+                    .executes(ctx -> unlockAll(ctx, getPlayer(ctx, null)))
+                    .then(Commands.argument(ARG_TARGET, EntityArgument.player())
+                        .executes(ctx -> unlockAll(ctx, getPlayer(ctx, ARG_TARGET)))))
                 .then(Commands.literal("ability")
                     .then(Commands.argument(ARG_ABILITY, StringArgumentType.word())
                         .suggests(DISABLED_ABILITY_SUGGESTIONS)
                         .executes(ctx -> unlockAbility(ctx, getPlayer(ctx, null)))
                         .then(Commands.argument(ARG_TARGET, EntityArgument.player())
                             .executes(ctx -> unlockAbility(ctx, getPlayer(ctx, ARG_TARGET)))))))
+            .then(Commands.literal("activate")
+                .executes(ctx -> activate(ctx, getPlayer(ctx, null)))
+                .then(Commands.argument(ARG_TARGET, EntityArgument.player())
+                    .executes(ctx -> activate(ctx, getPlayer(ctx, ARG_TARGET)))))
             .then(Commands.literal("disabled")
                 .executes(AdventurePowerCommand::listDisabled));
     }
@@ -163,10 +179,16 @@ public class AdventurePowerCommand {
             return 0;
         }
         if (!progress.grantAbilityByCommand(id)) {
-            // 已指令解锁过但当前在 P 面板中被手动关闭：提示真实状态，不误报成功
+            // 已指令解锁过但当前被手动关闭（disabledAbilities 含该能力）：直接补开
+            //（v1.4.0——此前仅提示"去面板手动开启"，若该能力在面板无 UI 入口则永久关着；
+            // 走到此分支时 isAbilityEnabled 必为 false，toggle 一次即恢复开启）
+            progress.toggleAbility(id);
+            SyncUtil.syncCapabilityToPersistent(player, progress);
+            AdventureItemNbtUtil.syncAllAdventureItemNbt(player, progress);
+            SyncUtil.syncToClient(player);
             ctx.getSource().sendSuccess(
-                () -> Component.translatable("command.adventure_power.ability_toggled_off", id), false);
-            return 0;
+                () -> Component.translatable("command.adventure_power.ability_unlocked", id), false);
+            return 1;
         }
         SyncUtil.syncCapabilityToPersistent(player, progress);
         // 同步物品 NBT 第三层备份（MME_CommandGranted）——否则指令解锁记录只存在于
@@ -176,6 +198,99 @@ public class AdventurePowerCommand {
         ctx.getSource().sendSuccess(
             () -> Component.translatable("command.adventure_power.ability_unlocked", id), false);
         return 1;
+    }
+
+    // ===== /ap unlock all [target]（一键全解锁，op 运维功能） =====
+
+    /**
+     * 一键全解锁：逐里程碑解锁 + 觉醒级联（终点替换/计分板/同步走 activateFinalStageIfReady
+     * 唯一级联入口）。原 PlayerTickHandler「持有冒险的终点→全解锁」测试入口已移除，
+     * 终点物品不再有测试作用（且已移出创造物品栏），全解锁能力仅保留于此指令。
+     */
+    private static int unlockAll(CommandContext<CommandSourceStack> ctx, ServerPlayer player)
+            throws CommandSyntaxException {
+        var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
+        if (progressOpt.isEmpty()) {
+            ctx.getSource().sendFailure(
+                Component.translatable("command.adventure_power.need_curio", player.getDisplayName()));
+            return 0;
+        }
+        IAdventureProgress progress = progressOpt.get();
+        if (progress.isFullyUnlocked()) {
+            ctx.getSource().sendSuccess(
+                () -> Component.translatable("command.adventure_power.already_fully_unlocked"), false);
+            return 0;
+        }
+        if (!progress.isAdventurer()) {
+            progress.activateAdventurer();
+        }
+        int unlocked = 0;
+        for (Milestone m : MilestoneRegistry.getAll()) {
+            if (!progress.isMilestoneUnlocked(m.id())) {
+                progress.unlockMilestone(m.id());
+                unlocked++;
+            }
+        }
+        // 觉醒级联唯一入口：终点替换 + fullyUnlocked + 计分板 + 同步
+        AdventureProgressCapability.activateFinalStageIfReady(player, progress);
+        // 物品 NBT 第三层备份同步（v1.4.0 发布前审查补）：activateFinalStageIfReady 的
+        // replaceStack 只把旧 begin NBT 原样拷给新 end——本次解锁的里程碑不写入任何
+        // 饰品，capability+persistentData 双丢的深边界会少恢复本次解锁进度
+        AdventureItemNbtUtil.syncAllAdventureItemNbt(player, progress);
+        // 防御：注册表为空/未初始化时级联无操作（activateAdventurer 内存态无同步会
+        // 登出即丢）。实际不可达——AddReloadListener 启动即初始化且内置兜底 ≥10 里程碑
+        if (!progress.isFullyUnlocked()) {
+            SyncUtil.syncCapabilityToPersistent(player, progress);
+            SyncUtil.syncToClient(player);
+        }
+        // 翱翔立即同步（与 grantMilestone 同款，防两处 END handler 顺序竞态）
+        if (progress.isAbilityEnabled(AbilityIds.SOAR) && !player.getAbilities().mayfly
+            && !player.getAbilities().instabuild && !player.isSpectator()) {
+            player.getAbilities().mayfly = true;
+            player.onUpdateAbilities();
+        }
+        final int count = unlocked;
+        ctx.getSource().sendSuccess(
+            () -> Component.translatable("command.adventure_power.unlock_all_done", count), false);
+        return 1;
+    }
+
+    // ===== /ap activate [target]（补发饰品 + 激活冒险者） =====
+
+    /**
+     * 补发冒险的开始并激活冒险者身份。
+     * <p>
+     * 应对首次发放锁死场景：GOT_BEGIN_KEY 在发放瞬间置位，未激活玩家若丢失饰品
+     * （落地消失/丢弃）将永不补发、永远无法激活。本指令先清除该标记再走
+     * {@code giveAdventureBeginIfNeeded} 补发链，之后由 {@code checkAndActivateAdventurer}
+     * 完成激活（含 fullyUnlocked 版本飞升玩家直接补激活的分支）。
+     */
+    private static int activate(CommandContext<CommandSourceStack> ctx, ServerPlayer player)
+            throws CommandSyntaxException {
+        var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
+        if (progressOpt.isEmpty()) {
+            ctx.getSource().sendFailure(
+                Component.translatable("command.adventure_power.need_curio", player.getDisplayName()));
+            return 0;
+        }
+        IAdventureProgress progress = progressOpt.get();
+        if (progress.isAdventurer()) {
+            ctx.getSource().sendSuccess(
+                () -> Component.translatable("command.adventure_power.already_adventurer"), false);
+            return 0;
+        }
+        // 清除首次发放标记以绕过锁死（仅未激活玩家执行；后续由 giveAdventureBeginIfNeeded 重新置位）
+        player.getPersistentData().remove(PersistentDataKeys.GOT_BEGIN_KEY);
+        CapabilityLifecycleHandler.giveAdventureBeginIfNeeded(player);
+        CapabilityLifecycleHandler.checkAndActivateAdventurer(player);
+        if (progress.isAdventurer()) {
+            ctx.getSource().sendSuccess(
+                () -> Component.translatable("command.adventure_power.activated"), false);
+            return 1;
+        }
+        ctx.getSource().sendFailure(
+            Component.translatable("command.adventure_power.activate_failed", player.getDisplayName()));
+        return 0;
     }
 
     // ===== /ap disabled =====

@@ -19,9 +19,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * <b>为什么必须</b>：外部模组（如终极骷髅 killEntity 链）直接操作世界容器
  * （EntitySection/EntityLookup/knownUuids 直抹，绕过 {@code remove()}）并直写
  * {@code removalReason} 后，原版 {@code ServerLevel.tick -> tickNonPassenger}
- * 见 {@code isRemoved()==true} 直接跳过玩家——实体不再 tick，{@link TrueHealthMixin}
- * 的 tick 存活性自检永不触发，玩家"卡死"（连接存活、不 tick、不可见）。
- * 本注入让玩家继续 tick，自检才有机会修复。
+ * 见 {@code isRemoved()==true} 直接跳过玩家——玩家从<b>世界 tick 流</b>脱离
+ * （不移动/不结算/对其他玩家不可见），连接存活但"卡死"。
+ * v1.4.0 注：{@code TrueHealthMixin} 的 tick 自检经
+ * {@code ServerGamePacketListenerImpl.tick -> player.doTick() -> super.tick()} 链
+ * 仍会每 tick 执行（与 ServerLevel 是否 tick 玩家无关），但玩家脱离世界 tick 流
+ * 本身即不可接受；本注入让玩家保持在世界 tick 流中，行为与自检修复都正常进行。
  * <p>
  * <b>登出/换维度安全性</b>：原版容器清理走 {@code remove() -> setRemoved(reason)
  * -> levelCallback.onRemove(reason)}（f_146801_ 回调），不读取 {@code isRemoved()}

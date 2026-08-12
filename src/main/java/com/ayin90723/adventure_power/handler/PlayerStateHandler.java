@@ -254,6 +254,35 @@ public class PlayerStateHandler {
             .withStyle(ChatFormatting.GOLD));
     }
 
+    /**
+     * 维度切换后强制重发 abilities 包（v1.4.0 修复翱翔失效）。
+     * <p>
+     * <b>根因</b>：三条维度切换路径的发包行为不同（字节码核实）——
+     * <ul>
+     *   <li>传送门 {@code ServerPlayer.changeDimension}（m_5489_）：无条件重发
+     *       {@code ClientboundPlayerAbilitiesPacket} ✓</li>
+     *   <li>死亡重生 {@code PlayerList.respawn}（m_11289_）：重发 abilities ✓
+     *       （另有 {@code restoreSoarFlight} 兜底）</li>
+     *   <li><b>末地出口 {@code ServerPlayer.teleportTo}（m_8999_）：不重发</b> ✗——
+     *       客户端收 {@code ClientboundRespawnPacket} 后重建 LocalPlayer（abilities 重置
+     *       为默认 mayfly=false），服务端实体未变 mayfly 仍 true——tick 兜底只看服务端
+     *       状态不触发，无人重发 → 客户端"翱翔失效"（按空格无反应）直到下次 abilities
+     *       同步（切游戏模式/死亡/toggle/重登）</li>
+     * </ul>
+     * 本监听挂 {@code PlayerChangedDimensionEvent}（传送门与末地出口两路径均 fire，
+     * 已字节码验证）：翱翔玩家无条件重发当前 abilities，恢复客户端 mayfly/flying 状态。
+     */
+    @SubscribeEvent
+    public static void onDimensionChange(PlayerEvent.PlayerChangedDimensionEvent event) {
+        Player player = event.getEntity();
+        if (player.level().isClientSide()) return;
+        AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
+            if (progress.isAbilityEnabled(AbilityIds.SOAR)) {
+                player.onUpdateAbilities();
+            }
+        });
+    }
+
     /** 游戏模式切换后恢复翱翔飞行能力（原版会在切回生存时重置 mayfly）。
      *  立即同步，不等 tick handler，避免竞态条件。 */
     @SubscribeEvent

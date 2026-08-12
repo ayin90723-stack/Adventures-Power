@@ -40,6 +40,8 @@ public abstract class LootItemConditionalFunctionMixin {
      * Mixin 在启动时不会报错，但满载而归对 function 级 conditions 的绕过将停止工作，
      * 导致「杀羊不掉熟肉」等 bug 复现。require=0 是为了兼容不同 Forge 版本间的微小
      * 字节码差异，避免 Mixin 注入失败导致整个模组崩溃。
+     * v1.4.0 起补 {@code expect = 1}：注入点缺失时在日志输出 WARN（不再纯静默），
+     * 便于启动后排查。
      *
      * 失效影响：满载归还的 "无条件执行所有 function" 能力退化。
      * 不影响 entry 级 canRun 和 pool 级 addRandomItems，这两层逻辑由
@@ -49,6 +51,7 @@ public abstract class LootItemConditionalFunctionMixin {
         method = "apply",
         at = @At(value = "INVOKE", target = "Ljava/util/function/Predicate;test(Ljava/lang/Object;)Z"),
         require = 0,
+        expect = 1,
         remap = false
     )
     private boolean adventure_power$lootAllBypassFunctionCond(Predicate<LootContext> predicate, Object context) {

@@ -125,6 +125,14 @@ public class NetworkHandler {
         ctx.get().setPacketHandled(true);
     }
 
+    /** 玩家登出时清理全部限频表（v1.4.0：防长期服务器 UUID 累积；由 PlayerTickHandler.onPlayerLogout 调用） */
+    public static void clearCooldowns(java.util.UUID uuid) {
+        AbilityTogglePacket.TOGGLE_COOLDOWN.remove(uuid);
+        AdventureSyncRequestPacket.SYNC_REQUEST_COOLDOWN.remove(uuid);
+        SkillSwitchPacket.SWITCH_COOLDOWN.remove(uuid);
+        ActiveSkillPacket.SKILL_COOLDOWN.remove(uuid);
+    }
+
     // ===== 包定义 =====
 
     /** 客户端→服务端：二段跳请求 */
@@ -315,7 +323,7 @@ public class NetworkHandler {
          *  每次 toggle 服务端都会回发全量 Capability NBT（含里程碑元数据，KB 级），
          *  恶意客户端快速来回 toggle 会放大服务器→客户端流量——限 5 tick（0.25s）一次
          *  （间隔不影响正常 UI 点击节奏）。用全局 tick 而非维度 gameTime：跨维度基准错位。 */
-        private static final java.util.Map<java.util.UUID, Long> TOGGLE_COOLDOWN =
+        static final java.util.Map<java.util.UUID, Long> TOGGLE_COOLDOWN =
             new java.util.concurrent.ConcurrentHashMap<>();
 
         public static void handle(AbilityTogglePacket msg, Supplier<NetworkEvent.Context> ctx) {
@@ -364,7 +372,7 @@ public class NetworkHandler {
          *  恶意客户端刷请求会放大服务器→客户端流量——限 1s（20 tick）一次。
          *  用全局 tick 而非维度 gameTime：1.20.1 每维度计时独立，跨维度会基准错位。
          *  put 时顺带清理超时条目（防长期服务器 UUID 累积） */
-        private static final java.util.Map<java.util.UUID, Long> SYNC_REQUEST_COOLDOWN =
+        static final java.util.Map<java.util.UUID, Long> SYNC_REQUEST_COOLDOWN =
             new java.util.concurrent.ConcurrentHashMap<>();
 
         public static void handle(AdventureSyncRequestPacket msg, Supplier<NetworkEvent.Context> ctx) {
@@ -401,12 +409,27 @@ public class NetworkHandler {
             return new ActiveSkillPacket(buf);
         }
 
+        /** 限频表：与 AbilityTogglePacket 同理——每次释放都会执行服务端 AABB 实体查询
+         *  （collectJudgmentTargets），恶意刷包放大查询开销（效果本身有 CD/GCD 强校验，
+         *  伪造包无法绕过冷却，这里只防查询放大）——限 5 tick 一次 */
+        static final java.util.Map<java.util.UUID, Long> SKILL_COOLDOWN =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
         public static void handle(ActiveSkillPacket msg, Supplier<NetworkEvent.Context> ctx) {
             if (ctx.get().getDirection() != NetworkDirection.PLAY_TO_SERVER) {
                 ctx.get().setPacketHandled(true);
                 return;
             }
-            runOnServer(ctx, player -> ActiveSkillHandler.handleSkillRelease(player, msg.skillIndex));
+            runOnServer(ctx, player -> {
+                long now = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer().getTickCount();
+                Long last = SKILL_COOLDOWN.get(player.getUUID());
+                if (last != null && now - last < 5) return; // 限频，静默丢弃
+                if (SKILL_COOLDOWN.size() > 2048) {
+                    SKILL_COOLDOWN.values().removeIf(t -> now - t > 6000); // 5 分钟超时清理
+                }
+                SKILL_COOLDOWN.put(player.getUUID(), now);
+                ActiveSkillHandler.handleSkillRelease(player, msg.skillIndex);
+            });
         }
     }
 
@@ -427,7 +450,7 @@ public class NetworkHandler {
         }
 
         /** 限频表：与 AbilityTogglePacket 同理——每次切换都会回发全量同步，限 5 tick 一次 */
-        private static final java.util.Map<java.util.UUID, Long> SWITCH_COOLDOWN =
+        static final java.util.Map<java.util.UUID, Long> SWITCH_COOLDOWN =
             new java.util.concurrent.ConcurrentHashMap<>();
 
         public static void handle(SkillSwitchPacket msg, Supplier<NetworkEvent.Context> ctx) {

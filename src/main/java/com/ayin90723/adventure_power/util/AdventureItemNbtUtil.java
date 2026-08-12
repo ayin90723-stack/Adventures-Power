@@ -144,12 +144,11 @@ public final class AdventureItemNbtUtil {
 
     // ===== 旧 NBT 迁移 =====
 
-    /** 清理玩家身上冒险饰品的旧 AdventureStage NBT（迁移到新里程碑格式） */
+    /** 清理玩家身上冒险饰品的旧 AdventureStage NBT（迁移到新里程碑格式）。
+     *  v1.4.0：改为覆盖全部冒险槽位（含 Curios）——此前只扫背包/盔甲/副手，
+     *  Curios 槽内旧键仅在 recover 路径才会被迁移，正常佩戴玩家身上可残留无害旧键 */
     public static void cleanOldStageNbt(Player player) {
-        ItemInventoryHelper.forEachInventorySlot(player, stack -> {
-            if (stack.is(ModItems.ADVENTURE_BEGIN.get()) || stack.is(ModItems.ADVENTURE_END.get()))
-                migrateOldStage(stack);
-        });
+        ItemInventoryHelper.forEachAdventureSlot(player, stack -> migrateOldStage(stack));
     }
 
     /** 旧 AdventureStage NBT 迁移到新里程碑格式 */
@@ -170,28 +169,28 @@ public final class AdventureItemNbtUtil {
     // ===== 冒险饰品替换 =====
 
     /** 全里程碑达成时，将冒险的开始替换为冒险的终点。
-     *  搜索顺序：Curios -> 背包 -> 盔甲 -> 副手 */
+     *  搜索顺序：Curios -> 背包 -> 盔甲 -> 副手。
+     *  v1.4.0：替换<b>全部</b>实例（此前只替换第一份）——创造模式取出的多份
+     *  冒险的开始会全部升级为终点，避免「终点仅通过替换获得」语义下多份 begin 残留；
+     *  每份替换独立 {@code new ItemStack}（v1.4.0 二次审查：共享实例会让多个槽位
+     *  指向同一对象，存在物品复制路径） */
     public static void replaceBeginWithEnd(Player player) {
-        ItemStack endItem = new ItemStack(ModItems.ADVENTURE_END.get());
-
-        // 1. 优先搜索 Curios 槽位（正常佩戴位置）
         boolean[] replaced = {false};
+
+        // 1. 优先搜索 Curios 槽位（正常佩戴位置），替换全部 begin
         ItemInventoryHelper.forEachCuriosSlot(player, (handler, i, stack) -> {
-            if (!replaced[0] && stack.is(ModItems.ADVENTURE_BEGIN.get())) {
+            if (stack.is(ModItems.ADVENTURE_BEGIN.get())) {
+                ItemStack endItem = new ItemStack(ModItems.ADVENTURE_END.get());
                 replaceStack(stack, endItem);
                 handler.getStacks().setStackInSlot(i, endItem);
                 replaced[0] = true;
             }
         });
 
-        // 2. 兜底搜索背包/盔甲/副手
-        if (!replaced[0]) {
-            ItemInventoryHelper.forEachInventoryList(player, list -> {
-                if (!replaced[0]) {
-                    replaced[0] = replaceInList(list, endItem);
-                }
-            });
-        }
+        // 2. 兜底搜索背包/盔甲/副手，替换全部 begin
+        ItemInventoryHelper.forEachInventoryList(player, list -> {
+            replaced[0] |= replaceAllInList(list);
+        });
 
         if (replaced[0]) {
             player.displayClientMessage(
@@ -201,16 +200,18 @@ public final class AdventureItemNbtUtil {
         // 注：完全解锁激活 + 计分板 + 数据同步由调用方 grantMilestone 统一处理，此处仅做物品替换
     }
 
-    /** 在物品列表中查找冒险的开始并替换 */
-    private static boolean replaceInList(NonNullList<ItemStack> list, ItemStack endItem) {
+    /** 将物品列表中所有冒险的开始替换为终点（每份独立实例），返回是否发生替换 */
+    private static boolean replaceAllInList(NonNullList<ItemStack> list) {
+        boolean any = false;
         for (int i = 0; i < list.size(); i++) {
             if (list.get(i).is(ModItems.ADVENTURE_BEGIN.get())) {
+                ItemStack endItem = new ItemStack(ModItems.ADVENTURE_END.get());
                 replaceStack(list.get(i), endItem);
                 list.set(i, endItem);
-                return true;
+                any = true;
             }
         }
-        return false;
+        return any;
     }
 
     /** 将旧物品的 NBT 迁移到新物品 */

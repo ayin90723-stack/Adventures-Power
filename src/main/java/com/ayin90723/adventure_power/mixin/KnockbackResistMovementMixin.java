@@ -90,17 +90,22 @@ public abstract class KnockbackResistMovementMixin {
         return true;
     }
 
-    /** 正常移动链方法白名单（SRG 名，运行时栈帧方法名） */
+    /**
+     * 正常移动链方法白名单——SRG 名 + 官方名双收录（v1.4.0）：
+     * 运行时（生产）栈帧是 SRG 名；dev 环境（runClient）方法名保持官方名，
+     * 只收 SRG 名会导致 dev 下正常移动链豁免失效（跑跳/二段跳误 cancel 顿挫）。
+     */
     private static final Set<String> NORMAL_MOVEMENT_METHODS = Set.of(
-        "m_6478_",   // Entity.move
-        "m_7023_",   // Entity/LivingEntity/Player.travel
-        "m_8107_",   // LivingEntity/Player.aiStep
-        "m_19890_",  // Entity.absMoveTo(DDDFF)
-        "m_20248_",  // Entity.absMoveTo(DDD)
-        "m_6027_",   // Entity.moveTo(DDD)
-        "m_7678_",   // Entity.moveTo(DDDFF)
-        "m_20219_",  // Entity.moveTo(Vec3)
-        "m_20035_"   // Entity.moveTo(BlockPos, FF)
+        // Entity.move
+        "m_6478_", "move",
+        // Entity/LivingEntity/Player.travel
+        "m_7023_", "travel",
+        // LivingEntity/Player.aiStep
+        "m_8107_", "aiStep",
+        // Entity.absMoveTo(DDDFF) / absMoveTo(DDD)
+        "m_19890_", "m_20248_", "absMoveTo",
+        // Entity.moveTo(DDD) / moveTo(DDDFF) / moveTo(Vec3) / moveTo(BlockPos, FF)
+        "m_6027_", "m_7678_", "m_20219_", "m_20035_", "moveTo"
     );
 
     private static boolean isNormalMovementCaller() {

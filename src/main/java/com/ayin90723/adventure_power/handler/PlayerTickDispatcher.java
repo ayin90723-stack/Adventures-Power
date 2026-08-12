@@ -21,7 +21,7 @@ import net.minecraftforge.fml.common.Mod.EventBusSubscriber.Bus;
  * -> RecoveryHandler -> KnockbackResistHandler -> FortuneFavorHandler。各 handler 的
  * onTick 不再做门禁检查（由本分发器统一做），仅保留业务逻辑。
  * <p>
- * 开局安全网（补发饰品 + 测试入口）需对非冒险者执行，在门禁前调用。
+ * 开局安全网（补发饰品 + 自动激活冒险者）需对非冒险者执行，在门禁前调用。
  * 首次激活冒险者/全解锁后，本次 tick 用激活前 progress 快照，延迟 1 tick 进入
  * onTick（玩家无感知）。
  */
@@ -35,8 +35,8 @@ public class PlayerTickDispatcher {
         if (player.level().isClientSide()) return;
 
         var progress = AdventureProgressCapability.getAdventureProgress(player).orElse(null);
-        // 门禁前：开局安全网（需对非冒险者执行：补发饰品 + 测试入口全解锁）
-        PlayerTickHandler.tickSafetyNet(player, progress);
+        // 门禁前：开局安全网（需对非冒险者执行：补发饰品 + 自动激活冒险者）
+        PlayerTickHandler.tickSafetyNet(player);
 
         if (progress == null) return;
         if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;

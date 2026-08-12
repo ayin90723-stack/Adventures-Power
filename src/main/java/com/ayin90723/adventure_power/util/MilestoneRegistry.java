@@ -45,14 +45,18 @@ public class MilestoneRegistry {
         "survive_night", "first_death", "first_trade", "y_below", "first_kill",
         "enter_dimension", "reach_y", "obtain_item");
 
-    private static List<Milestone> milestones = List.of();
-    private static Map<ResourceLocation, Milestone> byAdvancement = Map.of();
-    private static Map<String, Milestone> byId = Map.of();
-    private static Map<String, List<Milestone>> byTriggerType = Map.of();
-    private static boolean initialized = false;
+    // v1.4.0：列表/索引引用 volatile——服务端线程 /reload 写入与渲染线程（tooltip）读取
+    // 间需要 happens-before；x86 引用替换原子兜底了实际风险，volatile 保证严格可见性语义
+    private static volatile List<Milestone> milestones = List.of();
+    private static volatile Map<ResourceLocation, Milestone> byAdvancement = Map.of();
+    private static volatile Map<String, Milestone> byId = Map.of();
+    private static volatile Map<String, List<Milestone>> byTriggerType = Map.of();
+    // v1.4.0：volatile（渲染线程 tooltip 经 isInitialized() 首个读取；写入位于 milestones
+    // 等 volatile 写之间，补 volatile 保证 JMM 可见性语义一致）
+    private static volatile boolean initialized = false;
 
     /** 当前生效的禁用能力黑名单（数据包 disabled_abilities，由 loadFromJson 维护；指令后门可解锁这些能力） */
-    private static Set<String> disabledAbilities = Set.of();
+    private static volatile Set<String> disabledAbilities = Set.of();
 
     /** 内置兜底递归保护：内置 JSON 自身损坏时避免无限递归 */
     private static boolean inBuiltinFallback = false;
@@ -136,7 +140,17 @@ public class MilestoneRegistry {
         JsonArray arr = root.getAsJsonArray("milestones");
         if (arr == null || arr.size() == 0) {
             LOGGER.error("[MilestoneRegistry] milestones 数组为空或缺失，回退到内置默认");
+            // v1.4.0：回退前保留已累加的黑名单——loadBuiltinDefaults 会重置
+            // disabledAbilities，若直接清空则被禁用的能力在内置里程碑中"复活"
+            // （/ap unlock ability 与觉醒门禁随之失效）
+            Set<String> keepDisabled = new HashSet<>(disabledAbilities);
             loadBuiltinDefaults();
+            if (!keepDisabled.isEmpty()) {
+                Set<String> merged = new HashSet<>(disabledAbilities);
+                merged.addAll(keepDisabled);
+                disabledAbilities = Set.copyOf(merged);
+                LOGGER.warn("[MilestoneRegistry] 回退内置默认后保留禁用黑名单: {}", merged);
+            }
             return;
         }
 
@@ -457,7 +471,12 @@ public class MilestoneRegistry {
             JsonArray arr = (file.has("milestones") && file.get("milestones").isJsonArray())
                 ? file.getAsJsonArray("milestones") : new JsonArray();
             boolean merge = file.has("merge") && file.get("merge").getAsBoolean();
-            if (!merge && arr.size() == 0 && disabledAbilities.size() > 0) {
+            // v1.4.0：「只改黑名单」判定改用本文件自身的 disabled_abilities 条目数——
+            // 低优先级文件贡献的黑名单会让累计 disabledAbilities.size()>0，
+            // 空 milestones 且自身无黑名单的替换文件被误判而跳过替换（本应回退内置默认）
+            boolean ownDisabled = file.has("disabled_abilities") && file.get("disabled_abilities").isJsonArray()
+                && file.getAsJsonArray("disabled_abilities").size() > 0;
+            if (!merge && arr.size() == 0 && ownDisabled) {
                 // 替换模式文件只提供了 disabled_abilities（无 milestones）：视为「只改黑名单」，
                 // 保留下方内容；否则空数组会回退内置默认，把已累加的黑名单一并清掉
                 LOGGER.warn("[MilestoneRegistry] 文件未提供 milestones 但提供了 disabled_abilities，按 merge 语义保留下方内容");

@@ -23,6 +23,10 @@ public final class PersistentDataKeys {
     /** 开局安全网已执行标记（boolean）：PlayerTickHandler 首次 tick 补发+激活后置 true */
     public static final String VERIFIED_BEGIN_ITEM_KEY = "MME_VerifiedBeginItem";
 
+    /** survive_night 里程碑「本夜已度过」标记（boolean，v1.4.0 落盘）：
+     *  夜间写入、白天消费解锁；持久化后登出/死亡不丢标记 */
+    public static final String SURVIVE_NIGHT_KEY = "AP_SurviveNight_Passed";
+
     /** 旧版永久解锁标记（v1.0 遗留），登录时迁移后清除（boolean） */
     public static final String OLD_UNLOCKED_KEY = "MME_AdventureUnlocked";
 

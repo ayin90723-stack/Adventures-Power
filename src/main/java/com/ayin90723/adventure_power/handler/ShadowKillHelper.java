@@ -447,6 +447,7 @@ public class ShadowKillHelper {
     /** 任意实体死亡时，遍历所有在线玩家清理该目标的影子血量数据和 BossBar */
     @SubscribeEvent
     public static void onLivingDeath(LivingDeathEvent event) {
+        if (event.isCanceled()) return; // v1.4.0：死亡被其他模组取消（复活类机制）时不清理影子进度
         LivingEntity target = event.getEntity();
         if (target.level().isClientSide()) return;
 

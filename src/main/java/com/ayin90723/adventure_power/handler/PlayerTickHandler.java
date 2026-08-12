@@ -5,13 +5,10 @@ import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
-import com.ayin90723.adventure_power.milestone.Milestone;
-import com.ayin90723.adventure_power.util.AdventureItemNbtUtil;
 import com.ayin90723.adventure_power.util.BuffExclusionManager;
-import com.ayin90723.adventure_power.util.MilestoneRegistry;
 import com.ayin90723.adventure_power.util.PersistentDataKeys;
-import com.ayin90723.adventure_power.util.ScoreboardUtil;
 import com.ayin90723.adventure_power.util.SyncUtil;
+import com.ayin90723.adventure_power.network.NetworkHandler;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.effect.MobEffectCategory;
@@ -34,12 +31,15 @@ import java.util.UUID;
  * <p>
  * 从 PlayerTickDispatcher 分发调用（不再独立订阅 PlayerTickEvent）。处理：
  * <ul>
- *   <li>开局安全网（门禁前）：补发冒险饰品 + 自动激活冒险者 + 测试入口全解锁</li>
+ *   <li>开局安全网（门禁前）：补发冒险饰品 + 自动激活冒险者</li>
  *   <li>Buff 延长（恩赐永驻，每 60 tick）</li>
  *   <li>环境免疫（每 tick 清火）</li>
  *   <li>受击坚韧（超时层数归零）</li>
  *   <li>庇护无敌过期清除</li>
  * </ul>
+ * <p>
+ * v1.4.0：移除「持有冒险的终点 → 自动全解锁」测试入口——终点已移出创造物品栏，
+ * 全解锁能力迁移至 {@code /ap unlock all} 指令（op 2 专用）。
  */
 @EventBusSubscriber(modid = AdventurePower.MODID, bus = Bus.FORGE)
 public class PlayerTickHandler {
@@ -52,10 +52,10 @@ public class PlayerTickHandler {
 
     /**
      * 开局安全网（门禁前，由 PlayerTickDispatcher 调用）。
-     * 补发冒险饰品 + 自动激活冒险者（每玩家仅一次）+ 测试入口全解锁。
+     * 补发冒险饰品 + 自动激活冒险者（每玩家仅一次）。
      * 需对非冒险者执行，故在分发器门禁前调用。
      */
-    public static void tickSafetyNet(Player player, IAdventureProgress progress) {
+    public static void tickSafetyNet(Player player) {
         // 补发冒险饰品 + 自动激活冒险者（每玩家仅一次；内存标记 + persistentData 双保险）
         if (!VERIFIED_BEGIN_ITEM.contains(player.getUUID())) {
             VERIFIED_BEGIN_ITEM.add(player.getUUID());
@@ -64,32 +64,6 @@ public class PlayerTickHandler {
                 CapabilityLifecycleHandler.giveAdventureBeginIfNeeded(player);
                 CapabilityLifecycleHandler.checkAndActivateAdventurer(player);
             }
-        }
-
-        // 测试便捷入口：持有冒险的终点 -> 自动全解锁（每 20 tick 检查一次，降低物品栏遍历开销）
-        if (progress == null || progress.isFullyUnlocked()) return;
-        long currentTime = player.level().getGameTime();
-        if (currentTime % 20 != 0) return;
-        if (!AdventureItemNbtUtil.playerHasAdventureEnd(player)) return;
-
-        if (!progress.isAdventurer()) {
-            progress.activateAdventurer();
-        }
-        for (Milestone m : MilestoneRegistry.getAll()) {
-            progress.unlockMilestone(m.id());
-        }
-        progress.activateFullyUnlocked();
-        ScoreboardUtil.updateScoreboard(player, true);
-        SyncUtil.syncCapabilityToPersistent(player, progress);
-        AdventureItemNbtUtil.syncAllAdventureItemNbt(player, progress);
-        SyncUtil.syncToClient(player);
-
-        // 翱翔飞行立即同步：fullyUnlocked 不等下一 tick handler，
-        // 避免两处 TickEvent.Phase.END handler 执行顺序不确定导致的竞态
-        if (progress.isAbilityEnabled(AbilityIds.SOAR) && !player.getAbilities().mayfly
-            && !player.getAbilities().instabuild && !player.isSpectator()) {
-            player.getAbilities().mayfly = true;
-            player.onUpdateAbilities();
         }
     }
 
@@ -176,5 +150,7 @@ public class PlayerTickHandler {
         BuffExclusionManager.clearCache(uuid);
         MagnetHandler.onLogout(uuid);
         SwiftHandler.onLogout(uuid);
+        // 网络包限频表登出清理（防长期服务器 UUID 累积，v1.4.0）
+        NetworkHandler.clearCooldowns(uuid);
     }
 }

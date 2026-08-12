@@ -240,11 +240,13 @@ public class ExplorationAbilityHandler {
      * 同时让 TrueHealthMixin 同步备份（否则 backup 冻结旧值、getHealth 会把裁剪反向修复）。
      */
     private static void clampHealthTo(Player player, float target) {
+        boolean prevInternal = HealthUtil.INTERNAL_HEALTH_WRITE.get();
         HealthUtil.INTERNAL_HEALTH_WRITE.set(true);
         try {
             player.setHealth(target);
         } finally {
-            HealthUtil.INTERNAL_HEALTH_WRITE.remove();
+            // v1.4.0：恢复 prev 而非 remove()——防未来嵌套在其它 INTERNAL 窗口内调用时清掉外层标记
+            HealthUtil.INTERNAL_HEALTH_WRITE.set(prevInternal);
         }
     }
 

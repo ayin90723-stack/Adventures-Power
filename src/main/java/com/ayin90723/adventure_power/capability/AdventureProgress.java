@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArraySet;
 
 /**
  * IAdventureProgress 默认实现。
@@ -36,8 +37,10 @@ public class AdventureProgress implements IAdventureProgress {
 
     private boolean adventurer;
     private boolean fullyUnlocked;
-    private final Set<String> unlockedMilestones = new HashSet<>();
-    private final Set<String> disabledAbilities = new HashSet<>();
+    /** CopyOnWriteArraySet（v1.4.0）：tooltip 渲染线程（AdventureCurioItem 悬停）与主线程
+     *  deserializeNBT 并发读写，普通 HashSet 在写入清空/重建期间渲染侧迭代会 CME 或读到半状态 */
+    private final Set<String> unlockedMilestones = new CopyOnWriteArraySet<>();
+    private final Set<String> disabledAbilities = new CopyOnWriteArraySet<>();
     /** 指令后门（/ap unlock ability）解锁的被禁用能力 → 解锁时刻的已解锁里程碑数（per-player，持久化）。
      *  数值成长按「解锁后每解锁一个里程碑 +1 档」计算（count 平移），不受原归属位置限制。 */
     private final Map<String, Integer> commandGrantedAt = new HashMap<>();
@@ -45,16 +48,19 @@ public class AdventureProgress implements IAdventureProgress {
     /**
      * 缓存当前已解锁里程碑对应的所有可用能力 ID。
      * 由 rebuildAbilityCache() 维护，isAbilityEnabled() 直接 O(1) 查询。
-     * 仅限主线程访问（Forge Capability 生命周期约束）。
+     * v1.4.0：volatile + 整体替换式重建（不再 clear+addAll）——渲染线程（tooltip 悬停
+     * isAbilityUnlocked → contains）与服务端线程并发读写时，读者始终看到完整快照，
+     * 无中间态窗口。
      */
-    private final Set<String> enabledAbilityCache = new HashSet<>();
+    private volatile Set<String> enabledAbilityCache = new HashSet<>();
 
     /**
      * MilestoneRegistry.getAll() 返回列表的 identityHashCode 快照。
      * 用于在 isAbilityEnabled() 中检测 /reload 热更新导致的注册表变更，
      * 若不一致则触发惰性重建，保证缓存不因数据包重载而变脏。
+     * v1.4.0：volatile（与 enabledAbilityCache 重建成对，渲染线程可见性）。
      */
-    private int cachedRegistryHash;
+    private volatile int cachedRegistryHash;
     /**
      * 已解锁且仍存在于注册表的里程碑数（rebuildAbilityCache 维护）。
      * 数据包 /reload 删除里程碑后，死 ID 不计入，避免成长公式计数虚高。
@@ -147,23 +153,26 @@ public class AdventureProgress implements IAdventureProgress {
      * 以及 isAbilityEnabled 检测到注册表版本变更时的惰性重建。
      */
     private void rebuildAbilityCache() {
-        enabledAbilityCache.clear();
+        // 整体替换式重建（v1.4.0）：先构建局部集合再整体赋值——clear+addAll 的
+        // 中间态会让并发读（渲染线程 contains）看到空/半状态
+        Set<String> rebuilt = new HashSet<>();
         cachedRegistryHash = System.identityHashCode(MilestoneRegistry.getAll());
         int valid = 0;
         if (fullyUnlocked) {
             for (Milestone m : MilestoneRegistry.getAll()) {
-                enabledAbilityCache.addAll(m.abilities());
+                rebuilt.addAll(m.abilities());
             }
             valid = MilestoneRegistry.getMilestoneCount();
         } else {
             for (String milestoneId : unlockedMilestones) {
                 Milestone m = MilestoneRegistry.getById(milestoneId);
                 if (m != null) {
-                    enabledAbilityCache.addAll(m.abilities());
+                    rebuilt.addAll(m.abilities());
                     valid++;
                 }
             }
         }
+        enabledAbilityCache = rebuilt;
         validUnlockedCount = valid;
     }
 
@@ -404,7 +413,7 @@ public class AdventureProgress implements IAdventureProgress {
 
         this.deathDefyInvulEnd = nbt.getLong(TAG_DEATH_DEFY_INVUL_END);
         this.deathDefyCooldownEnd = nbt.getLong(TAG_DEATH_DEFY_COOLDOWN_END);
-        this.resilienceStacks = nbt.getInt(TAG_RESILIENCE_STACKS);
+        this.resilienceStacks = Math.max(0, nbt.getInt(TAG_RESILIENCE_STACKS)); // 损坏存档钳制（v1.4.0）
         this.lastHurtTime = nbt.getLong(TAG_LAST_HURT_TIME);
         this.judgmentCooldownEnd = nbt.getLong(TAG_JUDGMENT_COOLDOWN_END);
         this.sanctuaryCooldownEnd = nbt.getLong(TAG_SANCTUARY_COOLDOWN_END);

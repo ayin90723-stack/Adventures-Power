@@ -83,6 +83,13 @@ public class CapabilityLifecycleHandler {
                 newPlayer.getPersistentData().put(PersistentDataKeys.SHADOW_HP_DATA, oldShadowData);
             }
         }
+        // survive_night「本夜已度过」标记转移（v1.4.0 落盘后需随 Clone 转移：
+        // 死亡 respawn 新实体内存 persistentData 为磁盘旧值，用旧玩家内存值覆盖，
+        // 防夜间存活后立刻死亡导致标记丢失。v1.4.0 二次审查：无条件覆盖——
+        // 旧玩家已消费（内存 key 移除）但磁盘未保存时，contains 判定会漏写，
+        // 新玩家从磁盘继承旧 true 标记导致残留）
+        newPlayer.getPersistentData().putBoolean(PersistentDataKeys.SURVIVE_NIGHT_KEY,
+            oldPlayer.getPersistentData().getBoolean(PersistentDataKeys.SURVIVE_NIGHT_KEY));
         // 影杀影子血量过期时间同样平移（攻击者 level 切换后过期判定基准变化——
         // 不平移会导致下界积累的影子血量进主世界立即过期，或主世界的永不过期）
         if (timeDelta != 0) {
@@ -109,6 +116,11 @@ public class CapabilityLifecycleHandler {
             }
             if (progress.isAdventurer() || progress.isFullyUnlocked()) {
                 SyncUtil.syncCapabilityToPersistent(newPlayer, progress);
+            }
+            // v1.4.0：物品 NBT 兜底恢复激活 fullyUnlocked 时同步计分板——
+            // 否则"capability 丢失 + 死亡"深边界下计分板滞留 0 直到下次登录
+            if (progress.isFullyUnlocked()) {
+                ScoreboardUtil.updateScoreboard(newPlayer, true);
             }
         });
 
@@ -323,8 +335,9 @@ public class CapabilityLifecycleHandler {
         }
 
         // 维度切换兜底恢复：PlayerEvent.Clone 在部分场景不触发，
-        // 或 reviveCaps() 导致 AttachCapabilitiesEvent 重新创建空实例，
         // 此处从 persistent data / 物品 NBT 恢复 Capability 状态
+        //（注：reviveCaps() 仅置 valid 标志，不重新触发 AttachCapabilitiesEvent——
+        // 旧 CapabilityDispatcher 原样保留，此处恢复的是持久化快照而非空实例）
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
             if (!progress.isAdventurer() && !progress.isFullyUnlocked()) {
                 // 首选从 persistent data 恢复（跨维度可靠保留）

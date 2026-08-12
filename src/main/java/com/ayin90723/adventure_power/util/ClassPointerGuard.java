@@ -20,6 +20,12 @@ import java.lang.reflect.Field;
  * <ul>
  *   <li>探测验证：记录时用「异类对象槽值不同」验证 offset 8 确实是 klass 槽，
  *       验证失败（非标准 JVM 布局）则整体禁用，不做任何写入。</li>
+ *   <li>布局检测（v1.4.0）：-XX:-UseCompressedClassPointers（非压缩类指针，klass
+ *       槽为 8B）时禁用——旧实现 putInt 只写低 4B 会写坏对象头。检测 = 显式 VM
+ *       参数扫描 + 未显式指定时按 HotSpot 默认（heap≤32G 开启压缩）假定。</li>
+ *   <li>恢复写入（v1.4.0）：putInt 改为「读当前 8B、替换低 4B、putLong 写回」——
+ *       压缩布局下 offset 12-15 是相邻字段，putInt 不受影响但 putLong 全量写回
+ *       会回滚该字段；保留高 4B 现值则相邻字段零破坏，非压缩下也不会写坏高 4B。</li>
  *   <li>恢复后二次验证：{@code getClass()} 回到预期类才算成功；失败立即禁用
  *       守卫（防重复写入损坏内存），并记录日志。</li>
  *   <li>恢复是最后手段：{@code TrueHealthMixin} 的 remove 拦截负责先保实体，
@@ -62,6 +68,11 @@ public final class ClassPointerGuard {
         if (expectedClass != null || UNSAFE == null) return;
         synchronized (ClassPointerGuard.class) {
             if (expectedClass != null) return;
+            if (!isCompressedClassPointerLayout()) {
+                LOGGER.warn("[ClassPointerGuard] 检测到非压缩类指针布局（-XX:-UseCompressedClassPointers），"
+                    + "klass 槽为 8B，类指针守卫禁用");
+                return;
+            }
             Class<?> cls = player.getClass();
             try {
                 int klassInt = UNSAFE.getInt(player, KLASS_OFFSET);
@@ -81,6 +92,28 @@ public final class ClassPointerGuard {
         }
     }
 
+    /**
+     * 类指针布局检测：显式 VM 参数优先；未显式指定时按 HotSpot 默认
+     * （heap ≤ 32G 时 UseCompressedClassPointers 默认开启，klass 槽 4B）。
+     * 边界（v1.4.0 注）：-XX:-UseCompressedOops 会隐式关闭压缩类指针且不出现
+     * 显式参数——此场景未显式关闭 UseCompressedClassPointers 时按压缩假定，
+     * 若实际为非压缩，restore 的"保留高 4B + 写低 4B"最坏结果是换回失败 +
+     * 永久禁用（写入后 getClass 验证拦截），不会写坏对象头（恢复值保留当前
+     * 高 4B，无跨字段覆盖）。
+     */
+    private static boolean isCompressedClassPointerLayout() {
+        try {
+            for (String arg : java.lang.management.ManagementFactory.getRuntimeMXBean().getInputArguments()) {
+                if ("-XX:-UseCompressedClassPointers".equalsIgnoreCase(arg)) return false;
+                if ("-XX:+UseCompressedClassPointers".equalsIgnoreCase(arg)) return true;
+            }
+        } catch (Exception e) {
+            // 管理接口不可用（罕见），按默认压缩布局放行，restore 二次验证兜底
+            LOGGER.warn("[ClassPointerGuard] VM 参数读取失败，按默认压缩类指针布局继续", e);
+        }
+        return true;
+    }
+
     /** 实体类是否被替换（klass 指针被换到隐藏类）。未初始化/禁用时恒 false。 */
     public static boolean isReplaced(Player player) {
         return verified && player.getClass() != expectedClass;
@@ -95,7 +128,11 @@ public final class ClassPointerGuard {
     public static boolean restore(Player player) {
         if (!verified || UNSAFE == null) return false;
         try {
-            UNSAFE.putInt(player, KLASS_OFFSET, klassValue);
+            // 保留当前高 4B（压缩布局下为相邻字段现值，非压缩下为指针高 4B），
+            // 只替换低 4B 为记录的 klass 槽值——避免 putLong 全量写回回滚相邻字段
+            long current = UNSAFE.getLong(player, KLASS_OFFSET);
+            UNSAFE.putLong(player, KLASS_OFFSET,
+                (current & 0xFFFFFFFF00000000L) | (klassValue & 0xFFFFFFFFL));
             if (player.getClass() == expectedClass) {
                 return true;
             }

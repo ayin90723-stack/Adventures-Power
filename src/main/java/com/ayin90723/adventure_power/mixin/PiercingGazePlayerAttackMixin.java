@@ -53,7 +53,9 @@ public class PiercingGazePlayerAttackMixin {
      * 替换 {@code Player.attack()} 内部的 {@code target.hurt(source, amount)} 调用。
      * <p>
      * 目标 {@code Entity.hurt} 为实例方法，SRG 名 {@code m_6469_}。
-     * 使用 {@code require = 0} 避免因字节码结构变化导致注入失败。
+     * 使用 {@code require = 0} 避免因字节码结构变化导致注入失败；
+     * {@code expect = 1} 让注入点缺失时在日志输出 WARN（v1.4.0 起，替代纯静默失效，
+     * 便于启动后排查 Layer 0 是否被其它模组改写）。
      */
     @Redirect(
         method = "m_5706_",
@@ -61,7 +63,8 @@ public class PiercingGazePlayerAttackMixin {
             value = "INVOKE",
             target = "Lnet/minecraft/world/entity/Entity;m_6469_(Lnet/minecraft/world/damagesource/DamageSource;F)Z"
         ),
-        require = 0
+        require = 0,
+        expect = 1
     )
     private boolean redirectAttackHurt(Entity target, DamageSource source, float amount) {
         Player self = (Player)(Object)this;

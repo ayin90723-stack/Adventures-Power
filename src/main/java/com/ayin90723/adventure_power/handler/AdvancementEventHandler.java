@@ -2,6 +2,7 @@ package com.ayin90723.adventure_power.handler;
 
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.util.AdventureItemNbtUtil;
 import com.ayin90723.adventure_power.util.SyncUtil;
 import com.ayin90723.adventure_power.milestone.Milestone;
@@ -61,7 +62,9 @@ public class AdvancementEventHandler {
                     continue;
                 }
             }
-            // 再检查 trigger 是否已可触发（所有 5 种类型均支持追赶）
+            // 再检查 trigger 是否已可触发（8 种类型追赶：survive_night/y_below/first_death/
+            // first_trade/first_kill/enter_dimension 支持；reach_y 每 tick 检测天然覆盖，
+            // obtain_item 无统计可查——原版无"曾拾取过物品"记录，无法追赶，文档注明）
             if (m.trigger() != null) {
                 boolean met = switch (m.trigger().type()) {
                     // 度过首夜判定：当前处于黎明段 或 曾睡过觉（睡觉跳过黎明窗口，与
@@ -95,6 +98,13 @@ public class AdvancementEventHandler {
             SyncUtil.syncToClient(player);
             // 补解锁可能一次凑满 10/10 里程碑：必须走统一的觉醒级联，否则第 11 阶段永久失效
             AdventureProgressCapability.activateFinalStageIfReady(player, progress);
+            // 翱翔飞行立即同步（v1.4.0，与 grantMilestone 同款）：补解锁可能包含 elytra 里程碑
+            // 解锁 soar，不等下一 tick handler，避免两处 END handler 顺序竞态
+            if (progress.isAbilityEnabled(AbilityIds.SOAR) && !player.getAbilities().mayfly
+                && !player.getAbilities().instabuild && !player.isSpectator()) {
+                player.getAbilities().mayfly = true;
+                player.onUpdateAbilities();
+            }
         }
     }
 

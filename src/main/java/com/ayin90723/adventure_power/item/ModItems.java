@@ -29,8 +29,8 @@ public class ModItems {
             .title(Component.translatable("itemGroup.adventure_power"))
             .icon(() -> new ItemStack(ADVENTURE_BEGIN.get()))
             .displayItems((params, output) -> {
+                // 仅放冒险的开始：终点只通过 10 里程碑自动替换获得（无创造途径，防解锁绕过）
                 output.accept(ADVENTURE_BEGIN.get());
-                output.accept(ADVENTURE_END.get());
             })
             .build());
 }

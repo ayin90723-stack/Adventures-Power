@@ -82,6 +82,17 @@ public class HealthUtil {
     /** volatile：初始化可能在客户端/服务端两条线程发生，保证可见性 */
     private static volatile EntityDataAccessor<Float> DATA_HEALTH_ID;
 
+    /** 反射不可用降级的一次性告警标记（v1.4.0）：避免每次调用刷日志 */
+    private static volatile boolean degradeWarned = false;
+
+    /** 反射不可用降级告警（一次性；相关直读/直写降级为原版路径，防御能力受限） */
+    private static void warnDegrade(String reason) {
+        if (!degradeWarned) {
+            degradeWarned = true;
+            LOGGER.error("[HealthUtil] {}——直读/直写降级为原版路径，防御能力受限", reason);
+        }
+    }
+
     static {
         try {
             DATA_HEALTH_ID_FIELD = LivingEntity.class.getDeclaredField("f_20961_");
@@ -89,8 +100,7 @@ public class HealthUtil {
             try {
                 DATA_HEALTH_ID_FIELD = LivingEntity.class.getDeclaredField("DATA_HEALTH_ID");
             } catch (NoSuchFieldException ex) {
-                System.err.println("[AdventurePower] HealthUtil: 无法反射获取 DATA_HEALTH_ID 字段，setHealthDirect 将不可用");
-                LOGGER.error("[HealthUtil] 反射/内部操作失败", ex);
+                LOGGER.error("[HealthUtil] 无法反射获取 DATA_HEALTH_ID 字段，setHealthDirect 将不可用", ex);
             }
         }
         if (DATA_HEALTH_ID_FIELD != null) {
@@ -139,6 +149,7 @@ public class HealthUtil {
     @SuppressWarnings("unchecked")
     public static float getHealthDirect(LivingEntity target) {
         if (DATA_HEALTH_ID_FIELD == null) {
+            warnDegrade("DATA_HEALTH_ID 反射不可用");
             return target.getHealth();
         }
         try {
@@ -202,6 +213,7 @@ public class HealthUtil {
         INTERNAL_HEALTH_WRITE.set(true);
         try {
             if (DATA_HEALTH_ID_FIELD == null) {
+                warnDegrade("DATA_HEALTH_ID 反射不可用");
                 return;
             }
             try {
@@ -254,8 +266,7 @@ public class HealthUtil {
             try {
                 ENTITY_DATA_ITEMS_FIELD = SynchedEntityData.class.getDeclaredField("itemsById");
             } catch (NoSuchFieldException ex) {
-                System.err.println("[AdventurePower] HealthUtil: 无法反射获取 SynchedEntityData.itemsById 字段");
-                LOGGER.error("[HealthUtil] 反射/内部操作失败", ex);
+                LOGGER.error("[HealthUtil] 无法反射获取 SynchedEntityData.itemsById 字段", ex);
             }
         }
         if (ENTITY_DATA_ITEMS_FIELD != null) {
@@ -270,8 +281,7 @@ public class HealthUtil {
                 DATA_ITEM_VALUE_FIELD = dataItemClass.getDeclaredField("value");
             }
         } catch (ClassNotFoundException | NoSuchFieldException e) {
-            System.err.println("[AdventurePower] HealthUtil: 无法反射获取 DataItem.value 字段");
-            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
+            LOGGER.error("[HealthUtil] 无法反射获取 DataItem.value 字段", e);
         }
         if (DATA_ITEM_VALUE_FIELD != null) {
             DATA_ITEM_VALUE_FIELD.setAccessible(true);
@@ -1040,8 +1050,7 @@ public class HealthUtil {
             ep = reflectField(etlClz, "f_156904_", "passive");
 
         } catch (ClassNotFoundException e) {
-            System.err.println("[AdventurePower] HealthUtil: 内部类反射初始化失败，eradicateFromWorld 将不可用");
-            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
+            LOGGER.error("[HealthUtil] 内部类反射初始化失败，eradicateFromWorld 将不可用", e);
         }
         ESM_VISIBLE_ENTITY_STORAGE = elu;
         ESM_KNOWN_UUIDS = ku;
@@ -1185,6 +1194,11 @@ public class HealthUtil {
             }
 
             // ④ EntityTickList — 直拿内部 active(Int2ObjectMap)/passive(List)，绕过 Mixin 拦截
+            // v1.4.0 时序约束注释：从 EntityTickList 移除须避开 ServerLevel.tick 的
+            // entityTickList.forEach 迭代窗口（迭代中修改抛 CME）。当前调用链（影杀斩杀经
+            // 玩家 doTick/connection 阶段触发）恰好避开 levels 阶段的实体迭代；若未来调用
+            // 时机改变（如从 tick 事件内触发），此处会 CME——catch 已兜底降级为"该容器未清理"，
+            // 由 ⑤⑥ 与 tick 自检兜底，不会崩溃
             if (SL_ENTITY_TICK_LIST != null) {
                 try {
                     Object tickList = SL_ENTITY_TICK_LIST.get(sl);
@@ -1209,7 +1223,11 @@ public class HealthUtil {
                             } catch (IllegalAccessException ignored) {}
                         }
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    // v1.4.0：④ 失败（含迭代窗口 CME）降级为"该容器未清理"，由 ⑤⑥ 与 tick 自检兜底
+                    LOGGER.warn("[HealthUtil] eradicateFromWorld ④ EntityTickList 清理失败（时序冲突？），"
+                        + "由后续容器清理兜底", e);
+                }
             }
 
             // ⑤ EntitySection.classInstanceMultiMap.allInstances
@@ -1244,7 +1262,12 @@ public class HealthUtil {
                             }
                         }
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    // v1.4.0：⑤ 失败（目标移动/区块卸载导致 section 定位不到）→ 实体残留于
+                    // EntitySection/EntityLookup 的半抹除状态，getEntities 仍可找到——记日志便于排查
+                    LOGGER.warn("[HealthUtil] eradicateFromWorld ⑤ EntitySection 清理失败（目标移动/区块卸载？），"
+                        + "实体可能残留于区块索引（半抹除）", e);
+                }
             }
 
             // ⑥ ServerChunkCache.removeEntity(entity)

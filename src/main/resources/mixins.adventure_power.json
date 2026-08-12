@@ -13,6 +13,7 @@
         "PiercingGazePlayerAttackMixin",
         "HealingBlockMixin",
         "TrueHealthMixin",
+        "TrueHealthServerPlayerMixin",
         "EntityLivenessMixin",
         "EntityFieldsAccessor",
         "LivingEntityFieldsAccessor",
