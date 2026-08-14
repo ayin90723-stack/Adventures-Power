@@ -21,9 +21,8 @@ import net.minecraftforge.fml.common.Mod.EventBusSubscriber.Bus;
  * -> RecoveryHandler -> KnockbackResistHandler -> FortuneFavorHandler。各 handler 的
  * onTick 不再做门禁检查（由本分发器统一做），仅保留业务逻辑。
  * <p>
- * 开局安全网（补发饰品 + 自动激活冒险者）需对非冒险者执行，在门禁前调用。
- * 首次激活冒险者/全解锁后，本次 tick 用激活前 progress 快照，延迟 1 tick 进入
- * onTick（玩家无感知）。
+ * 开局安全网（补发饰品 + 自动激活冒险者）与庇护速度维护需对非冒险者执行，在门禁前调用。
+ * tickSafetyNet 修改的是同一 progress 实例，激活结果对下方门禁立即可见（同 tick 分发）。
  */
 @EventBusSubscriber(modid = AdventurePower.MODID, bus = Bus.FORGE)
 public class PlayerTickDispatcher {
@@ -39,6 +38,11 @@ public class PlayerTickDispatcher {
         PlayerTickHandler.tickSafetyNet(player);
 
         if (progress == null) return;
+
+        // 门禁前：庇护移动速度维护——else 恢复分支不能受 adventurer 门禁限制
+        // （卸下饰品后门禁失效，若只在门禁后执行，庇护写入的 base=0 将永久锁死移动）
+        PlayerStateHandler.tickSanctuarySpeed(player, progress);
+
         if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
 
         // 门禁后：按固定顺序分发

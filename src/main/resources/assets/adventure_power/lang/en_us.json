@@ -191,7 +191,7 @@
   "ability.adventure_power.swift.awakened": "§6[Awakened] §ePush away hostile mobs while sprinting",
   "ability.adventure_power.magnet.awakened": "§6[Awakened] §e+50% range · attract XP orbs",
   "ability.adventure_power.all_seeing.awakened": "§6[Awakened] §eThreat radar shows nearby hostiles",
-  "ability.adventure_power.xp_boost.awakened": "§6[Awakened] §eXP multiplier ×1.5",
+  "ability.adventure_power.xp_boost.awakened": "§6[Awakened] §eXP multiplier ×1.5 again (max base 1.5x → 2.25x)",
   "msg.adventure_power.inventory_full": "§eYour inventory is full! §6Adventure's Beginning§e dropped on the ground — pick it up and equip it to begin your journey",
   "msg.adventure_power.got_begin": "§eYou received §6Adventure's Beginning§e — equip it to begin your journey",
   "hud.adventure_power.dir.front": "Front",

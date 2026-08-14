@@ -59,18 +59,25 @@ public final class ClassPointerGuard {
     /** 探测已验证（offset 8 是 klass 槽且已记录槽值）才允许恢复 */
     private static volatile boolean verified = false;
 
+    /** 探测失败已判定（非压缩类指针布局/非标准 JVM 布局/探测异常）——短路标志。
+     *  v1.4.0 审查修复：record 由 TrueHealthMixin 每 tick 对每个真血玩家调用，
+     *  失败分支原先不置位，非标准 JVM 上会每 tick 重复 synchronized + VM 参数
+     *  读取 + warn 写盘（20 TPS × 玩家数 条/秒）。 */
+    private static volatile boolean disabled = false;
+
     private ClassPointerGuard() {}
 
     /**
      * 记录并验证玩家类（首次通过 true_health 门禁时调用一次，之后空操作）。
      */
     public static void record(Player player) {
-        if (expectedClass != null || UNSAFE == null) return;
+        if (expectedClass != null || disabled || UNSAFE == null) return;
         synchronized (ClassPointerGuard.class) {
-            if (expectedClass != null) return;
+            if (expectedClass != null || disabled) return;
             if (!isCompressedClassPointerLayout()) {
                 LOGGER.warn("[ClassPointerGuard] 检测到非压缩类指针布局（-XX:-UseCompressedClassPointers），"
                     + "klass 槽为 8B，类指针守卫禁用");
+                disabled = true;
                 return;
             }
             Class<?> cls = player.getClass();
@@ -85,9 +92,11 @@ public final class ClassPointerGuard {
                     verified = true;
                 } else {
                     LOGGER.warn("[ClassPointerGuard] klass 槽探测失败（非标准 JVM 布局？），类指针守卫禁用");
+                    disabled = true;
                 }
             } catch (Exception e) {
                 LOGGER.warn("[ClassPointerGuard] klass 槽探测异常，类指针守卫禁用", e);
+                disabled = true;
             }
         }
     }

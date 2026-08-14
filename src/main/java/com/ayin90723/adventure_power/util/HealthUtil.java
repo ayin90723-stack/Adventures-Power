@@ -347,7 +347,23 @@ public class HealthUtil {
      * @return true 表示命中并写入成功
      */
     public static boolean setHealthLikeGeneric(LivingEntity target, float health) {
-        for (java.lang.reflect.Method m : target.getClass().getDeclaredMethods()) {
+        // v1.4.0 审查修复：按类缓存命中的 Method——原实现每次调用都
+        // getDeclaredMethods()（分配 Method[] 拷贝）+ 逐个 invoke 验证，
+        // 禁疗目标的每次回血尝试（regen 约每 20 tick）都全量扫描。
+        // 缓存命中仍走验证闭环（不通过则清缓存回退全扫，行为等价）
+        Class<?> targetClass = target.getClass();
+        java.lang.reflect.Method cached = GENERIC_WRITE_CACHE.get(targetClass);
+        if (cached != null) {
+            try {
+                cached.invoke(target, health);
+                if (Math.abs(getEffectiveHealth(target) - health) < 1.0F) {
+                    return true;
+                }
+            } catch (Exception ignored) {
+            }
+            GENERIC_WRITE_CACHE.remove(targetClass);
+        }
+        for (java.lang.reflect.Method m : targetClass.getDeclaredMethods()) {
             Class<?>[] p = m.getParameterTypes();
             if (p.length != 1 || p[0] != float.class) continue;
             if (!m.getName().toLowerCase().contains("health")) continue;
@@ -357,6 +373,7 @@ public class HealthUtil {
                 m.invoke(target, health);
                 if (Math.abs(getEffectiveHealth(target) - health) < 1.0F) {
                     DebugLog.probe("[通用直写] 命中 {}: {} → {}", m.getName(), target, health);
+                    GENERIC_WRITE_CACHE.put(targetClass, m);
                     return true;
                 }
             } catch (Exception ignored) {
@@ -366,15 +383,21 @@ public class HealthUtil {
         return false;
     }
 
-    /** 插针命中缓存：实体类 → 真血字段写入通路（字段 + 从实体到宿主对象的引用路径链）。 */
+    /** 通用层直写的方法缓存：实体类 → 命中的 (F)V Health 写入方法（验证闭环筛选）。 */
+    private static final java.util.Map<Class<?>, java.lang.reflect.Method> GENERIC_WRITE_CACHE =
+        new java.util.concurrent.ConcurrentHashMap<>();
+
     /**
-     * 插针命中缓存：实体类 → 真血字段写入通路（字段 + 从实体到宿主对象的引用路径链）。
+     * 插针命中缓存：<b>按实例</b>（弱引用）缓存真血字段写入通路（字段 + 从实体到宿主对象的引用路径链）。
      * <p>
-     * 路径链避免"每次直写都全对象图搜索宿主"（大对象图实体如弹幕 Boss 会卡）；
-     * 写值前验证字段当前值仍接近真血读数，失效时缓存作废并回退全图插针重探测
-     * （见 {@link #probeCapabilityHealth}）。
+     * v1.4.0 审查修复：原先按实体类缓存，但路径链含实例相关的 Map key / Collection index——
+     * 同类多实例（召唤物/分身群的 Boss）互相作废缓存（第二个实例解析失败 → 清缓存 →
+     * 全图重探测 → 新缓存又被第三个实例作废），成群同类 Boss 的每次直写都退化为
+     * 全对象图插针。改弱 key 按实例缓存：每实例首次各探测一次，之后零开销互不干扰；
+     * 实体死亡/卸载后条目随弱引用自动清理。写值前的字段值验证保留（路径失效仍回退全图重探测）。
      */
-    private static final java.util.Map<Class<?>, WritePath> CAP_WRITE_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.Map<LivingEntity, WritePath> CAP_WRITE_CACHE =
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
 
     /** 真血字段写入通路：字段 + 从实体根对象到字段宿主的步骤链。 */
     private static final class WritePath {
@@ -447,21 +470,21 @@ public class HealthUtil {
      */
     public static boolean probeCapabilityHealth(LivingEntity target, float targetValue) {
         // 缓存命中：直接走已解明的通路（路径链直达宿主，零全图搜索）
-        WritePath cached = CAP_WRITE_CACHE.get(target.getClass());
+        WritePath cached = CAP_WRITE_CACHE.get(target);
         if (cached != null) {
             try {
                 Object owner = resolvePath(target, cached.steps, 0);
                 if (owner == null) {
-                    CAP_WRITE_CACHE.remove(target.getClass());
+                    CAP_WRITE_CACHE.remove(target);
                     return probeFresh(target, targetValue);
                 }
-                // 写值前验证：对象图结构变化可能让路径链指向错误宿主（同类多实例/索引漂移），
+                // 写值前验证：对象图结构变化可能让路径链指向错误宿主（索引漂移），
                 // 校验字段当前值仍接近真血读数（与 probeGraph 值域过滤同容差）；
                 // 不匹配视为路径失效 → 缓存作废 + 全图重探测（有验证闭环，不盲写）
                 float cur = cached.field.getFloat(owner);
                 float ref = target.getHealth();
                 if (Math.abs(cur - ref) > Math.max(1.0F, ref * 0.2F)) {
-                    CAP_WRITE_CACHE.remove(target.getClass());
+                    CAP_WRITE_CACHE.remove(target);
                     DebugLog.probe("[插针] 缓存路径失效（字段值 {} ≠ 真血读数 {}），回退全图重探测", cur, ref);
                     return probeFresh(target, targetValue);
                 }
@@ -469,7 +492,7 @@ public class HealthUtil {
                 return true;
             } catch (Exception e) {
                 // 路径失效（对象图结构变化/字段不可访问）→ 缓存作废 + 全图重探测
-                CAP_WRITE_CACHE.remove(target.getClass());
+                CAP_WRITE_CACHE.remove(target);
                 return probeFresh(target, targetValue);
             }
         }
@@ -580,9 +603,9 @@ public class HealthUtil {
                     if (Math.abs(after - before) < 0.5F) continue;
                     // 判据②：变化量必须指向测试值（真血字段特征）
                     if (Math.abs(after - (orig - 1.0F)) < 1.0F) {
-                        // 命中：写入目标值并缓存通路（字段 + 实体→宿主路径链）
+                        // 命中：写入目标值并缓存通路（字段 + 实体→宿主路径链，按实例弱 key）
                         f.setFloat(obj, targetValue);
-                        CAP_WRITE_CACHE.put(target.getClass(), new WritePath(f, new java.util.ArrayList<>(path)));
+                        CAP_WRITE_CACHE.put(target, new WritePath(f, new java.util.ArrayList<>(path)));
                         DebugLog.probe("[插针] 字段命中: {}#{} 原值={} → {}",
                             cls.getSimpleName(), f.getName(), orig, targetValue);
                         return orig;
@@ -1170,7 +1193,9 @@ public class HealthUtil {
                             if (byId instanceof it.unimi.dsi.fastutil.ints.Int2ObjectMap) {
                                 ((it.unimi.dsi.fastutil.ints.Int2ObjectMap<Object>) byId).remove(entityId);
                             }
-                        } catch (IllegalAccessException ignored) {}
+                        } catch (IllegalAccessException e) {
+                            LOGGER.warn("[HealthUtil] eradicateFromWorld ② byId 清理失败", e);
+                        }
                     }
                     if (EL_BY_UUID != null) {
                         try {
@@ -1178,7 +1203,9 @@ public class HealthUtil {
                             if (byUuid instanceof Map) {
                                 ((Map<?, ?>) byUuid).remove(entityUuid);
                             }
-                        } catch (IllegalAccessException ignored) {}
+                        } catch (IllegalAccessException e) {
+                            LOGGER.warn("[HealthUtil] eradicateFromWorld ② byUuid 清理失败", e);
+                        }
                     }
                 }
             }
@@ -1190,7 +1217,9 @@ public class HealthUtil {
                     if (knownUuids instanceof Set) {
                         ((Set<?>) knownUuids).remove(entityUuid);
                     }
-                } catch (IllegalAccessException ignored) {}
+                } catch (IllegalAccessException e) {
+                    LOGGER.warn("[HealthUtil] eradicateFromWorld ③ knownUuids 清理失败", e);
+                }
             }
 
             // ④ EntityTickList — 直拿内部 active(Int2ObjectMap)/passive(List)，绕过 Mixin 拦截
@@ -1274,7 +1303,9 @@ public class HealthUtil {
             if (SCC_REMOVE_ENTITY != null) {
                 try {
                     SCC_REMOVE_ENTITY.invoke(sl.getChunkSource(), target);
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    LOGGER.warn("[HealthUtil] eradicateFromWorld ⑥ ServerChunkCache 清理失败", e);
+                }
             }
 
             // ⑦ 龙部件清理 — 末影龙被秒杀时 part 不走原版死亡流程，dragonParts
@@ -1293,11 +1324,15 @@ public class HealthUtil {
                             }
                         }
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    LOGGER.warn("[HealthUtil] eradicateFromWorld ⑦ 龙部件清理失败", e);
+                }
             }
 
-        } catch (Exception ignored) {
-            // 静默处理 —— 这是最终兜底手段，不应因反射失败而中断主流程
+        } catch (Exception e) {
+            // 整体兜底 —— 这是最终兜底手段，不应因反射失败而中断主流程；
+            // 记日志便于排查半抹除状态（与 ④⑤ 分层日志对称）
+            LOGGER.warn("[HealthUtil] eradicateFromWorld 整体异常（部分容器可能未清理）", e);
         }
     }
 

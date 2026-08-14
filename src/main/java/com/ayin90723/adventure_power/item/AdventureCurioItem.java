@@ -44,6 +44,9 @@ public class AdventureCurioItem extends Item {
     @Override
     public void appendHoverText(ItemStack stack, @Nullable Level level,
                                 List<Component> tooltip, TooltipFlag flag) {
+        // side 守卫（v1.4.0 审查修复）：里程碑行内部引用客户端 Minecraft 类，
+        // 少数模组在服务端构建 tooltip 时防止解析客户端类（NoClassDefFoundError）
+        if (level != null && !level.isClientSide()) return;
         if (isEnd) {
             addEndTooltip(tooltip);
         } else {
@@ -124,7 +127,7 @@ public class AdventureCurioItem extends Item {
             if (progress == null || !progress.isMilestoneUnlocked(m.id())) continue;
             anyUnlocked = true;
             MutableComponent line = Component.literal("★ ").withStyle(ChatFormatting.GOLD)
-                    .append(Component.literal(m.name()).withStyle(ChatFormatting.GOLD));
+                    .append(m.displayName().withStyle(ChatFormatting.GOLD));
             line.append(Component.literal("  §8»  "));
             List<String> ids = m.abilities();
             for (int i = 0; i < ids.size(); i++) {

@@ -191,7 +191,7 @@
   "ability.adventure_power.swift.awakened": "§6[觉醒] §e疾跑推开敌对生物",
   "ability.adventure_power.magnet.awakened": "§6[觉醒] §e吸取范围+50%·经验球也吸入",
   "ability.adventure_power.all_seeing.awakened": "§6[觉醒] §e威胁雷达显示周围敌对生物方位",
-  "ability.adventure_power.xp_boost.awakened": "§6[觉醒] §e经验倍率×1.5",
+  "ability.adventure_power.xp_boost.awakened": "§6[觉醒] §e经验倍率再×1.5（满级基础1.5x→觉醒2.25x）",
   "msg.adventure_power.inventory_full": "§e你的物品栏已满，§6冒险的开始§e掉落在地上了！捡起并佩戴以开启冒险",
   "msg.adventure_power.got_begin": "§e你收到了一份 §6冒险的开始 §e- 佩戴它以开启冒险",
   "hud.adventure_power.dir.front": "前",

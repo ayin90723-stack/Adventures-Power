@@ -233,7 +233,9 @@ public abstract class TrueHealthMixin {
 
             cir.setReturnValue(backup);
         } finally {
-            IN_ON_GET_HEALTH.remove();
+            // set(false) 而非 remove()（v1.4.0 审查一致性）：高频 getHealth 下 remove 会
+            // 反复重建 ThreadLocal entry，与 PiercingGazeUtil 的 set() 模式统一
+            IN_ON_GET_HEALTH.set(false);
         }
     }
 

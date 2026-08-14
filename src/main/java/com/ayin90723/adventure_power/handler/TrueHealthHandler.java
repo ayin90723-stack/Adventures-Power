@@ -2,6 +2,7 @@ package com.ayin90723.adventure_power.handler;
 
 import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.AbilityIds;
+import com.ayin90723.adventure_power.util.HealthUtil;
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import net.minecraft.world.entity.player.Player;
@@ -49,6 +50,13 @@ public class TrueHealthHandler {
             // 备份血量 <= 0 表示玩家确实该死（合法 hurt 路径已将备份归零），不干预
             if (progress.getBackupHealth() <= 0.0F) return;
 
+            // v1.4.0 审查修复：cancel 前必须直写回血——cancel 只阻止 die() 方法体，
+            // 此时血量已被 actuallyHurt 归零，isDeadOrDying() 为 true，若无回血，
+            // 后续每 tick 走 tickDeath() 20 tick 后 remove(KILLED)。本层触发的前提是
+            // die() 的 Mixin 注入被绕过，同一 Mixin 的 tick 自检/remove 拦截大概率同样失效，
+            // 不回血 = 玩家断线式消失而非免死。与 DeathDefyHandler cancel 后回血同模式。
+            HealthUtil.setHealthDirect(player, progress.getBackupHealth());
+            player.deathTime = 0;
             event.setCanceled(true);
         });
     }

@@ -51,7 +51,14 @@ public class InputHandler {
             // 主动技能 - 门禁检查（体验预检，服务端另有校验）
             // 屏幕打开（聊天/物品栏/面板等）时忽略技能键：InputEvent.Key 不受 screen 门控，
             // 聊天框打字输入 g/y 会真实触发技能释放/切换（服务端无屏幕概念，照常执行）
-            if (mc.screen != null) return;
+            if (mc.screen != null) {
+               // 屏幕打开时 setScreen 触发 KeyMapping.releaseAll（isDown 恒 false），期间
+               // 松开按键不会更新 KeyButton.lastPressed——残留 true 会让关屏后首次按下
+               // 判定为"仍按住"而丢失上升沿。屏幕期间直接重置边沿状态（v1.4.0 审查修复）
+               skillSwitch.reset();
+               skillActivate.reset();
+               return;
+            }
             if (AdventureProgressCapability.isAdventurer(mc.player)
                 || AdventureProgressCapability.isFullyUnlocked(mc.player)) {
                // Y 键：切换技能（本地乐观更新 + 发包由服务端持久化，避免被后续 sync 覆盖）

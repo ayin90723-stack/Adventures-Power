@@ -204,10 +204,10 @@ public class AdventureProgressCapability {
                 player.getX(), player.getY() + 1.5, player.getZ(),
                 30, 0.5, 0.5, 0.5, 0.1);
             // 内置里程碑走 lang 键（zh/en 翻译），数据包自定义里程碑用 JSON name 兜底，
-            // 避免显示原始 key 或把中文 name 硬塞给英文玩家
+            // 避免显示原始 key 或把中文 name 硬塞给英文玩家（统一走 Milestone.displayName()）
             Milestone m = MilestoneRegistry.getById(milestoneId);
             net.minecraft.network.chat.MutableComponent milestoneName = m != null
-                ? Component.translatableWithFallback("milestone.adventure_power." + milestoneId, m.name())
+                ? m.displayName()
                 : Component.translatable("milestone.adventure_power." + milestoneId);
             player.displayClientMessage(milestoneName.withStyle(ChatFormatting.GREEN), true);
 

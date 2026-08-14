@@ -103,8 +103,9 @@ public class PiercingGazePlayerAttackMixin {
         // 否则（返回 false / return true 假成功未扣血）-> 穿透门禁统一入口：
         // 攻击者持破敌之眼 + 非友伤 + 非玩家目标（PVP 禁用）
         if (!PiercingGazeUtil.shouldPierce(source, living)) {
-            // 非破敌之眼/友伤/PVP：穿透不适用，但消费残留标记（本次 hurt 未走原版管线时置 false），
-            // 防止下次扣血攻击在 ASM 跳过 ForgeHooks 的环境误判"已 post"而不补发
+            // 非破敌之眼/友伤/PVP：穿透不适用。此处的 consume 调用是防御性同步
+            // （非消费式读，计数单调递增——历史版本为布尔标记时的"置 false"语义，
+            // 计数方案下因单调性该调用对下次判定无实际影响，保留作分层一致性行为）
             PiercingGazeUtil.consumeVanillaHurtEventPosted(living);
             return hurtResult;
         }

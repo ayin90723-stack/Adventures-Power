@@ -52,4 +52,25 @@ public class AllSeeingHandler {
                 0, false, false, false));
         }
     }
+
+    /**
+     * 维度切换后强制重发夜视效果（v1.4.0 修复夜视同步慢）。
+     * <p>
+     * <b>根因（字节码实锤）</b>：两条维度切换路径对效果的同步不对称——传送门
+     * {@code ServerPlayer.changeDimension} 发 RespawnPacket 后<b>重发全部活跃效果包</b>
+     * （方法体内 getActiveEffects + ClientboundUpdateMobEffectPacket 循环）；而末地出口
+     * {@code ServerPlayer.teleportTo}（六参，跨维度 tp 同路径）只发 RespawnPacket
+     * <b>不重发效果</b>。客户端 handleRespawn 重建 LocalPlayer（效果表为空）后，
+     * 服务端夜视实例还活着、剩余时长未低于刷新阈值（400 tick）→ onTick 的刷新条件
+     * 不满足、不补发 → 客户端夜视丢失最长 2400-400=2000 tick（约 100 秒）。
+     * 与翱翔 v1.4.0 修复（teleportTo 不重发 abilities）同族。
+     * <p>
+     * 本方法通过 addEffect 替换实例触发 {@code ClientboundUpdateMobEffectPacket} 重发，
+     * 挂 {@code PlayerChangedDimensionEvent}（两条路径均 fire，已验证），同 tick 恢复。
+     */
+    public static void resendNightVision(Player player) {
+        int duration = ModConfig.ALL_SEEING_NIGHT_VISION_DURATION.get();
+        player.addEffect(new MobEffectInstance(MobEffects.NIGHT_VISION, duration,
+            0, false, false, false));
+    }
 }

@@ -62,8 +62,10 @@ public class ActiveSkillHandler {
         long cdEnd = progress.getJudgmentCooldownEnd();
         if (cdEnd > 0 && currentTime < cdEnd) return;
 
-        // 空放不惩罚：范围内无敌对目标则不进 CD/GCD（预检与 executeJudgment 共用收集逻辑）
-        if (collectJudgmentTargets(player, progress).isEmpty()) return;
+        // 空放不惩罚：范围内无敌对目标则不进 CD/GCD（收集结果直接传给执行，
+        // 避免同一释放做两次 AABB 查询——v1.4.0 审查优化）
+        List<LivingEntity> targets = collectJudgmentTargets(player, progress);
+        if (targets.isEmpty()) return;
 
         // 消耗冷却
         int cooldown = ModConfig.ACTIVE_SKILL_JUDGMENT_COOLDOWN.get();
@@ -73,7 +75,7 @@ public class ActiveSkillHandler {
         SyncUtil.syncCapabilityToPersistent(player, progress);
         SyncUtil.syncToClient(player);
 
-        executeJudgment(player);
+        executeJudgment(player, targets);
     }
 
     /** 收集审判范围内敌对目标（空放预检与执行共用——范围随觉醒 +50%） */
@@ -99,6 +101,22 @@ public class ActiveSkillHandler {
 
         var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
         if (progressOpt.isEmpty()) return 0;
+        return executeJudgment(player, collectJudgmentTargets(player, progressOpt.get()));
+    }
+
+    /**
+     * 审判执行体（targets 由调用方传入——handleJudgment 复用空放预检的收集结果，
+     * 免费审判入口自收集，避免同一释放做两次 AABB 查询）。
+     *
+     * @param player 释放者
+     * @param targets 已收集的范围内敌对目标
+     * @return 受影响的实体数量
+     */
+    private static int executeJudgment(ServerPlayer player, List<LivingEntity> targets) {
+        if (player.level().isClientSide()) return 0;
+
+        var progressOpt = AdventureProgressCapability.getAdventureProgress(player);
+        if (progressOpt.isEmpty()) return 0;
         var progress = progressOpt.get();
 
         // 防御性门禁：冒险者 + 里程碑解锁 active_skill 即可释放审判
@@ -112,7 +130,6 @@ public class ActiveSkillHandler {
         float baseDamage = (float) (double) ModConfig.ACTIVE_SKILL_JUDGMENT_BASE_DAMAGE.get();
         float hpRatio = (float) (double) ModConfig.ACTIVE_SKILL_JUDGMENT_HP_RATIO.get() * milestones;
 
-        List<LivingEntity> targets = collectJudgmentTargets(player, progress);
         if (targets.isEmpty()) return 0;
         ServerLevel level = (ServerLevel) player.level();
         for (LivingEntity target : targets) {

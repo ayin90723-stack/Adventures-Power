@@ -20,7 +20,8 @@ public class ShadowKillAbility extends AbstractAbility {
 
     /**
      * 影杀是双参数能力（固伤 + 比例），handler 直接调用 {@link #flatDamage()} 和
-     * {@link #hpRatio()} 获取两个配置值。{@code value()} 仅满足接口契约，实际不被调用。
+     * {@link #hpRatio()} 获取两个配置值。{@code value()} 返回固伤，供 P 面板
+     * 当前数值展示（AbilityGate.value 经 lang 键 ability...shadow_kill.value）。
      */
 
     @Override

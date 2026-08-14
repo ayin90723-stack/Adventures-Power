@@ -227,8 +227,17 @@ public class NetworkHandler {
 
         public static void encode(BuffBlacklistSyncPacket msg, FriendlyByteBuf buf) {
             buf.writeBoolean(msg.request);
-            buf.writeVarInt(msg.blacklist.size());
-            for (String s : msg.blacklist) buf.writeUtf(s);
+            // 对称限长（v1.4.0 审查修复）：与 decode 的 readUtf(64) 对齐——外部途径
+            // （手改存档 NBT / 旧版本数据）写入的超长 key 在此过滤，否则服务端
+            // 无界编码成功、客户端 readUtf(64) 解码抛异常，该玩家进入"进服即踢"循环
+            int count = 0;
+            for (String s : msg.blacklist) {
+                if (s != null && s.length() <= 64) count++;
+            }
+            buf.writeVarInt(count);
+            for (String s : msg.blacklist) {
+                if (s != null && s.length() <= 64) buf.writeUtf(s, 64);
+            }
         }
 
         public static BuffBlacklistSyncPacket decode(FriendlyByteBuf buf) {
@@ -244,8 +253,14 @@ public class NetworkHandler {
                 return;
             }
             if (msg.request) {
-                // 客户端→服务端：请求同步
+                // 客户端→服务端：请求同步（v1.4.0 审查修复补限频：每次处理都读
+                // persistentData + 回发全量列表，与 AdventureSyncRequestPacket 的
+                // 放大场景相同——复用其 20 tick 冷却表，语义一致且登出清理已覆盖）
                 runOnServer(ctx, player -> {
+                    long now = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer().getTickCount();
+                    Long last = AdventureSyncRequestPacket.SYNC_REQUEST_COOLDOWN.get(player.getUUID());
+                    if (last != null && now - last < 20) return; // 1s 限频，静默丢弃
+                    AdventureSyncRequestPacket.SYNC_REQUEST_COOLDOWN.put(player.getUUID(), now);
                     Set<String> blacklist = BuffExclusionManager.getBuffExclusionSet(player);
                     INSTANCE.send(PacketDistributor.PLAYER.with(() -> player),
                         new BuffBlacklistSyncPacket(blacklist));
@@ -343,6 +358,11 @@ public class NetworkHandler {
                     || AdventureProgressCapability.isFullyUnlocked(player)) {
                     AdventureProgressCapability.toggleAbility(player, msg.id);
                     SyncUtil.syncToClient(player);
+                    // v1.4.0 审查修复：补 persistentData 第二层同步——toggle 是此前唯一
+                    // 遗漏该同步的变更路径，若 toggle 后服务器崩溃且 ForgeCaps 恰未落盘，
+                    // 登录恢复会读过期快照，手动关闭的能力被"复活"（三层备份约定 7 缺口）
+                    AdventureProgressCapability.getAdventureProgress(player)
+                        .ifPresent(p -> SyncUtil.syncCapabilityToPersistent(player, p));
 
                     // 翱翔 toggle 后立即同步 mayfly，不等下一 tick handler
                     if (AbilityIds.SOAR.equals(msg.id)) {
@@ -471,12 +491,14 @@ public class NetworkHandler {
                     AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
                         if (progress.isAbilityEnabled(AbilityIds.ACTIVE_SKILL)) {
                             progress.setActiveSkillIndex(msg.skillIndex == 0 ? 0 : 1);
+                            // 回发同步（v1.4.0 审查修复：移入门禁内）——接受时持久化确认，
+                            // 拒绝时（两端数据短暂不一致）让客户端乐观更新回滚到服务端
+                            // 真实状态，避免 HUD 索引永久偏离。未激活玩家客户端不会
+                            // 做乐观更新，回滚理由不成立，回发 KB 级 NBT 纯浪费流量
+                            SyncUtil.syncToClient(player);
                         }
                     });
                 }
-                // 总是回发同步：接受时持久化确认，拒绝时（两端数据短暂不一致）
-                // 让客户端乐观更新回滚到服务端真实状态，避免 HUD 索引永久偏离
-                SyncUtil.syncToClient(player);
             });
         }
     }

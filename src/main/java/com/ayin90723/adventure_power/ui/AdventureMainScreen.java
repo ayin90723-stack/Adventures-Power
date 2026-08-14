@@ -20,6 +20,7 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.effect.MobEffectCategory;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraftforge.registries.ForgeRegistries;
+import com.mojang.blaze3d.systems.RenderSystem;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -55,6 +56,8 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
     private final Set<String> excludedEffects = new HashSet<>();
     private final List<MobEffectInstance> displayEffects = new ArrayList<>();
     private final List<String> displayEffectNames = new ArrayList<>();
+    /** 预计算的注册表 key（refreshDisplayEffects 时更新，渲染/点击共用，避免每帧 MOB_EFFECTS.getKey 查询） */
+    private final List<String> displayEffectIds = new ArrayList<>();
     /** 预计算的剩余时间/状态文本（refreshDisplayEffects 时更新，避免每帧 String.format 与对象创建） */
     private final List<String> displayEffectTimes = new ArrayList<>();
     private final List<String> displayEffectStatuses = new ArrayList<>();
@@ -178,6 +181,7 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
     private void refreshDisplayEffects() {
         displayEffects.clear();
         displayEffectNames.clear();
+        displayEffectIds.clear();
         displayEffectTimes.clear();
         displayEffectStatuses.clear();
         Minecraft mc = Minecraft.getInstance();
@@ -188,7 +192,8 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
             }
         }
         displayEffects.sort((a, b) -> Integer.compare(b.getDuration(), a.getDuration()));
-        // 预计算显示名（含罗马数字）、剩余时间与状态文本，避免每帧格式化与对象创建
+        // 预计算显示名（含罗马数字）、注册表 key、剩余时间与状态文本，
+        // 避免每帧格式化/注册表查询与对象创建
         for (MobEffectInstance effect : displayEffects) {
             String name = effect.getEffect().getDisplayName().getString();
             if (effect.getAmplifier() > 0) {
@@ -197,6 +202,7 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
             displayEffectNames.add(name);
             displayEffectTimes.add(formatDuration(effect.getDuration()));
             String effectId = ForgeRegistries.MOB_EFFECTS.getKey(effect.getEffect()).toString();
+            displayEffectIds.add(effectId);
             boolean excluded = excludedEffects.contains(effectId);
             displayEffectStatuses.add(excluded
                 ? Component.translatable("screen.adventure_power.status_expire").getString()
@@ -236,6 +242,22 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
 
     @Override
     protected int visibleHeight() { return this.height - TOP_Y - BOTTOM_PADDING; }
+
+    /**
+     * 行区裁剪（1.20.1 无 GuiGraphics.enableScissors——1.20.2+ API，用 RenderSystem
+     * scissor 等效实现）。三个 tab 的行渲染循环外包：末行多渲染一行用于半行显示，
+     * 无裁剪时其下半部分会画过可见区边界、与底部提示文本重叠（v1.4.0 审查修复）。
+     */
+    private void enableRowScissors() {
+        double scale = this.minecraft.getWindow().getGuiScale();
+        RenderSystem.enableScissor(
+            0, (int) (TOP_Y * scale),
+            (int) (this.width * scale), (int) (visibleHeight() * scale));
+    }
+
+    private void disableRowScissors() {
+        RenderSystem.disableScissor();
+    }
 
     @Override
     protected int contentHeight() {
@@ -316,25 +338,32 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         int startRow = Math.max(0, scrollOffset / ROW_HEIGHT);
         int endRow = Math.min(abilityEntries.size(), startRow + visibleRows + 1);
         String hoveredAbilityId = null;
-        for (int i = startRow; i < endRow; i++) {
-            var entry = abilityEntries.get(i);
-            String id = entry.getKey();
-            String name = abilityNames.get(i);
-            int y = TOP_Y + i * ROW_HEIGHT - scrollOffset;
-            boolean isDisabled = disabledAbilities.contains(id);
-            if (mouseX >= leftX && mouseX <= leftX + PANEL_WIDTH
-                && mouseY >= y - 1 && mouseY < y + ROW_HEIGHT - 1) {
-                graphics.fill(leftX, y - 1, leftX + PANEL_WIDTH, y + ROW_HEIGHT - 1, 0x22FFFFFF);
-                hoveredAbilityId = id;
+        // 半行裁剪（v1.4.0 审查修复）：endRow 多渲染一行用于滚动到底部时的半行显示，
+        // 无裁剪时其下半部分会画过可见区边界、与底部提示文本重叠
+        enableRowScissors();
+        try {
+            for (int i = startRow; i < endRow; i++) {
+                var entry = abilityEntries.get(i);
+                String id = entry.getKey();
+                String name = abilityNames.get(i);
+                int y = TOP_Y + i * ROW_HEIGHT - scrollOffset;
+                boolean isDisabled = disabledAbilities.contains(id);
+                if (mouseX >= leftX && mouseX <= leftX + PANEL_WIDTH
+                    && mouseY >= y - 1 && mouseY < y + ROW_HEIGHT - 1) {
+                    graphics.fill(leftX, y - 1, leftX + PANEL_WIDTH, y + ROW_HEIGHT - 1, 0x22FFFFFF);
+                    hoveredAbilityId = id;
+                }
+                String dot = isDisabled ? "§7○" : "§a●";
+                graphics.drawString(this.font, dot, leftX + 5, y, isDisabled ? COLOR_GRAY : COLOR_GREEN);
+                graphics.drawString(this.font, name, leftX + 22, y, COLOR_WHITE);
+                Component status = isDisabled
+                    ? Component.translatable("screen.adventure_power.disabled")
+                    : Component.translatable("screen.adventure_power.enabled");
+                graphics.drawString(this.font, status.getString(), leftX + 140, y,
+                    isDisabled ? COLOR_GRAY : COLOR_GREEN);
             }
-            String dot = isDisabled ? "§7○" : "§a●";
-            graphics.drawString(this.font, dot, leftX + 5, y, isDisabled ? COLOR_GRAY : COLOR_GREEN);
-            graphics.drawString(this.font, name, leftX + 22, y, COLOR_WHITE);
-            Component status = isDisabled
-                ? Component.translatable("screen.adventure_power.disabled")
-                : Component.translatable("screen.adventure_power.enabled");
-            graphics.drawString(this.font, status.getString(), leftX + 140, y,
-                isDisabled ? COLOR_GRAY : COLOR_GREEN);
+        } finally {
+            disableRowScissors();
         }
         renderScrollBar(graphics, getScrollBarX(), TOP_Y);
         // 悬停能力条目 -> 侧边显示效果 / 当前数值 / 觉醒效果
@@ -461,6 +490,9 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         int rightSpace = this.width - (leftX + PANEL_WIDTH + 10) - 8;
         int leftSpace = leftX - 10 - 8;
         int candidateMaxWidth = Math.min(INFO_BOX_MAX_WIDTH, Math.max(rightSpace, leftSpace));
+        // 下限保护（v1.4.0 审查修复）：极小分辨率（窗口宽 <~360px）下两侧 space 均为负，
+        // textMaxWidth 负值会使 wrapText 退化为逐字符换行——钳到 60 保证至少可读
+        candidateMaxWidth = Math.max(60, candidateMaxWidth);
         int textMaxWidth = candidateMaxWidth - INFO_BOX_PADDING * 2;
 
         for (String l : wrapText(desc, textMaxWidth)) descLines.add("§7" + l);
@@ -590,25 +622,31 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         int visibleRows = visibleHeight() / ROW_HEIGHT;
         int startRow = Math.max(0, scrollOffset / ROW_HEIGHT);
         int endRow = Math.min(displayEffects.size(), startRow + visibleRows + 1);
-        for (int i = startRow; i < endRow; i++) {
-            MobEffectInstance effect = displayEffects.get(i);
-            int y = TOP_Y + i * ROW_HEIGHT - scrollOffset;
-            String effectId = ForgeRegistries.MOB_EFFECTS.getKey(effect.getEffect()).toString();
-            boolean isExcluded = excludedEffects.contains(effectId);
-            if (mouseX >= leftX && mouseX <= leftX + PANEL_WIDTH
-                && mouseY >= y - 1 && mouseY < y + ROW_HEIGHT - 1) {
-                graphics.fill(leftX, y - 1, leftX + PANEL_WIDTH, y + ROW_HEIGHT - 1, 0x22FFFFFF);
+        // 半行裁剪（同能力 tab）：末行溢出部分不画过可见区边界
+        enableRowScissors();
+        try {
+            for (int i = startRow; i < endRow; i++) {
+                MobEffectInstance effect = displayEffects.get(i);
+                int y = TOP_Y + i * ROW_HEIGHT - scrollOffset;
+                String effectId = i < displayEffectIds.size() ? displayEffectIds.get(i) : "";
+                boolean isExcluded = excludedEffects.contains(effectId);
+                if (mouseX >= leftX && mouseX <= leftX + PANEL_WIDTH
+                    && mouseY >= y - 1 && mouseY < y + ROW_HEIGHT - 1) {
+                    graphics.fill(leftX, y - 1, leftX + PANEL_WIDTH, y + ROW_HEIGHT - 1, 0x22FFFFFF);
+                }
+                String dot = isExcluded ? "§7○" : "§a●";
+                graphics.drawString(this.font, dot, leftX + 5, y, isExcluded ? COLOR_GRAY : COLOR_GREEN);
+                String name = displayEffectNames.get(i);
+                graphics.drawString(this.font, name, leftX + 22, y, COLOR_WHITE);
+                String timeStr = displayEffectTimes.get(i);
+                graphics.drawString(this.font, timeStr, leftX + 100, y,
+                    effect.getDuration() < 60 ? COLOR_YELLOW : COLOR_WHITE);
+                String status = displayEffectStatuses.get(i);
+                graphics.drawString(this.font, status, leftX + 140, y,
+                    isExcluded ? COLOR_GRAY : COLOR_GREEN);
             }
-            String dot = isExcluded ? "§7○" : "§a●";
-            graphics.drawString(this.font, dot, leftX + 5, y, isExcluded ? COLOR_GRAY : COLOR_GREEN);
-            String name = displayEffectNames.get(i);
-            graphics.drawString(this.font, name, leftX + 22, y, COLOR_WHITE);
-            String timeStr = displayEffectTimes.get(i);
-            graphics.drawString(this.font, timeStr, leftX + 100, y,
-                effect.getDuration() < 60 ? COLOR_YELLOW : COLOR_WHITE);
-            String status = displayEffectStatuses.get(i);
-            graphics.drawString(this.font, status, leftX + 140, y,
-                isExcluded ? COLOR_GRAY : COLOR_GREEN);
+        } finally {
+            disableRowScissors();
         }
         renderScrollBar(graphics, getScrollBarX(), TOP_Y);
         graphics.drawCenteredString(this.font,
@@ -658,17 +696,23 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         }
         var progress = milestoneProgress.orElse(null);
 
-        for (int i = startRow; i < endRow; i++) {
-            Milestone m = all.get(i);
-            int y = TOP_Y + i * MILESTONE_ROW_HEIGHT - scrollOffset;
-            graphics.fill(LEFT_X - 4, y - 1, leftX + PANEL_WIDTH + 4, y + MILESTONE_ROW_HEIGHT - 1, COLOR_BG);
-            // 缓存行兜底：/reload 后行缓存尚未随进度桶重建（size 不匹配）时现场构建
-            Component left = i < milestoneRowCache.size()
-                ? milestoneRowCache.get(i) : buildMilestoneRow(m, progress != null && progress.isMilestoneUnlocked(m.id()));
-            graphics.drawString(this.font, left, LEFT_X, y + 4, COLOR_WHITE);
-            Component hint = i < milestoneHintCache.size()
-                ? milestoneHintCache.get(i) : getUnlockHint(m);
-            graphics.drawString(this.font, hint, RIGHT_X, y + 4, COLOR_GRAY);
+        // 半行裁剪（同能力/Buff tab）：末行溢出部分不画过可见区边界
+        enableRowScissors();
+        try {
+            for (int i = startRow; i < endRow; i++) {
+                Milestone m = all.get(i);
+                int y = TOP_Y + i * MILESTONE_ROW_HEIGHT - scrollOffset;
+                graphics.fill(LEFT_X - 4, y - 1, leftX + PANEL_WIDTH + 4, y + MILESTONE_ROW_HEIGHT - 1, COLOR_BG);
+                // 缓存行兜底：/reload 后行缓存尚未随进度桶重建（size 不匹配）时现场构建
+                Component left = i < milestoneRowCache.size()
+                    ? milestoneRowCache.get(i) : buildMilestoneRow(m, progress != null && progress.isMilestoneUnlocked(m.id()));
+                graphics.drawString(this.font, left, LEFT_X, y + 4, COLOR_WHITE);
+                Component hint = i < milestoneHintCache.size()
+                    ? milestoneHintCache.get(i) : getUnlockHint(m);
+                graphics.drawString(this.font, hint, RIGHT_X, y + 4, COLOR_GRAY);
+            }
+        } finally {
+            disableRowScissors();
         }
         renderScrollBar(graphics, getScrollBarX(), TOP_Y);
 
@@ -684,7 +728,7 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
     private static MutableComponent buildMilestoneRow(Milestone m, boolean unlocked) {
         MutableComponent left = Component.literal(unlocked ? "✓ " : "✗ ")
             .withStyle(s -> s.withColor(unlocked ? COLOR_GREEN : COLOR_DARK));
-        left.append(Component.literal(m.name())
+        left.append(m.displayName()
             .withStyle(s -> s.withColor(unlocked ? COLOR_GREEN : COLOR_GRAY)));
         if (unlocked) {
             left.append(Component.literal("  §8->  "));
@@ -801,9 +845,9 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
             if (y < TOP_Y - ROW_HEIGHT || y > TOP_Y + visibleHeight()) continue;
             if (mouseX >= leftX && mouseX <= leftX + PANEL_WIDTH
                 && mouseY >= y - 1 && mouseY < y + ROW_HEIGHT - 1) {
-                MobEffectInstance effect = displayEffects.get(i);
-                String effectId = ForgeRegistries.MOB_EFFECTS.getKey(effect.getEffect()).toString();
-                NetworkHandler.sendBuffToggle(effectId);
+                // 复用 refreshDisplayEffects 的预计算 key（与渲染行同源，避免重复注册表查询）
+                if (i >= displayEffectIds.size()) return false;
+                NetworkHandler.sendBuffToggle(displayEffectIds.get(i));
                 return true;
             }
         }

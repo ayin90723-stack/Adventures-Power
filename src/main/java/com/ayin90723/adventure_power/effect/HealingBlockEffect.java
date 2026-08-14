@@ -78,12 +78,20 @@ public class HealingBlockEffect extends MobEffect {
       return true;
    }
 
-   /** 检查实体当前是否受禁疗之触效果影响（NBT 优先，内存表回退；过期自动清理） */
+   /** 检查实体当前是否受禁疗之触效果影响（内存快路径 → NBT → 内存回退；过期自动清理） */
    public static boolean isActive(LivingEntity entity) {
       if (entity == null || entity.level().isClientSide()) {
          return false;
       }
       long gameTime = entity.level().getGameTime();
+      // 快路径（v1.4.0 审查修复）：内存表命中且未过期直接返回——本方法挂在全服
+      // 每次血量写入（setHealth HEAD/RETURN）与每 tick（TAIL）的热路径上，
+      // 99.99% 的实体从未被禁疗，先查内存表避免每次 NBT 查找（getPersistentData
+      // 还会为从未使用的实体惰性分配空 tag）。与 onLivingTick 的快路径语义对齐
+      TrackedEntry quick = TRACKED_HEALTH.get(entity.getUUID());
+      if (quick != null && gameTime <= quick.endTime) {
+         return true;
+      }
       // ① NBT 标记优先 —— 正常实体持久化路径（服务器重启后仍可恢复）
       CompoundTag data = entity.getPersistentData();
       if (data != null && data.contains(NBT_KEY)) {
@@ -149,7 +157,18 @@ public class HealingBlockEffect extends MobEffect {
     */
    public static void clampBack(LivingEntity self, float tracked) {
       HealthUtil.setHealthLikeAny(self, tracked);
-      self.setHealth(tracked);
+      // v1.4.0 审查修复：模组内部写血必须包 INTERNAL_HEALTH_WRITE 标记（与
+      // ExplorationAbilityHandler.clampHealthTo 同款）——否则一旦目标为冒险者
+      // （未来开放 PVP 禁疗或外部数据包写入 NBT 标记），此调用会被自家
+      // RejectHealthManipMixin cancel 且 TrueHealthMixin 反向修复回 backup，
+      // 钳制与防御层形成对抗
+      boolean prevInternal = HealthUtil.INTERNAL_HEALTH_WRITE.get();
+      HealthUtil.INTERNAL_HEALTH_WRITE.set(true);
+      try {
+         self.setHealth(tracked);
+      } finally {
+         HealthUtil.INTERNAL_HEALTH_WRITE.set(prevInternal);
+      }
    }
 
    /** 记录觉醒易伤到期时间（内存 + NBT 双源，与禁疗标记同理） */

@@ -57,7 +57,7 @@ public class AdventurePowerCommand {
     /** 里程碑 id TAB 联想（tooltip 显示显示名——玩家无需记忆 id） */
     private static final SuggestionProvider<CommandSourceStack> MILESTONE_SUGGESTIONS = (ctx, builder) -> {
         for (Milestone m : MilestoneRegistry.getAll()) {
-            builder.suggest(m.id(), Component.literal(m.name()));
+            builder.suggest(m.id(), m.displayName());
         }
         return builder.buildFuture();
     };
@@ -136,13 +136,13 @@ public class AdventurePowerCommand {
         }
         if (progressOpt.get().isMilestoneUnlocked(m.id())) {
             ctx.getSource().sendSuccess(
-                () -> Component.translatable("command.adventure_power.milestone_already", m.name()), false);
+                () -> Component.translatable("command.adventure_power.milestone_already", m.displayName()), false);
             return 0;
         }
         // grantMilestone 为唯一入口：完成 Capability 更新 + NBT + 饰品 + 客户端同步 + 觉醒级联
         AdventureProgressCapability.grantMilestone(player, m.id());
         ctx.getSource().sendSuccess(
-            () -> Component.translatable("command.adventure_power.milestone_unlocked", m.name()), false);
+            () -> Component.translatable("command.adventure_power.milestone_unlocked", m.displayName()), false);
         return 1;
     }
 

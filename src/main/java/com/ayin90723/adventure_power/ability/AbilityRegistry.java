@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.ability;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -14,7 +15,12 @@ public class AbilityRegistry {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(AbilityRegistry.class);
 
-    public static final Map<String, Ability> ALL = new LinkedHashMap<>();
+    /** 内部可变注册表（仅类内 register/setCountAtUnlock 访问） */
+    private static final Map<String, Ability> REGISTRY = new LinkedHashMap<>();
+
+    /** 注册表不可变视图（v1.4.0 审查修复：可变 Map 直接暴露会被外部 put/remove 破坏，
+     *  迭代/查询语义不变；countAtUnlock 写在 Ability 实例上不经过本 map） */
+    public static final Map<String, Ability> ALL = Collections.unmodifiableMap(REGISTRY);
 
     static {
         register(new AgilityAbility());
@@ -50,14 +56,14 @@ public class AbilityRegistry {
     }
 
     private static void register(Ability ability) {
-        Ability prev = ALL.put(ability.id(), ability);
+        Ability prev = REGISTRY.put(ability.id(), ability);
         if (prev != null) {
             LOGGER.warn("[AbilityRegistry] 能力 ID 重复注册：{}（后者覆盖前者，请检查注册表）", ability.id());
         }
     }
 
     public static Ability get(String id) {
-        return ALL.get(id);
+        return REGISTRY.get(id);
     }
 
     /**
@@ -65,7 +71,7 @@ public class AbilityRegistry {
      * 该值写入 Ability 实例，驱动成长公式 value(count) = base + perMilestone × (count - countAtUnlock)。
      */
     public static void setCountAtUnlock(String id, int count) {
-        Ability ability = ALL.get(id);
+        Ability ability = REGISTRY.get(id);
         if (ability != null) {
             ability.setCountAtUnlock(count);
         }
@@ -76,7 +82,7 @@ public class AbilityRegistry {
      * 注意：被新 JSON 移除的能力其 countAtUnlock 回 0，避免残留旧值。
      */
     public static void clearCountAtUnlockOverrides() {
-        for (Ability ability : ALL.values()) {
+        for (Ability ability : REGISTRY.values()) {
             ability.setCountAtUnlock(0);
         }
     }

@@ -27,9 +27,10 @@ public class RejectHealthManipUtil {
     /**
      * 玩家登出时清理该玩家的 ATTR_OWNER 条目。
      * <p>
-     * ATTR_OWNER 的 value 是 LivingEntity 强引用，而玩家登出不触发
-     * {@code setRemoved}（{@code RejectHealthManipMixin.cleanupOnRemoval}
-     * 不生效），条目会残留导致 ServerPlayer 对象无法被 GC。此处主动清理。
+     * 冗余兜底：1.20.1 登出链 PlayerList.remove → removePlayerImmediately(UNLOADED_WITH_PLAYER)
+     * → Entity.remove 必然触发 {@code RejectHealthManipMixin.cleanupOnRemoval}（主要清理路径）；
+     * ATTR_OWNER 的 value 是 LivingEntity 强引用，本方法保证即使 remove 链被外部
+     * Mixin 拦截，ServerPlayer 对象仍可被 GC。
      */
     public static void clearOwner(Player player) {
         ATTR_OWNER.values().removeIf(v -> v == player);

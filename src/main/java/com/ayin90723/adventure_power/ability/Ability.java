@@ -21,8 +21,9 @@ public interface Ability {
     Component description();
 
     /**
-     * 当前数值。count = 玩家已解锁的里程碑总数。
-     * 无成长的能力可返回 -1 表示"已解锁即完整"。
+     * 当前数值。count 必须传 {@code AbilityGate.effectiveCount(progress, id)} 的平移结果
+     * （核心设计约定 12，禁止直接传 getUnlockedMilestoneCount）——无成长的能力可返回 -1
+     * 表示"已解锁即完整"。成长公式内部以 countAtUnlock 为解锁时刻基准。
      */
     float value(int count);
 

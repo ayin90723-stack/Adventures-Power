@@ -147,11 +147,12 @@ public class CombatAbilityHandler {
             if (event.isCanceled()) return;
             // 同 tick 去重（淬魂/影杀/禁疗/嗜血共享）：穿透三连的手动 post + actuallyHurt 内
             // ForgeHooks 二次 post 会让攻击方能力同 tick 双结算——按 (attacker, target)
-            // 同 tick 只结算一次（影杀内部另有 SHADOW_KILL_TICKED 双保险）
-            if (!tryMarkCombatTick(attacker, target)) return;
+            // 同 tick 只结算一次（影杀内部另有 SHADOW_KILL_TICKED 双保险）。
+            // 放在 progress 门禁之后：非冒险者每次命中无需写去重集合（纯微优化，语义不变）
             var progress = AdventureProgressCapability.getAdventureProgress(attacker).orElse(null);
             if (progress == null) return;
             if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
+            if (!tryMarkCombatTick(attacker, target)) return;
 
             if (progress.isAbilityEnabled(AbilityIds.HEALING_BLOCK)) handleHealingBlock(event, target, attacker, progress);
             if (progress.isFullyUnlocked() && progress.isAbilityEnabled(AbilityIds.PIERCING_GAZE)) handlePiercingGazeAwakened(event, target, attacker, progress);

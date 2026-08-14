@@ -200,7 +200,7 @@ public class ExplorationAbilityHandler {
         }
 
         if (enabled) {
-            double expected = 20.0 + bonus;
+            double expected = Attributes.MAX_HEALTH.getDefaultValue() + bonus;
             if (Math.abs(currentVal - expected) > 0.001) {
                 ORIGINAL_MAX_HEALTH.putIfAbsent(player.getUUID(), currentVal);
                 attr.setBaseValue(expected);
@@ -214,13 +214,13 @@ public class ExplorationAbilityHandler {
             Double restore = ORIGINAL_MAX_HEALTH.get(player.getUUID());
             if (restore == null) {
                 // 无记录（从未启用，或服务端重启后静态 Map 清空、player.dat 已保存 20+bonus 的残留值）：
-                // 残留判定——当前值 ≈ 本模组启用时会写的值（20+bonus）则判定为本模组残留，回归默认 20；
+                // 残留判定——当前值 ≈ 本模组启用时会写的值（默认+bonus）则判定为本模组残留，回归默认；
                 // 否则视为其他模组的修改，**不记录、不操作**——若无条件记录当前值为原值，
                 // 从未启用过本能力的玩家其 baseValue 会被永久"锁存"，之后其他模组的临时修改
                 // 会被本模组每 tick 还原并强制裁剪血量（三能力全关的短路分支每 tick 调用本方法）。
-                double own = 20.0 + bonus;
+                double own = Attributes.MAX_HEALTH.getDefaultValue() + bonus;
                 if (Math.abs(currentVal - own) > 0.001) return;
-                restore = 20.0;
+                restore = Attributes.MAX_HEALTH.getDefaultValue();
                 ORIGINAL_MAX_HEALTH.put(player.getUUID(), restore);
             }
             if (Math.abs(currentVal - restore) > 0.001) {

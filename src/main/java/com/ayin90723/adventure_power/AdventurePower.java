@@ -9,7 +9,6 @@ import com.ayin90723.adventure_power.item.ModItems;
 import com.ayin90723.adventure_power.network.NetworkHandler;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
-import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
@@ -33,9 +32,8 @@ public class AdventurePower {
         ModItems.ITEMS.register(modEventBus);
         ModItems.CREATIVE_MODE_TABS.register(modEventBus);
 
-        // 事件订阅
-        MinecraftForge.EVENT_BUS.register(this);
-
+        // 事件订阅均走各 handler 的 @EventBusSubscriber（本类无 @SubscribeEvent，
+        // 无需 EVENT_BUS.register——v1.4.0 审查清理冗余注册）
         modEventBus.addListener(this::commonSetup);
     }
 

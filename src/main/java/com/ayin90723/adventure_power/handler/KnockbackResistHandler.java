@@ -109,6 +109,10 @@ public class KnockbackResistHandler {
                 AbilityGate.effectiveCount(progress, AbilityIds.KNOCKBACK_RESIST),
                 progress.isFullyUnlocked(), ModConfig.KNOCKBACK_RESIST_HARD_CAP.get().floatValue());
             attr.setBaseValue(percent / 100.0);
+            // v1.4.0 审查修复：同步记录 LAST_WRITTEN（与 onTick 启用分支一致）——
+            // 否则 Clone 后登出时 getOrDefault 回退取 ORIGINAL（Clone 重置后恒为 0），
+            // 与当前值（本模组写入值）不等 → 跳过恢复 → 本模组击退抗性残留进 player.dat
+            LAST_WRITTEN.put(player.getUUID(), percent / 100.0);
         });
     }
 

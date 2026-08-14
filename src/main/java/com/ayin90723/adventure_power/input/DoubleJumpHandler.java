@@ -35,6 +35,12 @@ public class DoubleJumpHandler {
     /** 本空中周期已跳过二段跳的玩家集合，落地清除 */
     private static final Set<UUID> AIR_JUMPED = new HashSet<>();
 
+    /** 拒绝回发节流表：UUID → 上次拒绝回发的服务端全局 tick。
+     *  v1.4.0 审查修复：拒绝路径原先对每个请求包 1:1 回发拉回包（无放大，但与
+     *  网络层其余包的节流思路不一致）——10 tick 窗口内只回发一次，恶意刷包
+     *  不再逐包响应。主线程独占访问（包处理经 enqueueWork），HashMap 即可。 */
+    private static final java.util.Map<UUID, Long> REJECT_THROTTLE = new java.util.HashMap<>();
+
     // ==================== 公开入口 ====================
 
     /**
@@ -49,11 +55,16 @@ public class DoubleJumpHandler {
         if (tryApplyJump(player)) {
             playEffects(player);
         } else if (!player.onGround()) {
-            // 拒绝时拉回客户端预测，防独飞。
+            // 拒绝时拉回客户端预测，防独飞（10 tick 节流见 REJECT_THROTTLE 注释）。
             // 落地瞬间的拒绝属于落地竞态（服务端 AIR_JUMPED 在 tick END 清零，客户端
             // MovementInputUpdateEvent 已先清零）——此时客户端位置已随落地自然收敛，
             // 拉回包会把客户端预测的 Y 和御风冲刺一起拉掉，产生可见顿挫，故跳过。
-            player.connection.send(new ClientboundSetEntityMotionPacket(player));
+            long now = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer().getTickCount();
+            Long last = REJECT_THROTTLE.get(player.getUUID());
+            if (last == null || now - last >= 10) {
+                REJECT_THROTTLE.put(player.getUUID(), now);
+                player.connection.send(new ClientboundSetEntityMotionPacket(player));
+            }
         }
     }
 
@@ -112,11 +123,13 @@ public class DoubleJumpHandler {
     @SubscribeEvent
     public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         AIR_JUMPED.remove(event.getEntity().getUUID());
+        REJECT_THROTTLE.remove(event.getEntity().getUUID());
     }
 
     /** 玩家死亡重生 / 跨维度（Clone）-> 清理残留 */
     @SubscribeEvent
     public static void onPlayerClone(PlayerEvent.Clone event) {
         AIR_JUMPED.remove(event.getEntity().getUUID());
+        REJECT_THROTTLE.remove(event.getEntity().getUUID());
     }
 }

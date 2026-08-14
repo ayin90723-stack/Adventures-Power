@@ -56,10 +56,11 @@ public class LegacyHurtAndBreakMixin {
         }
     }
 
-    // ===== Forge hurt（m_220157_）=====
+    // ===== hurt(int, RandomSource, ServerPlayer)（SRG m_220157_，原版方法）=====
 
     /**
-     * 拦截 Forge 新增的 {@code hurt(int, RandomSource, ServerPlayer)}。
+     * 拦截 {@code hurt(int, RandomSource, ServerPlayer)}（1.20.1 原版方法，非 Forge 新增——
+     * tsrg 核实 m_220157_ 属 ItemStack 官方映射）。
      * <p>
      * LostEngine 等模组通过此方法消耗耐久并检测物品是否损坏。
      * 返回 {@code false}（未损坏）阻止调用方的物品删除逻辑，

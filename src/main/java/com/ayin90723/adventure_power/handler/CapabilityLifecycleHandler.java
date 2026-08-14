@@ -40,7 +40,13 @@ import net.minecraftforge.fml.common.Mod.EventBusSubscriber.Bus;
 @EventBusSubscriber(modid = AdventurePower.MODID, bus = Bus.FORGE)
 public class CapabilityLifecycleHandler {
 
-    // ===== Clone（死亡/跨维度） =====
+    // ===== Clone（死亡重生 / 末地 credits respawn） =====
+    // v1.4.0 审查澄清（字节码核实）：1.20.1 维度切换（传送门 changeDimension /
+    // 末地出口 teleportTo）**不触发** PlayerEvent.Clone——ForgeEventFactory.onPlayerClone
+    // 仅在 PlayerList.respawn 调用链上 fire（死亡 respawn + 末地 credits 完成确认的
+    // respawn(keepEverything=true)，后者时点已 changeDimension 回主世界、两实体同维度
+    // timeDelta≈0）。维度切换路径的计时平移由 onDimensionChange 处理，本方法专注
+    // 死亡重生的数据转移（wasDeath 分支判断仍兼容两路径）。
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onPlayerClone(PlayerEvent.Clone event) {

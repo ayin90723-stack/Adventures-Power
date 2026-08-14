@@ -60,6 +60,9 @@ public final class BuffExclusionManager {
         CompoundTag blacklist = root.getCompound(BUFF_BLACKLIST_KEY);
         Set<String> set = new HashSet<>();
         for (String key : blacklist.getAllKeys()) {
+            // 长度校验（v1.4.0 审查修复）：网络同步层 readUtf(64) 限长，此处源头对齐——
+            // 外部途径（手改存档）写入的超长 key 不进入运行时集合，防同步不对称
+            if (key.length() > 64) continue;
             if (blacklist.getBoolean(key)) set.add(key);
         }
         return set;

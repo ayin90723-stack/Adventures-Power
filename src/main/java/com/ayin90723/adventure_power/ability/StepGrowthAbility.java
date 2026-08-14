@@ -15,6 +15,10 @@ public abstract class StepGrowthAbility extends AbstractAbility {
 
     protected StepGrowthAbility(int countAtUnlock, int divisor) {
         super(countAtUnlock);
+        if (divisor <= 0) {
+            // 防御（v1.4.0 审查）：双参构造是 protected 公开 API，divisor=0 会在 value() 除零
+            throw new IllegalArgumentException("divisor must be > 0, got " + divisor);
+        }
         this.divisor = divisor;
     }
 

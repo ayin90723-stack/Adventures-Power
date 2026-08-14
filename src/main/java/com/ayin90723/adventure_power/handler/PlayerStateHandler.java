@@ -223,7 +223,8 @@ public class PlayerStateHandler {
         // 清理 ATTR_OWNER 中该玩家条目：玩家登出不触发 setRemoved，
         // 否则 value 强引用会阻止 ServerPlayer 被 GC（内存泄漏）
         RejectHealthManipUtil.clearOwner(event.getEntity());
-        // 不清理 ORIGINAL_MOVE_SPEED：庇护期间登出后,重登时 onTick 的 else 分支需 remove 恢复原始速度
+        // 不清理 ORIGINAL_MOVE_SPEED：庇护期间登出后,重登时 tickSanctuarySpeed（门禁前执行）
+        // 的 else 分支需 remove 恢复原始速度
     }
 
     // ========================================================================
@@ -255,22 +256,24 @@ public class PlayerStateHandler {
     }
 
     /**
-     * 维度切换后强制重发 abilities 包（v1.4.0 修复翱翔失效）。
+     * 维度切换后强制重发客户端重建即丢的状态（v1.4.0 修复翱翔失效 + 夜视同步慢）。
      * <p>
      * <b>根因</b>：三条维度切换路径的发包行为不同（字节码核实）——
      * <ul>
      *   <li>传送门 {@code ServerPlayer.changeDimension}（m_5489_）：无条件重发
-     *       {@code ClientboundPlayerAbilitiesPacket} ✓</li>
+     *       {@code ClientboundPlayerAbilitiesPacket} ✓ + 重发全部活跃效果包
+     *       （getActiveEffects + ClientboundUpdateMobEffectPacket 循环）✓</li>
      *   <li>死亡重生 {@code PlayerList.respawn}（m_11289_）：重发 abilities ✓
-     *       （另有 {@code restoreSoarFlight} 兜底）</li>
-     *   <li><b>末地出口 {@code ServerPlayer.teleportTo}（m_8999_）：不重发</b> ✗——
-     *       客户端收 {@code ClientboundRespawnPacket} 后重建 LocalPlayer（abilities 重置
-     *       为默认 mayfly=false），服务端实体未变 mayfly 仍 true——tick 兜底只看服务端
-     *       状态不触发，无人重发 → 客户端"翱翔失效"（按空格无反应）直到下次 abilities
-     *       同步（切游戏模式/死亡/toggle/重登）</li>
+     *       （另有 {@code restoreSoarFlight} 兜底；效果重生后由 onTick 立即重施加）</li>
+     *   <li><b>末地出口 {@code ServerPlayer.teleportTo}（m_8999_，六参——跨维度
+     *       /execute in run tp 同走此方法）：不重发 abilities ✗ 也不重发效果包 ✗</b>——
+     *       客户端收 {@code ClientboundRespawnPacket} 后重建 LocalPlayer（abilities
+     *       重置默认 mayfly=false、效果表为空），服务端实体未变（mayfly 仍 true、
+     *       夜视实例还活着且剩余时长未低于刷新阈值 400 tick 不会补发）→ 客户端
+     *       "翱翔失效"（按空格无反应）+ "夜视丢失最长 ~100 秒"直到下次同步</li>
      * </ul>
      * 本监听挂 {@code PlayerChangedDimensionEvent}（传送门与末地出口两路径均 fire，
-     * 已字节码验证）：翱翔玩家无条件重发当前 abilities，恢复客户端 mayfly/flying 状态。
+     * 已字节码验证）：翱翔玩家无条件重发当前 abilities；全视之眼玩家无条件重发夜视。
      */
     @SubscribeEvent
     public static void onDimensionChange(PlayerEvent.PlayerChangedDimensionEvent event) {
@@ -279,6 +282,9 @@ public class PlayerStateHandler {
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
             if (progress.isAbilityEnabled(AbilityIds.SOAR)) {
                 player.onUpdateAbilities();
+            }
+            if (progress.isAbilityEnabled(AbilityIds.ALL_SEEING)) {
+                AllSeeingHandler.resendNightVision(player);
             }
         });
     }
@@ -498,14 +504,16 @@ public class PlayerStateHandler {
                 int weaknessAmp = ModConfig.AWAKEN_PURIFIED_SOUL_WEAKNESS_AMPLIFIER.get();
                 int weaknessDur = ModConfig.AWAKEN_PURIFIED_SOUL_WEAKNESS_DURATION.get();
                 AABB aabb = player.getBoundingBox().inflate(radius);
-                List<LivingEntity> targets = player.level()
-                    .getEntitiesOfClass(LivingEntity.class, aabb,
-                        e -> e != player && e.isAlive()
-                            && e instanceof net.minecraft.world.entity.monster.Monster);
+                // 直接按 Monster 类型收集（v1.4.0 审查优化）：原先拉取半径内全部
+                // LivingEntity 再 instanceof 过滤，与 SwiftHandler 的同款扫描对齐
+                //（Player 不实现 Monster 接口，无需再排除自身）
+                List<net.minecraft.world.entity.monster.Monster> targets = player.level()
+                    .getEntitiesOfClass(net.minecraft.world.entity.monster.Monster.class, aabb,
+                        net.minecraft.world.entity.monster.Monster::isAlive);
                 // 刷新余量：时长的 60%，且至少覆盖到下一次施加（避免配置短时长时断档）
                 int refreshThreshold = Math.min(weaknessDur * 3 / 5,
                     ModConfig.AWAKEN_PURIFIED_SOUL_AURA_INTERVAL.get());
-                for (LivingEntity target : targets) {
+                for (net.minecraft.world.entity.monster.Monster target : targets) {
                     MobEffectInstance existing = target.getEffect(MobEffects.WEAKNESS);
                     if (existing == null || existing.getAmplifier() < weaknessAmp
                         || existing.getDuration() < refreshThreshold) {
@@ -562,7 +570,20 @@ public class PlayerStateHandler {
             removeUndyingGearAwakened(player);
         }
 
-        // ---- 旅者庇护：非觉醒锁定移动，觉醒减速移动 ----
+        // 旅者庇护速度维护在 tickSanctuarySpeed（由 PlayerTickDispatcher 在门禁前调用，
+        // 恢复分支不能受 adventurer 门禁限制，见该方法注释）
+    }
+
+    /**
+     * 旅者庇护移动速度维护：非觉醒锁定移动（base=0），觉醒减速移动。
+     * <p>
+     * <b>必须由 {@link PlayerTickDispatcher} 在 adventurer 门禁之前调用</b>（v1.4.0 审查修复）：
+     * 玩家在庇护激活的数秒窗口内卸下冒险饰品后 adventurer/fullyUnlocked 均失效，
+     * 若本逻辑只在门禁后执行，base=0 的恢复分支永不可达 → 移动速度永久锁死，
+     * 直到重新佩戴饰品。门禁前调用保证 else 恢复分支对任何持有 progress 的玩家始终可达
+     * （未激活玩家 inSanctuary 恒 false，仅做 O(1) 的残留查询，无副作用）。
+     */
+    static void tickSanctuarySpeed(Player player, IAdventureProgress progress) {
         long sanctuaryNow = player.level().getGameTime();
         boolean inSanctuary = progress.getSanctuaryInvulEnd() > sanctuaryNow
             && progress.isAbilityEnabled(AbilityIds.ACTIVE_SKILL);

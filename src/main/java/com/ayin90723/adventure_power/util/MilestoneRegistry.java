@@ -157,6 +157,10 @@ public class MilestoneRegistry {
         Set<String> seenIds = new HashSet<>();
         // 能力 ID → 首次出现的里程碑（检测同一能力挂多个里程碑的归属歧义）
         Map<String, String> abilityFirstSeen = new HashMap<>();
+        // 被禁能力 ID → 归属里程碑 id（v1.4.0 审查修复：disabled 能力的 countAtUnlock
+        // 不能在解析循环内用 JSON 原始下标设置——某条目损坏被跳过时 JSON 下标与
+        // loaded 最终列表位置错位；改为记录归属，applyMilestones 后按最终位置统一设置）
+        Map<String, String> disabledAbilityOwner = new HashMap<>();
         for (int i = 0; i < arr.size(); i++) {
             JsonObject obj = arr.get(i).getAsJsonObject();
             try {
@@ -172,14 +176,15 @@ public class MilestoneRegistry {
                 List<String> abilities = new ArrayList<>();
                 JsonArray abilityArr = obj.getAsJsonArray("abilities");
                 if (abilityArr != null) {
-                    for (JsonElement e : abilityArr) {
-                        String abilityId = e.getAsString();
-                        if (disabled.contains(abilityId)) {
-                            // 被数据包禁用：不加入能力列表，但保持其归属位置的 countAtUnlock，
-                            // 指令后门解锁该能力后成长公式仍按原设计计算（不出现数值错乱）
-                            AbilityRegistry.setCountAtUnlock(abilityId, i + 1);
-                            continue;
-                        }
+                        for (JsonElement e : abilityArr) {
+                            String abilityId = e.getAsString();
+                            if (disabled.contains(abilityId)) {
+                                // 被数据包禁用：不加入能力列表，但记录归属里程碑，
+                                // applyMilestones 后按最终列表位置设置 countAtUnlock
+                                // （指令后门解锁该能力后成长公式仍按原设计计算）
+                                disabledAbilityOwner.put(abilityId, id);
+                                continue;
+                            }
                         if (AbilityRegistry.get(abilityId) == null) {
                             LOGGER.warn("[MilestoneRegistry] 未知的 ability ID: {}，跳过", abilityId);
                         } else {
@@ -239,6 +244,23 @@ public class MilestoneRegistry {
         }
 
         applyMilestones(loaded);
+        // disabled 能力的 countAtUnlock：按 loaded 最终列表中归属里程碑的位置设置，
+        // 与正常能力（applyMilestones 内 i+1）同一套索引基准——JSON 条目损坏被跳过
+        // 时不会错位；同一被禁能力挂多个里程碑取最后出现位置（与正常能力语义一致）
+        for (Map.Entry<String, String> entry : disabledAbilityOwner.entrySet()) {
+            int pos = -1;
+            for (int i = 0; i < milestones.size(); i++) {
+                if (milestones.get(i).id().equals(entry.getValue())) {
+                    pos = i;
+                }
+            }
+            if (pos >= 0) {
+                AbilityRegistry.setCountAtUnlock(entry.getKey(), pos + 1);
+            } else {
+                LOGGER.warn("[MilestoneRegistry] 被禁能力 {} 的归属里程碑 {} 未在最终列表中，countAtUnlock 保持 0",
+                    entry.getKey(), entry.getValue());
+            }
+        }
         LOGGER.info("[MilestoneRegistry] 加载完成: {} 个里程碑", milestones.size());
     }
 
@@ -295,7 +317,12 @@ public class MilestoneRegistry {
             Milestone m = loaded.get(i);
             byId.put(m.id(), m);
             if (m.advancement() != null) {
-                byAdvancement.put(m.advancement(), m);
+                Milestone prevAdv = byAdvancement.put(m.advancement(), m);
+                if (prevAdv != null) {
+                    // 数据包作者笔误（两个里程碑绑同一成就）时只有后者可经成就解锁，提示排查
+                    LOGGER.warn("[MilestoneRegistry] 里程碑 {} 与 {} 绑定同一成就 {}，成就解锁仅对 {} 生效",
+                        prevAdv.id(), m.id(), m.advancement(), m.id());
+                }
             }
             if (m.trigger() != null && m.trigger().type() != null) {
                 byTriggerType.computeIfAbsent(m.trigger().type(), k -> new ArrayList<>()).add(m);

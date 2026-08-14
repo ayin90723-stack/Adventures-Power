@@ -195,7 +195,10 @@ public class ShadowKillHelper {
             }
             removeShadowHPBossBar(target);
 
-            event.setCanceled(true);  // 取消原事件伤害，避免与下面 hurt() 叠加
+            event.setCanceled(true);  // 取消原事件伤害，避免与下面 hurt() 叠加。
+            // 取舍（v1.4.0 审查确认）：cancel 使嗜血的 LOW 优先级攻击吸血跳过本次（不收
+            // canceled 事件）——影杀为必杀一击，吸血意义让位于击杀回馈（LivingDeathEvent
+            // 仍触发，RecoveryHandler 的击杀回馈正常结算），刻意不在此手动补吸血
             target.setLastHurtByMob(attacker);
             target.setLastHurtByPlayer(attacker);
             executeShadowKill(target, attacker);
@@ -212,6 +215,11 @@ public class ShadowKillHelper {
     /**
      * 饱和式秒杀 — 当 hurt() / die() 全部被拦截时的最终手段。
      * 通过多层移除链逐层递增，确保无 Boss 可拦截。
+     * <p>
+     * v1.4.0 审查修复：分段异常保护——本方法运行在 LivingHurtEvent 分发链上，任一层
+     * 未捕获异常会中断同事件的其他监听器且后续层全部跳过（Boss 停留"0 血未移除"
+     * 中间态）。各段独立降级捕获：归零段/战利品段失败不阻断移除段；移除段（⑥~⑨）
+     * 逐层捕获，保证任一层失败其余层仍执行。
      */
     private static void saturationKill(LivingEntity target, DamageSource source, LivingEntity attacker) {
         Level level = target.level();
@@ -221,61 +229,96 @@ public class ShadowKillHelper {
         //     （覆盖普通字段真血，如亚波伦 FloatWrapped / 灵梦 CombatProgress，带 WritePath 缓存）
         //     → DataItem 按值匹配兜底。扰动（写测试值/调 setter）均在同一同步窗口内
         //     try/finally 还原，客户端无感知；命中即归零
-        HealthUtil.setHealthLikeAny(target, 0.0F);
-
         // ①b 全 float 同步数据保险丝 — 砧板之刃[神]同款：清空所有 float 同步条目，
         //     覆盖"不联动 getHealth 的隐藏 float 条目"（插针发现不了的旁路）。
         //     目标即将被删除，副作用（缩放/动画清零）随实体消失
-        HealthUtil.zeroAllSynchedFloats(target);
-
-        // ② 强制掉落全套装备
-        for (EquipmentSlot slot : EquipmentSlot.values()) {
-            ItemStack equipment = target.getItemBySlot(slot);
-            if (!equipment.isEmpty()) {
-                target.spawnAtLocation(equipment.copy());
-                target.setItemSlot(slot, ItemStack.EMPTY);
-            }
+        try {
+            HealthUtil.setHealthLikeAny(target, 0.0F);
+            HealthUtil.zeroAllSynchedFloats(target);
+        } catch (Exception e) {
+            LOGGER.error("[ShadowKill] 归零段失败（①①b），继续移除链 target={}", target, e);
         }
 
-        // ③ 反射调用 dropAllDeathLoot（触发战利品表 / LivingDropsEvent / LootModifier）
+        // ② 强制掉落全套装备 + ③ 反射调用 dropAllDeathLoot（触发战利品表 /
+        //     LivingDropsEvent / LootModifier）+ ④ 手动 post LivingDeathEvent（墓碑/任务
+        //     模组可正常处理）+ ⑤ 善后清理 —— 战利品/事件段失败不阻断移除
         try {
+            for (EquipmentSlot slot : EquipmentSlot.values()) {
+                ItemStack equipment = target.getItemBySlot(slot);
+                if (!equipment.isEmpty()) {
+                    target.spawnAtLocation(equipment.copy());
+                    target.setItemSlot(slot, ItemStack.EMPTY);
+                }
+            }
             if (DROP_ALL_DEATH_LOOT != null) {
                 DROP_ALL_DEATH_LOOT.invoke(target, source);
             }
         } catch (Exception e) {
-            LOGGER.error("[ShadowKill] 反射/内部操作失败", e);
+            LOGGER.error("[ShadowKill] 战利品段失败（②③），继续移除链 target={}", target, e);
+        }
+        try {
+            MinecraftForge.EVENT_BUS.post(new LivingDeathEvent(target, source));
+            target.unRide();
+            target.ejectPassengers();
+        } catch (Exception e) {
+            LOGGER.error("[ShadowKill] 死亡事件/善后段失败（④⑤），继续移除链 target={}", target, e);
         }
 
-        // ④ 手动 post LivingDeathEvent（墓碑/任务模组可正常处理）
-        MinecraftForge.EVENT_BUS.post(new LivingDeathEvent(target, source));
-
-        // ⑤ 善后清理
-        target.unRide();
-        target.ejectPassengers();
-
-        // ⑥ 五重移除链 — 逐层递增，确保无 Boss 可拦截
-        target.remove(Entity.RemovalReason.KILLED);                             // 标准路径
-        target.remove(Entity.RemovalReason.DISCARDED);                          // 双保险
-        HealthUtil.removeDirect(target, Entity.RemovalReason.KILLED);           // 反射 remove() — 绕过 Java 覆写
-        HealthUtil.setRemovedFieldDirect(target, Entity.RemovalReason.KILLED);  // 字段直写 — 绕过一切 Mixin
+        // ⑥ 五重移除链 — 逐层递增，确保无 Boss 可拦截（逐层捕获：任一层失败其余层仍执行）
+        try {
+            target.remove(Entity.RemovalReason.KILLED);                             // 标准路径
+        } catch (Exception e) {
+            LOGGER.error("[ShadowKill] 移除层1失败 target={}", target, e);
+        }
+        try {
+            target.remove(Entity.RemovalReason.DISCARDED);                          // 双保险
+        } catch (Exception e) {
+            LOGGER.error("[ShadowKill] 移除层2失败 target={}", target, e);
+        }
+        try {
+            HealthUtil.removeDirect(target, Entity.RemovalReason.KILLED);           // 反射 remove() — 绕过 Java 覆写
+        } catch (Exception e) {
+            LOGGER.error("[ShadowKill] 移除层3失败 target={}", target, e);
+        }
+        try {
+            HealthUtil.setRemovedFieldDirect(target, Entity.RemovalReason.KILLED);  // 字段直写 — 绕过一切 Mixin
+        } catch (Exception e) {
+            LOGGER.error("[ShadowKill] 移除层4失败 target={}", target, e);
+        }
         // 第5层：CHANGED_DIMENSION 兜底 — 部分 Boss 的 Mixin 仅拦截 KILLED/DISCARDED
-        HealthUtil.setRemovedDirect(target, Entity.RemovalReason.CHANGED_DIMENSION);
+        try {
+            HealthUtil.setRemovedDirect(target, Entity.RemovalReason.CHANGED_DIMENSION);
+        } catch (Exception e) {
+            LOGGER.error("[ShadowKill] 移除层5失败 target={}", target, e);
+        }
 
         // ⑦ 客户端同步 — 强制通知所有追踪此实体的玩家其已被移除
-        net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket packet =
-            new net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket(target.getId());
-        serverLevel.getChunkSource().broadcast(target, packet);
+        try {
+            net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket packet =
+                new net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket(target.getId());
+            serverLevel.getChunkSource().broadcast(target, packet);
+        } catch (Exception e) {
+            LOGGER.error("[ShadowKill] 客户端移除包发送失败（⑦） target={}", target, e);
+        }
 
         // ⑧ 内部结构抹除 — 从 EntityLookup/EntityTickList/EntitySection 中直接删除实体
-        HealthUtil.eradicateFromWorld(target);
+        try {
+            HealthUtil.eradicateFromWorld(target);
+        } catch (Exception e) {
+            LOGGER.error("[ShadowKill] 容器抹除失败（⑧） target={}", target, e);
+        }
 
         // ⑨ 最终确认 — 若防护 Boss 在移除链中清除了标记（极端场景），兜底重写 removalReason
-        if (!target.isRemoved()) {
-            DebugLog.shadowKill("[影杀] 移除标记被清除，兜底重写 target={}", target);
-            HealthUtil.setRemovedFieldDirect(target, Entity.RemovalReason.KILLED);
+        try {
+            if (!target.isRemoved()) {
+                DebugLog.shadowKill("[影杀] 移除标记被清除，兜底重写 target={}", target);
+                HealthUtil.setRemovedFieldDirect(target, Entity.RemovalReason.KILLED);
+            }
+            DebugLog.shadowKill("[影杀] 饱和式秒杀完成 target={} removed={} reason={}",
+                target, target.isRemoved(), target.getRemovalReason());
+        } catch (Exception e) {
+            LOGGER.error("[ShadowKill] 兜底确认失败（⑨） target={}", target, e);
         }
-        DebugLog.shadowKill("[影杀] 饱和式秒杀完成 target={} removed={} reason={}",
-            target, target.isRemoved(), target.getRemovalReason());
     }
 
     // ==================== 影杀辅助：BossBar ====================

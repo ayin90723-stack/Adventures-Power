@@ -29,7 +29,7 @@ public final class ProgressCache {
     private static final Map<Entity, Entry> CACHE = Collections.synchronizedMap(new WeakHashMap<>());
 
     private static final class Entry {
-        volatile long tick; // 构造后不再变更；volatile 保证 synchronized 块外读取可见
+        final long tick; // 构造后不再变更（v1.4.0 审查：volatile→final，去掉多余内存屏障）
         final IAdventureProgress progress; // null = 本 tick 已检查且未附加 capability
         Entry(long tick, IAdventureProgress progress) {
             this.tick = tick;
