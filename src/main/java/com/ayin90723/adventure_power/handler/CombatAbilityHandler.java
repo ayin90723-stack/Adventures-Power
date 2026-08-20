@@ -15,6 +15,8 @@ import com.ayin90723.adventure_power.util.DebugLog;
 import com.ayin90723.adventure_power.util.FriendlyFireProtection;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import com.ayin90723.adventure_power.util.PiercingGazeUtil;
+import com.ayin90723.adventure_power.util.probe.BloodWriteEngine;
+import com.ayin90723.adventure_power.util.probe.ProbeScales;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.damagesource.DamageSource;
@@ -246,14 +248,16 @@ public class CombatAbilityHandler {
         target.invulnerableTime = 0;
         clearHurtTime(target);
 
-        // 兜底：hurt() 被外部 mod（Boss 限伤/硬上限等）拦截 → 直写血量
-        float epsilon = Math.max(0.01F, extraDamage * 0.01F);
+        // 兜底：hurt() 被外部 mod（Boss 限伤/硬上限等）拦截 → 走五层改血引擎
+        // v1.4.2：拦截判定容差量纲化（大血量目标读数 ulp 地板，原裸 0.01 下限会误判拦截）
+        float epsilon = ProbeScales.interceptTolerance(extraDamage, healthBefore);
         if (target.isAlive() && actualDealt < extraDamage - epsilon) {
             float correctedHealth = Math.max(healthBefore - extraDamage, 0.0F);
             DebugLog.soulQuench("[淬魂] 兜底直写: hp {} → {}（hurt 被拦截/限伤，实际仅扣 {}）",
                 healthBefore, correctedHealth, actualDealt);
-            // 分级直写：通用层（方法扫描+验证）→ 对象图插针 → DataItem 兜底
-            HealthUtil.setHealthLikeAny(target, correctedHealth);
+            // 五层引擎：L1 通用 setter → L2 对象图插针 → L3 类静态容器 → 封存补探 → exhausted
+            // （L0 hurt 已由上方完成并判定拦截；设计文档 docs/quench-upgrade-proposal.md）
+            BloodWriteEngine.execute(target, correctedHealth);
             if (correctedHealth <= 0.0F) {
                 clearHurtTime(target);
                 target.invulnerableTime = 0;

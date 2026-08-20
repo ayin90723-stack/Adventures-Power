@@ -8,6 +8,8 @@ import com.ayin90723.adventure_power.util.SyncUtil;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.DamageUtil;
+import com.ayin90723.adventure_power.util.probe.BloodWriteEngine;
+import com.ayin90723.adventure_power.util.probe.ProbeScales;
 import com.ayin90723.adventure_power.util.FriendlyFireProtection;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import net.minecraft.core.particles.ParticleTypes;
@@ -144,10 +146,13 @@ public class ActiveSkillHandler {
             float actualDealt = healthBefore - HealthUtil.getEffectiveHealth(target);
             target.invulnerableTime = 0;
 
-            float epsilon = Math.max(0.01F, totalDamage * 0.01F);
+            // v1.4.2：拦截判定容差量纲化（大血量目标读数 ulp 地板，同淬魂）
+            float epsilon = ProbeScales.interceptTolerance(totalDamage, healthBefore);
             if (target.isAlive() && actualDealt < totalDamage - epsilon) {
                 float correctedHealth = Math.max(healthBefore - totalDamage, 0.0F);
-                HealthUtil.setAllHealthLikeRaw(target, correctedHealth);
+                // v1.4.2：五层引擎（磨血语义）--L3/L4 覆盖静态 Map/加密存储型高级 Boss；
+                // 全层失败退 raw（与原 setAllHealthLikeRaw 行为等价）
+                BloodWriteEngine.execute(target, correctedHealth);
                 if (correctedHealth <= 0.0F) {
                     target.invulnerableTime = 0;
                     target.setLastHurtByMob(player);

@@ -5,6 +5,7 @@ import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.DebugLog;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import com.ayin90723.adventure_power.util.PersistentDataKeys;
+import com.ayin90723.adventure_power.util.probe.BloodWriteEngine;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.effect.MobEffect;
@@ -156,7 +157,9 @@ public class HealingBlockEffect extends MobEffect {
     * 不满足 {@code health > tracked}，自然放行，无递归。
     */
    public static void clampBack(LivingEntity self, float tracked) {
-      HealthUtil.setHealthLikeAny(self, tracked);
+      // v1.4.2：五层改血引擎（磨血语义=写低点值）--L3 类静态容器/L4 广义写路径
+      // 覆盖"真血藏在静态 Map/加密存储"的高级 Boss；引擎关闭时内部退回 setHealthLikeAny 行为不变
+      BloodWriteEngine.execute(self, tracked);
       // v1.4.0 审查修复：模组内部写血必须包 INTERNAL_HEALTH_WRITE 标记（与
       // ExplorationAbilityHandler.clampHealthTo 同款）——否则一旦目标为冒险者
       // （未来开放 PVP 禁疗或外部数据包写入 NBT 标记），此调用会被自家
@@ -338,9 +341,9 @@ public class HealingBlockEffect extends MobEffect {
          if (data.contains(FORCE_KILL_KEY) && data.getBoolean(FORCE_KILL_KEY)) {
             data.remove(FORCE_KILL_KEY);
             // 如果被其他模组取消（复活），强制归零血量并放行死亡
-            // 使用 setAllHealthLikeRaw 直写 DataItem.value 字段清零原版+自定义血条
+            // v1.4.2：五层引擎处决归零（覆盖静态 Map/加密存储型；全层失败退 raw 清零原版+自定义血条）
             if (event.isCanceled()) {
-               HealthUtil.setAllHealthLikeRaw(entity, 0.0F);
+               BloodWriteEngine.execute(entity, 0.0F);
                event.setCanceled(false);
             }
          }

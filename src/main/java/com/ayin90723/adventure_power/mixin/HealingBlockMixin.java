@@ -3,6 +3,7 @@ package com.ayin90723.adventure_power.mixin;
 import com.ayin90723.adventure_power.effect.HealingBlockEffect;
 import com.ayin90723.adventure_power.util.DebugLog;
 import com.ayin90723.adventure_power.util.HealthUtil;
+import com.ayin90723.adventure_power.util.probe.BloodWriteEngine;
 import net.minecraft.world.entity.LivingEntity;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -50,9 +51,10 @@ public class HealingBlockMixin {
         // 回血请求（写高）：源头掐断 —— 真血压回低点 + cancel 原调用，
         // 原版槽/自写字段都不会被写高，客户端血条纹丝不动
         if (health > tracked) {
-            DebugLog.healingBlock("[禁疗] setHealth HEAD 拦截回血: {} → 低点 {}（原请求 {}）",
+            DebugLog.healingBlock("[禁疗] setHealth HEAD 拦截回血: {} -> 低点 {}（原请求 {}）",
                 self, tracked, health);
-            HealthUtil.setHealthLikeAny(self, tracked);
+            // v1.4.2：五层引擎（磨血语义）覆盖静态 Map/加密存储型高级 Boss
+            BloodWriteEngine.execute(self, tracked);
             ci.cancel();
         }
     }

@@ -62,6 +62,13 @@ public class ModConfig {
     public static final DoubleValue SOUL_QUENCH_HP_RATIO_10;
     public static final DoubleValue SOUL_QUENCH_HEALING_BLOCK_MULTIPLIER;
     public static final IntValue SOUL_QUENCH_PARTICLE_COUNT;
+    // --- 淬魂之力·五层改血引擎（v1.4.2，docs/quench-upgrade-proposal.md） ---
+    public static final BooleanValue QUENCH_ENGINE_ENABLED;
+    public static final DoubleValue QUENCH_PROBE_EPS_BASE;
+    public static final DoubleValue QUENCH_REPROBE_RATIO;
+    public static final BooleanValue QUENCH_LAYER3_ENABLED;
+    public static final BooleanValue QUENCH_LAYER4_ENABLED;
+    public static final IntValue QUENCH_GRAPH_BUDGET;
 
     // --- 破敌之眼 ---
     public static final BooleanValue PIERCING_GAZE_FEEDBACK_ENABLED;
@@ -274,6 +281,18 @@ public class ModConfig {
             .defineInRange("soul_quench_healing_block_multiplier", 1.5, 1.0, 10.0);
         SOUL_QUENCH_PARTICLE_COUNT = BUILDER.comment("命中时灵魂蓝火粒子数量（0=关闭粒子反馈）")
             .defineInRange("soul_quench_particle_count", 6, 0, 100);
+        QUENCH_ENGINE_ENABLED = BUILDER.comment("五层改血引擎开关（关闭=退回 v1.4.1 三级直写链；引擎含 L1 通用setter/L2 对象图插针/L3 类静态容器/封存补探与 per-class 负缓存）")
+            .define("quench_engine_enabled", true);
+        QUENCH_PROBE_EPS_BASE = BUILDER.comment("探针步长基数 ε（量纲缩放下限：ε=max(基数, ulp(读数)×4)；高血量 Boss 的 ulp 地板会自动放大，无需调高）")
+            .defineInRange("quench_probe_eps_base", 1.0, 0.1, 100.0);
+        QUENCH_REPROBE_RATIO = BUILDER.comment("读数漂移重探阈值（读数较负缓存记录时刻漂移超过 最大生命×该比例 时失效重探；过大=重探滞后，过小=频繁重扫）")
+            .defineInRange("quench_reprobe_ratio", 0.01, 0.001, 0.2);
+        QUENCH_LAYER3_ENABLED = BUILDER.comment("L3 类静态容器层开关（扫描目标类静态 Map 缓存型血量存储，如 GraeMod UomWither；关闭=L2 失败后直接进 L4）")
+            .define("quench_layer3_enabled", true);
+        QUENCH_LAYER4_ENABLED = BUILDER.comment("L4 广义写路径层开关（行为学扫描目标模组类与可达 holder 上的单数值参数方法并验证 getHealth 联动，覆盖加密存血/双字段校验/不变量维护型 Boss；探针有界扰动，详见设计文档）")
+            .define("quench_layer4_enabled", true);
+        QUENCH_GRAPH_BUDGET = BUILDER.comment("L2 对象图扫描预算（访问对象数上限）：geckolib 动画类实体可达图可达数百万对象，超预算立即中止并封存该类（防数秒卡顿）；实测泽林变体 597 万对象单次全图 4.6 秒。调大=覆盖更广但可能卡顿")
+            .defineInRange("quench_graph_budget", 200000, 10000, 5000000);
         BUILDER.pop();
 
         BUILDER.push("破敌之眼");

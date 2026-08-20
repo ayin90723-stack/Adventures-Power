@@ -1,5 +1,8 @@
 package com.ayin90723.adventure_power.util;
 
+import com.ayin90723.adventure_power.config.ModConfig;
+import com.ayin90723.adventure_power.util.probe.BloodWriteEngine;
+import com.ayin90723.adventure_power.util.probe.ProbeScales;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
@@ -259,6 +262,9 @@ public class HealthUtil {
      */
     private static Field DATA_ITEM_VALUE_FIELD;
 
+    /** 实体上的 {@code SynchedEntityData} 字段（声明在 Entity 类，SRG f_19804_——getDeclaredField 必须从声明类起查），DataItem 槽插针的路径起点。 */
+    private static Field ENTITY_DATA_FIELD;
+
     static {
         try {
             ENTITY_DATA_ITEMS_FIELD = SynchedEntityData.class.getDeclaredField("f_135345_");
@@ -282,6 +288,26 @@ public class HealthUtil {
             }
         } catch (ClassNotFoundException | NoSuchFieldException e) {
             LOGGER.error("[HealthUtil] 无法反射获取 DataItem.value 字段", e);
+        }
+        if (DATA_ITEM_VALUE_FIELD != null) {
+            DATA_ITEM_VALUE_FIELD.setAccessible(true);
+        }
+
+        try {
+            // entityData 声明在 Entity 类（非 LivingEntity）——getDeclaredField 不沿父类链，
+            // 必须从 Entity 起找（v1.4.2 实测：用 LivingEntity.class 查 f_19804_/entityData 双失败，
+            // 槽插针静默失效，泽林改血无效）
+            Class<?> entityClazz = net.minecraft.world.entity.Entity.class;
+            try {
+                ENTITY_DATA_FIELD = entityClazz.getDeclaredField("f_19804_");
+            } catch (NoSuchFieldException e) {
+                ENTITY_DATA_FIELD = entityClazz.getDeclaredField("entityData");
+            }
+        } catch (NoSuchFieldException e) {
+            LOGGER.error("[HealthUtil] 无法反射获取 Entity.entityData 字段", e);
+        }
+        if (ENTITY_DATA_FIELD != null) {
+            ENTITY_DATA_FIELD.setAccessible(true);
         }
         if (DATA_ITEM_VALUE_FIELD != null) {
             DATA_ITEM_VALUE_FIELD.setAccessible(true);
@@ -347,21 +373,28 @@ public class HealthUtil {
      * @return true 表示命中并写入成功
      */
     public static boolean setHealthLikeGeneric(LivingEntity target, float health) {
+        Class<?> targetClass = target.getClass();
+        // L1 负缓存（v1.4.2）：本类无命中方法 → 跳过全扫（getDeclaredMethods 每次分配 Method[] 拷贝）。
+        // 级联失效时由 BloodWriteEngine 统一清空（正缓存漂移=对方形态变化，负结论同步作废）
+        if (GENERIC_NO_HIT.contains(targetClass)) return false;
         // v1.4.0 审查修复：按类缓存命中的 Method——原实现每次调用都
         // getDeclaredMethods()（分配 Method[] 拷贝）+ 逐个 invoke 验证，
         // 禁疗目标的每次回血尝试（regen 约每 20 tick）都全量扫描。
         // 缓存命中仍走验证闭环（不通过则清缓存回退全扫，行为等价）
-        Class<?> targetClass = target.getClass();
         java.lang.reflect.Method cached = GENERIC_WRITE_CACHE.get(targetClass);
+        // 量纲口径：ε 基于当前读数（子代理审查修：原用目标值 epsilon(health)，磨血时两者差 ≤ ulp 等价，
+        // 但规范定义为读数口径，统一）
+        float driftTol = ProbeScales.driftTolerance(ProbeScales.epsilon(target.getHealth()));
         if (cached != null) {
             try {
                 cached.invoke(target, health);
-                if (Math.abs(getEffectiveHealth(target) - health) < 1.0F) {
+                if (Math.abs(getEffectiveHealth(target) - health) < driftTol) {
                     return true;
                 }
             } catch (Exception ignored) {
             }
             GENERIC_WRITE_CACHE.remove(targetClass);
+            BloodWriteEngine.onPositiveCacheDrift();
         }
         for (java.lang.reflect.Method m : targetClass.getDeclaredMethods()) {
             Class<?>[] p = m.getParameterTypes();
@@ -371,21 +404,32 @@ public class HealthUtil {
             try {
                 m.setAccessible(true);
                 m.invoke(target, health);
-                if (Math.abs(getEffectiveHealth(target) - health) < 1.0F) {
+                if (Math.abs(getEffectiveHealth(target) - health) < driftTol) {
                     DebugLog.probe("[通用直写] 命中 {}: {} → {}", m.getName(), target, health);
                     GENERIC_WRITE_CACHE.put(targetClass, m);
+                    GENERIC_NO_HIT.remove(targetClass);
                     return true;
                 }
             } catch (Exception ignored) {
                 // 调用失败（访问控制/类型不符）→ 继续下一候选
             }
         }
+        GENERIC_NO_HIT.add(targetClass);
         return false;
     }
 
     /** 通用层直写的方法缓存：实体类 → 命中的 (F)V Health 写入方法（验证闭环筛选）。 */
     private static final java.util.Map<Class<?>, java.lang.reflect.Method> GENERIC_WRITE_CACHE =
         new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 通用层负缓存（v1.4.2）：本类确认无命中的 Health 写方法，跳过全扫；级联失效时统一清空。 */
+    private static final java.util.Set<Class<?>> GENERIC_NO_HIT = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** 级联失效入口（BloodWriteEngine 调用）：任意正缓存漂移 → 通用层负缓存 + 对象图超预算封存全部作废。 */
+    public static void invalidateGenericNegativeCache() {
+        GENERIC_NO_HIT.clear();
+        GRAPH_OVERWHELMED.clear();
+    }
 
     /**
      * 插针命中缓存：<b>按实例</b>（弱引用）缓存真血字段写入通路（字段 + 从实体到宿主对象的引用路径链）。
@@ -403,20 +447,26 @@ public class HealthUtil {
     private static final class WritePath {
         final java.lang.reflect.Field field;
         final java.util.List<Object> steps; // Field=对象字段；其余=Map key / Collection index（按当前节点类型解释）
+        /** true=反向存储（承伤累计：血量下降=字段值上升），写值需换算 orig+(reading−targetValue)。 */
+        final boolean reverse;
 
-        WritePath(java.lang.reflect.Field field, java.util.List<Object> steps) {
+        WritePath(java.lang.reflect.Field field, java.util.List<Object> steps, boolean reverse) {
             this.field = field;
             this.steps = steps;
+            this.reverse = reverse;
         }
     }
 
     /**
-     * DataItem 联动探针：直写 DATA_HEALTH_ID 槽 value = 原值-1（绕过 set() 直改 DataItem.value 字段），
+     * DataItem 联动探针：直写 DATA_HEALTH_ID 槽 value = 原值−ε（绕过 set() 直改 DataItem.value 字段），
      * 观察 {@code getHealth()} 是否联动。
      * <p>
      * 联动 = {@code getHealth()} 真读该槽（正常实体）→ 返回 true，DataItem 直写足够；
      * 不联动 = {@code getHealth()} 被重定向/架空（如亚波伦 ASM 改写读 MegaCapability）→ 返回 false，
      * 必须进插针层找真血存储。扰动同 tick 内还原，客户端无感知。
+     * <p>
+     * v1.4.2：扰动量与判定容差量纲化（原裸 −1/±1.0 在 ≥16M HP 目标上低于 float ulp
+     * 精度地板，探针静默失效）。
      */
     private static boolean probeDataItemLinked(LivingEntity target) {
         if (ENTITY_DATA_ITEMS_FIELD == null || DATA_ITEM_VALUE_FIELD == null || DATA_HEALTH_ID == null) {
@@ -431,16 +481,22 @@ public class HealthUtil {
                 return true;
             }
             float orig = ((Float) DATA_ITEM_VALUE_FIELD.get(item)).floatValue();
-            DATA_ITEM_VALUE_FIELD.set(item, orig - 1.0F);
+            float eps = ProbeScales.epsilon(orig);
+            DATA_ITEM_VALUE_FIELD.set(item, orig - eps);
             float after;
             try {
                 after = target.getHealth();
             } finally {
                 DATA_ITEM_VALUE_FIELD.set(item, orig); // 还原
             }
-            boolean linked = Math.abs(after - (orig - 1.0F)) < 1.0F;
-            DebugLog.probe("[插针] 门禁: 槽{} 原值={} 扰动后 getHealth={} 联动={}",
-                DATA_HEALTH_ID.getId(), orig, after, linked);
+            // 双判据（实测修复）：①读数必须真的变化（防"getHealth 恒定 + 扰动量被容差吞掉"的边界误判
+            // ——49360 血改版 UomWither：eps=1.0、driftTol=1.0，未联动的 |after−(orig−eps)|=1.0 ≤ 1.0
+            // 曾误判联动，DataItem 通道被误信导致永不降层）②变化指向测试值
+            boolean changed = Math.abs(after - orig) >= ProbeScales.verifyThreshold(eps);
+            boolean directed = Math.abs(after - (orig - eps)) <= ProbeScales.driftTolerance(eps);
+            boolean linked = changed && directed;
+            DebugLog.probe("[插针] 门禁: 槽{} 原值={} 扰动后 getHealth={} 变化={} 联动={}",
+                DATA_HEALTH_ID.getId(), orig, after, changed, linked);
             return linked;
         } catch (Exception e) {
             DebugLog.probe("[插针] 门禁异常: {}", e.toString());
@@ -454,21 +510,33 @@ public class HealthUtil {
     private static final int GRAPH_DEPTH_LIMIT = 10;
 
     /**
-     * 通用对象图插针层：当 DataItem 直写无效（{@link #probeDataItemLinked} 判定
-     * getHealth 被重定向）时，从实体自身出发<b>递归遍历全部可达对象</b>，
-     * 对每个 float 字段写测试值并观察 {@code getHealth()} 是否联动 → 解明真血存储位置并完成写入。
-     * <p>
-     * 纯对象图遍历，无任何模组 API/包名耦合：真血容器（如 Capability provider 实例）
-     * 必然在实体可达对象图内，任意层级都能被摸到。安全性由<b>验证闭环</b>保证——
-     * 写 原值-1 小扰动 → {@code getHealth()} 不联动 → 立即还原，正常实体即使被插也无副作用；
-     * 只有"写它 getHealth 就变"的真血字段才会落笔。对象图遍历自带 visited 防环 +
-     * 深度上限 + 世界/注册表等全局巨对象跳过（通用性能边界，非模组耦合）。
-     * <p>
-     * 命中后按实体类缓存写入通路，后续直写零开销。
-     *
-     * @return true 表示插针命中并完成写入
+     * 对象图扫描预算中止标记值（v1.4.2 实测修复）：probeGraph 返回 -2 表示
+     * 访问对象数超过预算、扫描中止——与 -1（完整扫描未命中）语义区分，
+     * 递归调用链需立即传播中止（继续扫无意义）。
      */
-    public static boolean probeCapabilityHealth(LivingEntity target, float targetValue) {
+    private static final float GRAPH_ABORTED = -2.0F;
+
+    /**
+     * 对象图超预算类封存表（v1.4.2 实测修复）：geckolib 动画类等实体的可达图
+     * 可达数百万对象（实测泽林变体 597 万，单次全图 4.6 秒），无预算会卡顿数秒。
+     * 超预算的类封存全图扫描（DataItem/WritePath 快路径不受影响），级联失效时清空重试。
+     */
+    private static final java.util.Set<Class<?>> GRAPH_OVERWHELMED = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    /**
+     * 分级直写结果（供 {@code BloodWriteEngine} 走梯判定）。
+     */
+    public enum LayerOutcome {
+        /** L1 命中：通用 setter 写入成功。 */
+        GENERIC_HIT,
+        /** L2 命中：对象图插针写入成功。 */
+        PROBE_HIT,
+        /** DataItem 门禁通过：getHealth 真读原版槽，raw 直写即主通道（tryLayeredWrite 已执行写入）。 */
+        DATA_GATE_PASS,
+        /** L1+L2 均未命中（tryLayeredWrite 不执行 raw 兜底，由引擎决定兜底时机）。 */
+        NO_HIT
+    }
+
+    public static LayerOutcome probeCapabilityHealth(LivingEntity target, float targetValue) {
         // 缓存命中：直接走已解明的通路（路径链直达宿主，零全图搜索）
         WritePath cached = CAP_WRITE_CACHE.get(target);
         if (cached != null) {
@@ -476,23 +544,44 @@ public class HealthUtil {
                 Object owner = resolvePath(target, cached.steps, 0);
                 if (owner == null) {
                     CAP_WRITE_CACHE.remove(target);
+                    BloodWriteEngine.onPositiveCacheDrift();
                     return probeFresh(target, targetValue);
                 }
                 // 写值前验证：对象图结构变化可能让路径链指向错误宿主（索引漂移），
                 // 校验字段当前值仍接近真血读数（与 probeGraph 值域过滤同容差）；
                 // 不匹配视为路径失效 → 缓存作废 + 全图重探测（有验证闭环，不盲写）
-                float cur = cached.field.getFloat(owner);
-                float ref = target.getHealth();
-                if (Math.abs(cur - ref) > Math.max(1.0F, ref * 0.2F)) {
+                // v1.4.2：兼容 Object 型字段（DataItem.value）+ 反向存储换算
+                // 子代理审查修：反向 WritePath 的门禁参照必须用 maxHealth−reading（承伤累计
+                // 字段值≈max−reading），用正向参照会恒失效→每击重探+级联风暴
+                float cur = cached.field.getType() == Object.class
+                    ? ((Number) cached.field.get(owner)).floatValue()
+                    : cached.field.getFloat(owner);
+                float ref = cached.reverse
+                    ? target.getMaxHealth() - target.getHealth()
+                    : target.getHealth();
+                if (Math.abs(cur - ref) > ProbeScales.gateTolerance(ref)) {
                     CAP_WRITE_CACHE.remove(target);
+                    BloodWriteEngine.onPositiveCacheDrift();
                     DebugLog.probe("[插针] 缓存路径失效（字段值 {} ≠ 真血读数 {}），回退全图重探测", cur, ref);
                     return probeFresh(target, targetValue);
                 }
-                cached.field.setFloat(owner, targetValue);
-                return true;
+                // 写值公式用当前血量 reading 而非门禁参照 ref（回归修复：严重②修复把 ref 改为
+                // 反向语义 max−reading 后，写值沿用 ref 变成 away+(away−targetValue) 双倍偏移，
+                // 泽林实测"一刀残两刀杀"）。反向语义正确公式：away_new = away + (reading − targetValue)。
+                float reading = target.getHealth();
+                if (cached.field.getType() == Object.class) {
+                    float writeVal = cached.reverse ? cur + (reading - targetValue) : targetValue;
+                    cached.field.set(owner, writeVal);
+                } else if (cached.reverse) {
+                    cached.field.setFloat(owner, cur + (reading - targetValue));
+                } else {
+                    cached.field.setFloat(owner, targetValue);
+                }
+                return LayerOutcome.PROBE_HIT;
             } catch (Exception e) {
                 // 路径失效（对象图结构变化/字段不可访问）→ 缓存作废 + 全图重探测
                 CAP_WRITE_CACHE.remove(target);
+                BloodWriteEngine.onPositiveCacheDrift();
                 return probeFresh(target, targetValue);
             }
         }
@@ -504,20 +593,126 @@ public class HealthUtil {
      * 与 {@link #probeCapabilityHealth} 的区别：不做缓存读取，仅用于缓存缺失/失效后的
      * 首次探测——命中后自行写入并重建缓存。
      */
-    private static boolean probeFresh(LivingEntity target, float targetValue) {
+    private static LayerOutcome probeFresh(LivingEntity target, float targetValue) {
         // 门禁：DataItem 扰动后 getHealth 联动 = 正常实体（getHealth 真读槽 9），
         // DataItem 直写足够且更高效，不插针。门禁仅为性能优化，安全性仍由验证闭环保证。
         if (probeDataItemLinked(target)) {
+            return LayerOutcome.DATA_GATE_PASS;
+        }
+        // DataItem 自定义槽插针（v1.4.2，泽林变体实证）：真血在 SynchedEntityData 自定义
+        // Float 槽（如泽林 EXALTED_NORMAL−EXALTED_AWAY 双槽差、承伤累计反向语义）时，
+        // 门禁（DATA_HEALTH_ID）联动=false、对象图字段插针摸不到（DataItem.value 是 Object 字段）。
+        if (dataItemSlotProbe(target, targetValue)) {
+            return LayerOutcome.PROBE_HIT;
+        }
+        if (probeGraphFull(target, targetValue, false)) {
+            return LayerOutcome.PROBE_HIT;
+        }
+        return LayerOutcome.NO_HIT;
+    }
+
+    /**
+     * DataItem 自定义槽插针（v1.4.2，泽林变体 VariantZsieinEntity 实证）：
+     * 遍历目标 SynchedEntityData 的全部 Float DataItem（除 DATA_HEALTH_ID 主槽），
+     * 值闸双向形态分类（正向 value≈reading / 反向 value≈(max−reading) 承伤累计，地板≥1）
+     * → 写 ±ε 探针（血量恒下降方向）→ getHealth 联动验证 → 命中写入目标值并缓存
+     * WritePath（steps=[entityData 字段, itemsById key]，field=DataItem.value，reverse 标记）。
+     * <p>
+     * 覆盖形态：getHealth 覆写读自定义槽差（泽林 EXALTED_NORMAL−EXALTED_AWAY）、
+     * 槽内反向承伤累计（EXALTED_AWAY）、以及 setAllHealthLikeRaw 按值匹配写不中的
+     * 一切自定义 Float 槽血量。验证闭环与 probeGraph 同判据，扰动同栈还原。
+     *
+     * @return true 表示命中并完成写入
+     */
+    private static boolean dataItemSlotProbe(LivingEntity target, float targetValue) {
+        if (ENTITY_DATA_ITEMS_FIELD == null || DATA_ITEM_VALUE_FIELD == null || ENTITY_DATA_FIELD == null
+            || DATA_HEALTH_ID == null) {
             return false;
         }
-        // 通用对象图插针：从实体自身递归全部可达对象
+        try {
+            Map<Integer, Object> items = (Map<Integer, Object>) ENTITY_DATA_ITEMS_FIELD.get(target.getEntityData());
+            if (items == null) {
+                return false;
+            }
+            float reading = target.getHealth();
+            float maxHealth = target.getMaxHealth();
+            boolean reverseAllowed = ProbeScales.reverseFloorMet(target, reading);
+            float eps = ProbeScales.epsilon(reading);
+            float gateTol = ProbeScales.gateTolerance(reading);
+            float verifyTh = ProbeScales.verifyThreshold(eps);
+            float driftTol = ProbeScales.driftTolerance(eps);
+            float reverseRef = maxHealth - reading;
+            for (Map.Entry<Integer, Object> e : items.entrySet()) {
+                int key = e.getKey();
+                if (key == DATA_HEALTH_ID.getId()) continue; // 主槽门禁已判不联动，跳过
+                Object item = e.getValue();
+                if (item == null) continue;
+                Object raw = DATA_ITEM_VALUE_FIELD.get(item);
+                if (!(raw instanceof Float orig)) continue;
+                // 值闸双向形态分类（正向优先降噪）
+                boolean forward = Math.abs(orig - reading) <= gateTol;
+                boolean reverse = !forward && reverseAllowed && Math.abs(orig - reverseRef) <= gateTol;
+                if (!forward && !reverse) continue;
+                boolean isReverse = reverse;
+                // 探针：±ε 小扰动（血量恒下降方向）→ 无条件还原
+                float probeVal = isReverse ? orig + eps : orig - eps;
+                float before = target.getHealth();
+                DATA_ITEM_VALUE_FIELD.set(item, probeVal);
+                float after;
+                try {
+                    after = target.getHealth();
+                } finally {
+                    DATA_ITEM_VALUE_FIELD.set(item, orig);
+                }
+                if (Math.abs(after - before) < verifyTh) continue;
+                float expected = isReverse ? reading - eps : orig - eps;
+                if (Math.abs(after - expected) <= driftTol) {
+                    // 命中：写入目标值并缓存通路（entityData 字段 → itemsById key → DataItem.value）
+                    float writeVal = isReverse ? orig + (reading - targetValue) : targetValue;
+                    DATA_ITEM_VALUE_FIELD.set(item, writeVal);
+                    java.util.List<Object> steps = new java.util.ArrayList<>();
+                    steps.add(ENTITY_DATA_FIELD);
+                    steps.add(key);
+                    CAP_WRITE_CACHE.put(target, new WritePath(DATA_ITEM_VALUE_FIELD, steps, isReverse));
+                    DebugLog.probe("[插针] DataItem槽命中(形态={}) key={} 原值={} → {}",
+                        isReverse ? "反向承伤" : "正向血量", key, orig, writeVal);
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            DebugLog.probe("[插针] DataItem 槽插针异常: {}", e.toString());
+        }
+        return false;
+    }
+
+    /**
+     * 全图对象图插针公共入口（v1.4.2）。
+     *
+     * @param relaxed true 时放宽反向形态闸地板（封存前补探专用，满血时承伤累计型
+     *                候选的 max−reading&lt;1.0 不受降噪闸拦截）；false 为常规探测
+     */
+    public static boolean probeGraphFull(LivingEntity target, float targetValue, boolean relaxed) {
+        // 超预算封存类：直接跳过全图（WritePath 快路径不受影响；级联失效时清空重试）。
+        // 中等项修复（子代理审查）：relaxed（封存前放宽补探）不受封存拦截——补探语义本就是
+        // 放宽约束的最后一轮尝试，若仍超预算中止则封存已存在，语义自洽
+        if (!relaxed && GRAPH_OVERWHELMED.contains(target.getClass())) {
+            DebugLog.probe("[插针] {} 对象图超预算封存，跳过全图扫描", target.getClass().getSimpleName());
+            return false;
+        }
         try {
             java.util.Set<Object> visited =
                 java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
-            float hit = probeGraph(target, target, 0, targetValue, visited, new java.util.ArrayList<>());
+            float hit = probeGraph(target, target, 0, targetValue, visited, new java.util.ArrayList<>(), relaxed);
             if (hit >= 0.0F) {
                 DebugLog.probe("[插针] 命中 {}: {} → {}", target, targetValue);
                 return true;
+            }
+            if (hit == GRAPH_ABORTED) {
+                GRAPH_OVERWHELMED.add(target.getClass());
+                DebugLog.probe("[插针] {} 对象图超预算（{} 对象 > {}），中止并封存该类全图扫描",
+                    target.getClass().getSimpleName(), visited.size(),
+                    ModConfig.QUENCH_GRAPH_BUDGET.get());
+                return false;
             }
             DebugLog.probe("[插针] 对象图遍历完成: 访问 {} 个对象, 未命中", visited.size());
         } catch (Exception e) {
@@ -563,22 +758,42 @@ public class HealthUtil {
     }
 
     /**
-     * 递归插针单个对象：扫描 float 字段（值≈当前真血）写测试值验证；
-     * 命中写入目标值并缓存通路（字段 + 从实体到宿主的引用路径链），未命中还原并递归全部引用字段/容器。
+     * 递归插针单个对象：扫描 float 字段做<b>形态分类值闸</b>（正向血量镜像 /
+     * 反向承伤累计）后写测试值验证；命中写入目标值并缓存通路（字段 + 从实体到
+     * 宿主的引用路径链），未命中还原并递归全部引用字段/容器。
      * {@code visited} 防环；深度上限 {@link #GRAPH_DEPTH_LIMIT}。
      * {@code path} 记录从实体根到当前对象的步骤链（Field=对象字段；Map 记录 key；Collection 记录 index）。
      * 返回命中字段原值，未命中返回 -1。
+     * <p>
+     * v1.4.2（设计文档 quench-upgrade-proposal.md）：
+     * <ul>
+     *   <li>值闸双向形态分类（不变量①）——正向 {@code field≈reading}（血量镜像，写降）；
+     *       反向 {@code field≈(maxHealth−reading)}（承伤累计型，血量下降=字段值上升）。
+     *       两形态都匹配时正向优先（满血附近 max−reading≈0 时 0 值冷却/计数字段的假阳性降噪）。
+     *       反向候选受 {@code max−reading≥1.0} 降噪闸（relaxed=true 时放宽，封存前补探专用）。</li>
+     *   <li>量纲缩放（不变量⑦）——探针步长 ε=max(基数, ulp(reading)×4)、验证门槛与指向
+     *       容差随 ε 派生（原裸 −1/0.5/±1.0 在 ≥16M HP 目标上低于 float ulp 地板）。</li>
+     *   <li>探测方向恒朝血量下降（不变量③）——正向写 orig−ε、反向写 orig+ε。</li>
+     * </ul>
      */
     private static float probeGraph(LivingEntity target, Object obj, int depth, float targetValue,
-                                    java.util.Set<Object> visited, java.util.List<Object> path) {
+                                    java.util.Set<Object> visited, java.util.List<Object> path, boolean relaxed) {
         if (obj == null || depth > GRAPH_DEPTH_LIMIT) return -1.0F;
         if (obj instanceof Class<?> || obj instanceof Thread || obj instanceof ClassLoader) return -1.0F;
         // 通用性能边界：世界/注册表等全局巨对象（不含实体血量，跳过防对象图爆炸）
         if (obj instanceof net.minecraft.world.level.Level) return -1.0F;
         if (obj instanceof net.minecraft.core.Registry) return -1.0F;
         if (!visited.add(obj)) return -1.0F; // 防环：同 tick 内同一对象只插一次
+        // 扫描预算（v1.4.2 实测修复）：geckolib 动画类可达图数百万对象，超预算立即中止
+        if (visited.size() > ModConfig.QUENCH_GRAPH_BUDGET.get()) return GRAPH_ABORTED;
         // 参照 = getHealth()（真血读数：正常实体读槽9；重定向实体读真血源）
         float currentHealth = target.getHealth();
+        float reverseRef = target.getMaxHealth() - currentHealth; // 反向形态参照（承伤累计）
+        boolean reverseAllowed = relaxed || ProbeScales.reverseFloorMet(target, currentHealth);
+        float eps = ProbeScales.epsilon(currentHealth);
+        float gateTol = ProbeScales.gateTolerance(currentHealth);
+        float verifyTh = ProbeScales.verifyThreshold(eps);
+        float driftTol = ProbeScales.driftTolerance(eps);
         Class<?> cls = obj.getClass();
         // ① float 字段插针
         for (Class<?> c = cls; c != null && c != Object.class; c = c.getSuperclass()) {
@@ -588,11 +803,16 @@ public class HealthUtil {
                 try {
                     f.setAccessible(true);
                     float orig = f.getFloat(obj);
-                    // 值域过滤：候选必须接近当前真血（血条特征），避免扰动无关 float
-                    if (Math.abs(orig - currentHealth) > Math.max(1.0F, currentHealth * 0.2F)) continue;
-                    // 插针：快照 → 写 原值-1 小扰动 → 无条件还原
+                    // 值闸形态分类：正向候选（血量镜像）或反向候选（承伤累计），都不匹配跳过不探
+                    boolean forward = Math.abs(orig - currentHealth) <= gateTol;
+                    boolean reverse = !forward && reverseAllowed
+                        && Math.abs(orig - reverseRef) <= gateTol;
+                    if (!forward && !reverse) continue;
+                    boolean isReverse = reverse;
+                    // 插针：快照 → 写 ±ε 小扰动（血量恒下降方向）→ 无条件还原
+                    float probeVal = isReverse ? orig + eps : orig - eps;
                     float before = target.getHealth();
-                    f.setFloat(obj, orig - 1.0F);
+                    f.setFloat(obj, probeVal);
                     float after;
                     try {
                         after = target.getHealth();
@@ -600,14 +820,18 @@ public class HealthUtil {
                         f.setFloat(obj, orig); // 无条件还原（异常也不残留）
                     }
                     // 判据①：写入前后 getHealth 必须真实变化（防"恒定读数 + 碰巧≈血量"的无关字段误判）
-                    if (Math.abs(after - before) < 0.5F) continue;
+                    if (Math.abs(after - before) < verifyTh) continue;
                     // 判据②：变化量必须指向测试值（真血字段特征）
-                    if (Math.abs(after - (orig - 1.0F)) < 1.0F) {
+                    //   正向：after ≈ orig−ε；反向：血量=reading−（新增累计 ε）→ after ≈ reading−ε
+                    float expected = isReverse ? currentHealth - eps : orig - eps;
+                    if (Math.abs(after - expected) <= driftTol) {
                         // 命中：写入目标值并缓存通路（字段 + 实体→宿主路径链，按实例弱 key）
-                        f.setFloat(obj, targetValue);
-                        CAP_WRITE_CACHE.put(target, new WritePath(f, new java.util.ArrayList<>(path)));
-                        DebugLog.probe("[插针] 字段命中: {}#{} 原值={} → {}",
-                            cls.getSimpleName(), f.getName(), orig, targetValue);
+                        //   反向字段的目标值换算：累计 = 原累计 +（读数 − 目标血量）
+                        float writeVal = isReverse ? orig + (currentHealth - targetValue) : targetValue;
+                        f.setFloat(obj, writeVal);
+                        CAP_WRITE_CACHE.put(target, new WritePath(f, new java.util.ArrayList<>(path), isReverse));
+                        DebugLog.probe("[插针] 字段命中(形态={}): {}#{} 原值={} → {}",
+                            isReverse ? "反向承伤" : "正向血量", cls.getSimpleName(), f.getName(), orig, writeVal);
                         return orig;
                     }
                 } catch (Exception ignored) {
@@ -628,27 +852,27 @@ public class HealthUtil {
                         for (java.util.Map.Entry<?, ?> e : m.entrySet()) {
                             path.add(f);
                             path.add(e.getKey());
-                            float r = probeGraph(target, e.getValue(), depth + 1, targetValue, visited, path);
+                            float r = probeGraph(target, e.getValue(), depth + 1, targetValue, visited, path, relaxed);
                             path.remove(path.size() - 1);
                             path.remove(path.size() - 1);
-                            if (r >= 0.0F) return r;
+                            if (r >= 0.0F || r == GRAPH_ABORTED) return r;
                         }
                     } else if (child instanceof java.util.Collection<?> col) {
                         int idx = 0;
                         for (Object v : col) {
                             path.add(f);
                             path.add(idx);
-                            float r = probeGraph(target, v, depth + 1, targetValue, visited, path);
+                            float r = probeGraph(target, v, depth + 1, targetValue, visited, path, relaxed);
                             path.remove(path.size() - 1);
                             path.remove(path.size() - 1);
-                            if (r >= 0.0F) return r;
+                            if (r >= 0.0F || r == GRAPH_ABORTED) return r;
                             idx++;
                         }
                     } else if (!child.getClass().isPrimitive()) {
                         path.add(f);
-                        float r = probeGraph(target, child, depth + 1, targetValue, visited, path);
+                        float r = probeGraph(target, child, depth + 1, targetValue, visited, path, relaxed);
                         path.remove(path.size() - 1);
-                        if (r >= 0.0F) return r;
+                        if (r >= 0.0F || r == GRAPH_ABORTED) return r;
                     }
                 } catch (Exception ignored) {
                 }
@@ -666,8 +890,23 @@ public class HealthUtil {
      */
     public static void setHealthLikeAny(LivingEntity target, float health) {
         if (setHealthLikeGeneric(target, health)) return;
-        if (probeCapabilityHealth(target, health)) return;
+        if (probeCapabilityHealth(target, health) == LayerOutcome.PROBE_HIT) return;
         setAllHealthLikeRaw(target, health);
+    }
+
+    /**
+     * 分级直写（引擎版，v1.4.2）：通用层 → 门禁 → 插针层，返回分层结果。
+     * 与 {@link #setHealthLikeAny} 的区别：NO_HIT 时<b>不</b>执行 raw 兜底——
+     * {@code BloodWriteEngine} 需要在 L2 失败后先走 L3 类静态容器层与封存前补探，
+     * raw（显示层盲兜底）放梯子末端统一执行。
+     */
+    public static LayerOutcome tryLayeredWrite(LivingEntity target, float health) {
+        if (setHealthLikeGeneric(target, health)) return LayerOutcome.GENERIC_HIT;
+        LayerOutcome probe = probeCapabilityHealth(target, health);
+        if (probe == LayerOutcome.DATA_GATE_PASS) {
+            setAllHealthLikeRaw(target, health);
+        }
+        return probe;
     }
 
 

@@ -8,6 +8,7 @@ import com.ayin90723.adventure_power.ability.AbilityRegistry;
 import com.ayin90723.adventure_power.ability.ShadowKillAbility;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.util.DamageUtil;
+import com.ayin90723.adventure_power.util.probe.BloodWriteEngine;
 import com.ayin90723.adventure_power.util.DebugLog;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import com.ayin90723.adventure_power.config.ModConfig;
@@ -225,15 +226,16 @@ public class ShadowKillHelper {
         Level level = target.level();
         if (!(level instanceof ServerLevel serverLevel)) return;
 
-        // ① 插针归零 — setHealthLikeAny 三级链：自定义 setter 扫描 → 对象图插针
-        //     （覆盖普通字段真血，如亚波伦 FloatWrapped / 灵梦 CombatProgress，带 WritePath 缓存）
-        //     → DataItem 按值匹配兜底。扰动（写测试值/调 setter）均在同一同步窗口内
-        //     try/finally 还原，客户端无感知；命中即归零
+        // ① 五层改血引擎归零（v1.4.2：淬魂强化同款，处决语义 writeValue=0）——
+        //     L1 setter 扫描 → L2 对象图插针（亚波伦 FloatWrapped/灵梦 CombatProgress，WritePath 缓存）
+        //     → L3 类静态容器（GraeMod UomWither CACHE 型）→ L4 广义写路径 → DataItem 兜底。
+        //     与淬魂共享 per-class 探针缓存（影子血条磨完首次处决探测，后续直接快路径）；
+        //     全层失败时引擎内部 raw 兜底等价于原 setHealthLikeAny 行为
         // ①b 全 float 同步数据保险丝 — 砧板之刃[神]同款：清空所有 float 同步条目，
         //     覆盖"不联动 getHealth 的隐藏 float 条目"（插针发现不了的旁路）。
         //     目标即将被删除，副作用（缩放/动画清零）随实体消失
         try {
-            HealthUtil.setHealthLikeAny(target, 0.0F);
+            BloodWriteEngine.execute(target, 0.0F);
             HealthUtil.zeroAllSynchedFloats(target);
         } catch (Exception e) {
             LOGGER.error("[ShadowKill] 归零段失败（①①b），继续移除链 target={}", target, e);

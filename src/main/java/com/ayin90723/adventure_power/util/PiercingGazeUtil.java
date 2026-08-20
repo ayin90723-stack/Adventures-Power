@@ -17,6 +17,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
+import com.ayin90723.adventure_power.util.probe.BloodWriteEngine;
 
 import java.util.Map;
 import java.util.WeakHashMap;
@@ -241,10 +242,12 @@ public final class PiercingGazeUtil {
         // 架空参照读数：自定义血条 Boss（亚波伦）原版槽被架空，getHealthDirect 读到不动值，
         // 会导致"血量未下降"检测恒成立而每击触发直写兜底（数值错位）；取真实血量判断
         if (effectiveAmount > 0.0F && HealthUtil.getEffectiveHealth(target) >= healthBefore && target.isAlive()) {
-            DebugLog.piercingGaze("[破敌] 穿透后血量未降（{} >= {}）→ 直写兜底 {}",
+            DebugLog.piercingGaze("[破敌] 穿透后血量未降（{} >= {}）-> 直写兜底 {}",
                 HealthUtil.getEffectiveHealth(target), healthBefore,
                 Math.max(0.0F, healthBefore - effectiveAmount));
-            HealthUtil.setAllHealthLikeRaw(target, Math.max(0.0F, healthBefore - effectiveAmount));
+            // v1.4.2：五层引擎（磨血语义）--L3/L4 覆盖静态 Map/加密存储型高级 Boss；
+            // 全层失败退 raw（与原 setAllHealthLikeRaw 行为等价）
+            BloodWriteEngine.execute(target, Math.max(0.0F, healthBefore - effectiveAmount));
         }
         InvulClearUtil.clearCustomInvulTimers(target);
     }
