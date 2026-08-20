@@ -597,7 +597,16 @@ public class HealthUtil {
         // 门禁：DataItem 扰动后 getHealth 联动 = 正常实体（getHealth 真读槽 9），
         // DataItem 直写足够且更高效，不插针。门禁仅为性能优化，安全性仍由验证闭环保证。
         if (probeDataItemLinked(target)) {
-            return LayerOutcome.DATA_GATE_PASS;
+            setAllHealthLikeRaw(target, targetValue);
+            // 写后验证（v1.4.2-fix 补）：门禁"部分联动"型 Boss（getHealth = 原版槽 + 自定义槽
+            // 合成——原版槽只是分量，如双槽合成血）直通道只写原版槽分量，合成读数 ≠ 目标值；
+            // 验证不过则直通道不可信，回落槽插针/对象图（防"血越打越多"的错误成功）
+            float after = getEffectiveHealth(target);
+            if (Math.abs(after - targetValue) <= ProbeScales.driftTolerance(ProbeScales.epsilon(targetValue))) {
+                return LayerOutcome.DATA_GATE_PASS;
+            }
+            DebugLog.probe("[插针] 门禁直通道写后验证失败（getHealth={} 目标={}，合成血部分联动？），回落槽插针/对象图",
+                after, targetValue);
         }
         // DataItem 自定义槽插针（v1.4.2，泽林变体实证）：真血在 SynchedEntityData 自定义
         // Float 槽（如泽林 EXALTED_NORMAL−EXALTED_AWAY 双槽差、承伤累计反向语义）时，
@@ -902,11 +911,8 @@ public class HealthUtil {
      */
     public static LayerOutcome tryLayeredWrite(LivingEntity target, float health) {
         if (setHealthLikeGeneric(target, health)) return LayerOutcome.GENERIC_HIT;
-        LayerOutcome probe = probeCapabilityHealth(target, health);
-        if (probe == LayerOutcome.DATA_GATE_PASS) {
-            setAllHealthLikeRaw(target, health);
-        }
-        return probe;
+        // 门禁直通道的写入与写后验证已内聚在 probeFresh（v1.4.2-fix：验证失败回落槽插针/对象图）
+        return probeCapabilityHealth(target, health);
     }
 
 
