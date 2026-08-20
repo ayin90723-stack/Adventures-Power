@@ -260,15 +260,6 @@ public final class BloodWriteEngine {
      * L3 攻击入口：命中缓存直接写；未命中全扫（目标类+父链 static Map 字段，
      * 含 Mixin 合并字段——getDeclaredFields 天然可见）。
      * <p>
-     * 探测协议（不变量③④）：key 原不存在才探（孤儿探测的还原=remove 条目，无旧值可写回）；
-     * put 降向探针值（读数−ε）→ 同栈读联动 → finally 无条件 remove 还原；
-     * 联动验证（变化≥门槛 且 指向测试值）通过才落攻击 put(key, 0)。
-     * put 期间对方代码无执行窗口（主线程同调用栈），跨类型 value 的瞬时条目不残留。
-     *
-    /**
-     * L3 攻击入口：命中缓存直接写；未命中全扫（目标类+父链 static Map 字段，
-     * 含 Mixin 合并字段——getDeclaredFields 天然可见）。
-     * <p>
      * 探测协议（不变量③④）：key 已存在（运行时缓存型血量表必然已有本实体条目）
      * → 快照旧值探针后还原旧值；key 不存在（冷缓存）→ 孤儿探测后 remove 还原；
      * put 降向探针（读数−ε）→ 同栈读联动 → finally 按探测前状态还原；
