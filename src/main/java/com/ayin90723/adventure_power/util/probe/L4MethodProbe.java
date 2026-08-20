@@ -19,10 +19,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * L4 广义写路径探针（设计文档 {@code docs/quench-upgrade-proposal.md} §2/§5）。
  * <p>
  * 定位：L1 的行为学广义化——不按名字/位置找存储，而是<b>按行为找写路径</b>：
- * 扫描"实体类 ∪ 图可达 holder（限深 3）"上签名吃一个数值参数的方法，
- * 调用探针后验证 getHealth 联动。覆盖 L1/L2/L3 摸不到的形态：加密存血
- * （写入方法即加密入口，选择密文——让它自己加密斩杀值）、双字段校验型
- * （官方写方法同时更新 health+checksum）、不变量维护型。
+ * 扫描"实体类 ∪ 图可达 holder（限深 3）"上签名吃一个数值参数（可带身份校验
+ * 第二参）的方法，调用探针后验证 getHealth 联动。覆盖 L1/L2/L3 摸不到的形态：
+ * 加密存血（写入方法即加密入口，选择密文——让它自己加密斩杀值）、双字段校验型
+ * （官方写方法同时更新 health+checksum）、不变量维护型、身份校验型
+ * （写入口第二参校验写入者，如 bmSetHealth(float, Object)——探针/攻击统一传
+ * target 自身过 zhis==this）。
  * <p>
  * 方法探针协议（不变量③⑥，文档 §5）：
  * <ul>
@@ -42,9 +44,10 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li><b>探测残余</b>：setter 单向锁还原失败=残血 ε、delta 扣 ε，均朝血量下降
  *       方向，无害。</li>
  * </ul>
- * 签名闸（不变量⑥副作用闸）：单参数 float|double → 返回 void|boolean|数值；
- * int 参数不进（单位歧义放大器）；getter（get/is 前缀）与语义黑名单
- * （heal/restore/regen/phase/stage/level/tier/mode/state——攻击无意义或副作用型）跳过。
+ * 签名闸（不变量⑥副作用闸）：单参 float|double 或双参 (float|double, Object/Entity
+ * 身份校验型) → 返回 void|boolean|数值；int 参数不进（单位歧义放大器）；getter
+ * （get/is 前缀）与语义黑名单（heal/restore/regen/phase/stage/level/tier/mode/state
+ * ——攻击无意义或副作用型）跳过。
  * 作用域：实体模组类链（net.minecraft 层级原版单参方法不扫）+ 图可达非
  * net.minecraft holder。
  * <p>
@@ -170,7 +173,7 @@ final class L4MethodProbe {
                     expected = writeValue;
                     break;
             }
-            method.invoke(owner, boxArg(method, arg));
+            method.invoke(owner, invokerArgs(method, target, arg));
             float after = target.getHealth();
             float eps = ProbeScales.epsilon(Math.max(after, 0.0F));
             return Math.abs(after - expected) <= ProbeScales.driftTolerance(eps);
@@ -274,11 +277,18 @@ final class L4MethodProbe {
         return false;
     }
 
-    /** 签名闸 + 名字闸：单参数 float|double → void|boolean|数值；getter 与黑名单跳过。 */
+    /** 签名闸 + 名字闸：单参 float|double 或双参 (float|double, Object/Entity) → void|boolean|数值；getter 与黑名单跳过。 */
     private static boolean isCandidate(Method m) {
         if (Modifier.isStatic(m.getModifiers()) || Modifier.isAbstract(m.getModifiers())) return false;
         Class<?>[] p = m.getParameterTypes();
-        if (p.length != 1 || (p[0] != float.class && p[0] != double.class)) return false;
+        boolean numeric = p.length > 0 && (p[0] == float.class || p[0] == double.class);
+        boolean single = p.length == 1 && numeric;
+        // 双参身份校验型（v1.4.3 预先，本末起源 bmSetHealth(float, Object) 实证形态）：
+        // 第二参 = Object 或 Entity 子类——探针/攻击统一传 target 自身过 zhis==this 校验；
+        // 非身份校验的 (float, Object) 方法由探针协议兜底（不联动即拒绝，黑名单同单参）
+        boolean paired = p.length == 2 && numeric
+            && (p[1] == Object.class || net.minecraft.world.entity.Entity.class.isAssignableFrom(p[1]));
+        if (!single && !paired) return false;
         Class<?> ret = m.getReturnType();
         if (ret != void.class && ret != boolean.class && !Number.class.isAssignableFrom(ret)
             && ret != int.class && ret != long.class && ret != float.class && ret != double.class) {
@@ -287,7 +297,14 @@ final class L4MethodProbe {
         String name = m.getName().toLowerCase();
         if (name.startsWith("get") || name.startsWith("is")) return false;
         for (String bad : NAME_BLACKLIST) {
-            if (name.contains(bad)) return false;
+            // "heal" 与写血方法名后缀 "health"（setHealth/bmSetHealth 等）子串冲突：
+            // 黑名单意图是过滤"治疗"（heal 系攻击无意义），不是过滤写血方法；
+            // 含 "health" 的方法名视为写血候选放行（探针协议自会拒绝不联动的）
+            if (bad.equals("heal")) {
+                if (name.contains("heal") && !name.contains("health")) return false;
+            } else if (name.contains(bad)) {
+                return false;
+            }
         }
         return true;
     }
@@ -325,7 +342,7 @@ final class L4MethodProbe {
             float maxHealth = target.getMaxHealth();
             float eps = ProbeScales.epsilon(reading);
             float before = target.getHealth();
-            m.invoke(owner, boxArg(m, eps));
+            m.invoke(owner, invokerArgs(m, target, eps));
             float after = target.getHealth();
             if (Math.abs(after - before) < ProbeScales.verifyThreshold(eps)) {
                 return 0; // 无联动 → 拒绝（黑名单已滤 heal，残余副作用风险明示接受）
@@ -337,12 +354,12 @@ final class L4MethodProbe {
             if (Math.abs(after - eps) <= driftTol) {
                 // setter 形状 → 二次确认（跟踪新值而非钳位，防 setMaxHealth 型）
                 float secondArg = after + eps;
-                m.invoke(owner, boxArg(m, secondArg));
+                m.invoke(owner, invokerArgs(m, target, secondArg));
                 float after2 = target.getHealth();
                 boolean tracks = Math.abs(after2 - secondArg) <= confirmTol;
                 if (tracks) {
                     // 还原只在确认后执行（拒绝路径不追加调用——delta 误入时还原=额外扣血，子代理审查修）
-                    m.invoke(owner, boxArg(m, reading));
+                    m.invoke(owner, invokerArgs(m, target, reading));
                     return 1;
                 }
                 return 0;
@@ -356,12 +373,12 @@ final class L4MethodProbe {
                 && Math.abs(after - (maxHealth - eps)) <= driftTol) {
                 // 反向承伤 setter 形状（参数=承伤累计值，血量=maxHealth−累计）→ 二次确认
                 float secondArg = after + eps; // 累计 +eps → 血量应降 eps
-                m.invoke(owner, boxArg(m, secondArg));
+                m.invoke(owner, invokerArgs(m, target, secondArg));
                 float after2 = target.getHealth();
                 boolean tracks = Math.abs(after2 - (maxHealth - secondArg)) <= confirmTol;
                 if (tracks) {
                     // 还原：累计原值 = maxHealth − reading（确认后执行）
-                    m.invoke(owner, boxArg(m, maxHealth - reading));
+                    m.invoke(owner, invokerArgs(m, target, maxHealth - reading));
                     return 3;
                 }
                 return 0;
@@ -376,9 +393,14 @@ final class L4MethodProbe {
         }
     }
 
-    /** float/double 参数装箱（Method.invoke 需要包装类型）。 */
-    private static Object boxArg(Method m, float value) {
-        return m.getParameterTypes()[0] == double.class ? (Object) Double.valueOf(value) : (Object) Float.valueOf(value);
+    /** 探针/攻击参数组装：单参 = [数值]；双参身份校验型 = [数值, target]（第二参传目标自身过身份校验）。 */
+    private static Object[] invokerArgs(Method m, LivingEntity target, float value) {
+        Class<?>[] p = m.getParameterTypes();
+        Object num = p[0] == double.class ? (Object) Double.valueOf(value) : (Object) Float.valueOf(value);
+        if (p.length == 2) {
+            return new Object[]{num, target};
+        }
+        return new Object[]{num};
     }
 
     /** 沿路径链从实体根解析 owner（Field=对象字段；其余=Map key / Collection index）。 */
