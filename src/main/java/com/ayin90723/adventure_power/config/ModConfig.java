@@ -291,8 +291,8 @@ public class ModConfig {
             .define("quench_layer3_enabled", true);
         QUENCH_LAYER4_ENABLED = BUILDER.comment("L4 广义写路径层开关（行为学扫描目标模组类与可达 holder 上的单数值参数方法并验证 getHealth 联动，覆盖加密存血/双字段校验/不变量维护型 Boss；探针有界扰动，详见设计文档）")
             .define("quench_layer4_enabled", true);
-        QUENCH_GRAPH_BUDGET = BUILDER.comment("L2 对象图扫描预算（访问对象数上限）：geckolib 动画类实体可达图可达数百万对象，超预算立即中止并封存该类（防数秒卡顿）；实测泽林变体 597 万对象单次全图 4.6 秒。调大=覆盖更广但可能卡顿")
-            .defineInRange("quench_graph_budget", 200000, 10000, 5000000);
+        QUENCH_GRAPH_BUDGET = BUILDER.comment("L2 对象图扫描预算（访问对象数上限）：geckolib 动画类实体可达图可达数百万对象，超预算立即中止并封存该类（防数秒卡顿）；实测泽林变体 597 万对象单次全图 4.6 秒（靠 DataItem 槽插针覆盖，封存无碍）；灵梦变体 200001 对象卡线（v1.4.2 回归：20 万默认值差 1 个对象被中止→落 L4 触发其 setCombatProgress 反作弊 chaotic——30 万默认覆盖）。调大=覆盖更广但可能卡顿")
+            .defineInRange("quench_graph_budget", 300000, 10000, 5000000);
         BUILDER.pop();
 
         BUILDER.push("破敌之眼");
