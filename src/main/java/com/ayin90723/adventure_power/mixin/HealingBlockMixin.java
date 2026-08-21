@@ -53,13 +53,11 @@ public class HealingBlockMixin {
         if (health > tracked) {
             DebugLog.healingBlock("[禁疗] setHealth HEAD 拦截回血: {} -> 低点 {}（原请求 {}）",
                 self, tracked, health);
-            // v1.4.3 十九轮：清盾前置（与淬魂/破敌/钳制对齐）——合成血 Boss 护盾未清时
-            // 读数失真写坏分量；清盾后真血不超低点则仅 cancel 原回血请求（盾已清）不写血
-            com.ayin90723.adventure_power.util.probe.MultiStoreWriter.clearShieldComponents(self);
-            if (HealthUtil.getEffectiveHealth(self) > tracked) {
-                // v1.4.2：五层引擎（磨血语义）覆盖静态 Map/加密存储型高级 Boss
-                BloodWriteEngine.execute(self, tracked);
-            }
+            // v1.4.3 二十轮：清盾前置已下沉引擎 execute 磨血分支统一处理（调用点零纪律）；
+            // 禁疗语义：cancel 拒绝回血请求无条件执行，写低点交给引擎（清盾后读数≤低点时
+            // 引擎磨血通道自然无降向空间不写血）
+            // v1.4.2：五层引擎（磨血语义）覆盖静态 Map/加密存储型高级 Boss
+            BloodWriteEngine.execute(self, tracked);
             ci.cancel();
         }
     }

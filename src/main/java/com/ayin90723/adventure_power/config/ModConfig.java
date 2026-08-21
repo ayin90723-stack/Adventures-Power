@@ -301,10 +301,10 @@ public class ModConfig {
             .defineInRange("quench_graph_budget", 2000000, 10000, Integer.MAX_VALUE);
         QUENCH_MULTI_STORE_ENABLED = BUILDER.comment("多存储合成血支持：getHealth 覆写为多存储之和的 Boss（真血+护盾/身体+护甲双分量形态），检测单分量写入后合成读数不到位 → 差值推断第二分量 → 分配双写（处决双清零/磨血次分量优先承伤）+ 下 tick 复验。关闭时回落 v1.4.2 行为（总读数验证仍生效，失败即作废缓存走既有梯）")
             .define("quench_multi_store_enabled", true);
-        GATE_ORACLE_ENABLED = BUILDER.comment("GateOracle 存活语义反推：五层引擎 exhausted（数值探针全败）后改用 isAlive/isDeadOrDying 语义翻转定位并打开存活许可（许可标志/进度阈值/隐藏血量），让目标走正规死亡链（战利品/事件/簿记对方自清），失败退影杀兜底（开门优先、抹除兜底，零退化）。默认关闭，实测后开")
-            .define("gate_oracle_enabled", false);
-        GATE_ORACLE_KILL_TOOL_ENABLED = BUILDER.comment("GateOracle·KILL_TOOL 击杀工具反推：从目标 hurt/die 覆写反推其自己的静态击杀工具并反射调用（唯一实体作用域参数签名闸+调用点常量实参回放+双条件死亡验证，despawn 型不采用）——目标自清含其注册表/复活列表。激进层级高于写字段，单独开关，默认关闭")
-            .define("gate_oracle_kill_tool_enabled", false);
+        GATE_ORACLE_ENABLED = BUILDER.comment("GateOracle 存活语义反推：五层引擎数值通道之外（含写 0 未死/die 拦截）反推存活许可并打开（许可标志/进度阈值/击杀工具/死亡序列触发），让目标走正规死亡链（战利品/事件/遭遇注销对方自清），失败退影杀兜底。v1.4.3 三大 Boss 实测通过后默认开启")
+            .define("gate_oracle_enabled", true);
+        GATE_ORACLE_KILL_TOOL_ENABLED = BUILDER.comment("GateOracle·KILL_TOOL 击杀工具反推：从目标 hurt/die 覆写反推其自己的静态击杀工具并反射调用（唯一实体作用域参数签名闸+调用点常量实参回放+双条件死亡验证，despawn 型不采用）——目标自清含其注册表/复活列表=真死。本末起源 KILL_TOOL 实测通过后默认开启")
+            .define("gate_oracle_kill_tool_enabled", true);
         GATE_ORACLE_WAIT_TICKS = BUILDER.comment("GateOracle 轮询型有界等待窗口（tick）：许可静默写入后等待 Boss 自身 tick 消费（写完留着+看门狗，超时降级响写→同栈 die→影杀兜底）；tick 延迟耦合型 Boss 可调大")
             .defineInRange("gate_oracle_wait_ticks", 10, 2, 200);
         BUILDER.pop();

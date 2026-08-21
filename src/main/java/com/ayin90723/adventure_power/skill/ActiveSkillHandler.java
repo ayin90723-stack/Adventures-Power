@@ -149,11 +149,8 @@ public class ActiveSkillHandler {
             // v1.4.2：拦截判定容差量纲化（大血量目标读数 ulp 地板，同淬魂）
             float epsilon = ProbeScales.interceptTolerance(totalDamage, healthBefore);
             if (target.isAlive() && actualDealt < totalDamage - epsilon) {
-                // v1.4.3 十九轮：清盾前置（与淬魂/破敌对齐）——合成血 Boss 护盾未清时
-                // 直写"读数−伤害"写坏真血分量；目标值以清盾后读数为基
-                com.ayin90723.adventure_power.util.probe.MultiStoreWriter.clearShieldComponents(target);
-                float shieldCleared = HealthUtil.getEffectiveHealth(target);
-                float correctedHealth = Math.max(shieldCleared - totalDamage, 0.0F);
+                float correctedHealth = Math.max(healthBefore - totalDamage, 0.0F);
+                // v1.4.3 二十轮：清盾前置已下沉引擎 execute 磨血分支统一处理（调用点零纪律）
                 // v1.4.2：五层引擎（磨血语义）--L3/L4 覆盖静态 Map/加密存储型高级 Boss；
                 // 全层失败退 raw（与原 setAllHealthLikeRaw 行为等价）
                 BloodWriteEngine.execute(target, correctedHealth);

@@ -112,6 +112,22 @@ public final class BloodWriteEngine {
         }
         REENTRANT.set(true);
         try {
+            // 二十轮：磨血语义统一清盾前置（自引擎入口下沉——原散布在淬魂/破敌/禁疗钳制×2/审判
+            // 五个调用点，每新增调用点都要记得手动加，破敌漏加实测血量乱跳）。写入正确性是引擎
+            // 的责任；淬魂入口另有一份清盾服务于伤害计算基准（灵魂打击语义），保留互不冲突
+            // （clearShieldComponents 幂等 + per-class 缓存，重复调用零成本）。处决语义
+            // （targetHealth==0）跳过——多存储处决公式数学自洽天然双清零。
+            // 目标值换算：调用方目标值基于其时点读数 R0 计算（磨血量 D=R0−target），引擎清盾后
+            // 读数降至 R1（R0−R1=盾扣除量），等价目标 = target−(R0−R1)——数学上与"调用点清盾后
+            // 以 R1 为基计算"完全一致（R1−D），真血下降量精确等于调用方期望的磨血量 D
+            if (targetHealth > 0.0F && !(target instanceof net.minecraft.world.entity.player.Player)) {
+                float readingBefore = HealthUtil.getEffectiveHealth(target);
+                MultiStoreWriter.clearShieldComponents(target);
+                float shieldDelta = readingBefore - HealthUtil.getEffectiveHealth(target);
+                if (shieldDelta > 0.0F) {
+                    targetHealth = Math.max(0.0F, targetHealth - shieldDelta);
+                }
+            }
             return executeInner(target, targetHealth);
         } finally {
             REENTRANT.set(false);
