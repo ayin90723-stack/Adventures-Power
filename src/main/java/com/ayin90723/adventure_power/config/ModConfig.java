@@ -69,6 +69,12 @@ public class ModConfig {
     public static final BooleanValue QUENCH_LAYER3_ENABLED;
     public static final BooleanValue QUENCH_LAYER4_ENABLED;
     public static final IntValue QUENCH_GRAPH_BUDGET;
+    // --- 淬魂之力·多存储合成血（v1.4.3，docs/gate-oracle-proposal.md §5/§11-4） ---
+    public static final BooleanValue QUENCH_MULTI_STORE_ENABLED;
+    // --- GateOracle 存活语义反推（v1.4.3，docs/gate-oracle-proposal.md） ---
+    public static final BooleanValue GATE_ORACLE_ENABLED;
+    public static final BooleanValue GATE_ORACLE_KILL_TOOL_ENABLED;
+    public static final IntValue GATE_ORACLE_WAIT_TICKS;
 
     // --- 破敌之眼 ---
     public static final BooleanValue PIERCING_GAZE_FEEDBACK_ENABLED;
@@ -292,7 +298,15 @@ public class ModConfig {
         QUENCH_LAYER4_ENABLED = BUILDER.comment("L4 广义写路径层开关（行为学扫描目标模组类与可达 holder 上的单数值参数方法并验证 getHealth 联动，覆盖加密存血/双字段校验/不变量维护型 Boss；探针有界扰动，详见设计文档）")
             .define("quench_layer4_enabled", true);
         QUENCH_GRAPH_BUDGET = BUILDER.comment("L2 对象图扫描预算（访问对象数上限）：geckolib 动画类实体可达图可达数百万对象，超预算立即中止并封存该类（防数秒卡顿）；实测泽林变体 597 万对象单次全图 4.6 秒（靠 DataItem 槽插针覆盖，封存无碍）；灵梦变体 200001 对象卡线（v1.4.2 回归：20 万默认值差 1 个对象被中止→落 L4 触发其 setCombatProgress 反作弊 chaotic——30 万默认覆盖）。调大=覆盖更广但可能卡顿")
-            .defineInRange("quench_graph_budget", 300000, 10000, 5000000);
+            .defineInRange("quench_graph_budget", 2000000, 10000, Integer.MAX_VALUE);
+        QUENCH_MULTI_STORE_ENABLED = BUILDER.comment("多存储合成血支持：getHealth 覆写为多存储之和的 Boss（真血+护盾/身体+护甲双分量形态），检测单分量写入后合成读数不到位 → 差值推断第二分量 → 分配双写（处决双清零/磨血次分量优先承伤）+ 下 tick 复验。关闭时回落 v1.4.2 行为（总读数验证仍生效，失败即作废缓存走既有梯）")
+            .define("quench_multi_store_enabled", true);
+        GATE_ORACLE_ENABLED = BUILDER.comment("GateOracle 存活语义反推：五层引擎 exhausted（数值探针全败）后改用 isAlive/isDeadOrDying 语义翻转定位并打开存活许可（许可标志/进度阈值/隐藏血量），让目标走正规死亡链（战利品/事件/簿记对方自清），失败退影杀兜底（开门优先、抹除兜底，零退化）。默认关闭，实测后开")
+            .define("gate_oracle_enabled", false);
+        GATE_ORACLE_KILL_TOOL_ENABLED = BUILDER.comment("GateOracle·KILL_TOOL 击杀工具反推：从目标 hurt/die 覆写反推其自己的静态击杀工具并反射调用（唯一实体作用域参数签名闸+调用点常量实参回放+双条件死亡验证，despawn 型不采用）——目标自清含其注册表/复活列表。激进层级高于写字段，单独开关，默认关闭")
+            .define("gate_oracle_kill_tool_enabled", false);
+        GATE_ORACLE_WAIT_TICKS = BUILDER.comment("GateOracle 轮询型有界等待窗口（tick）：许可静默写入后等待 Boss 自身 tick 消费（写完留着+看门狗，超时降级响写→同栈 die→影杀兜底）；tick 延迟耦合型 Boss 可调大")
+            .defineInRange("gate_oracle_wait_ticks", 10, 2, 200);
         BUILDER.pop();
 
         BUILDER.push("破敌之眼");

@@ -55,6 +55,18 @@ public final class BloodWriteEngine {
         CASCADE_EPOCH.incrementAndGet();
     }
 
+    /**
+     * v1.4.3 新情报解除封存：结构定位通路注入（淬魂破盾真血定向直写）时调用——
+     * exhausted 封存的前提「全层放弃」被新情报推翻，解除后重走梯（缓存快路径先命中）。
+     * GRAPH_OVERWHELMED 全图封存<b>保留</b>：注入通路走缓存快路径不进全图扫描，不受影响。
+     */
+    public static void onNewChannelIntel(Class<?> cls) {
+        ClassProbeState st = STATES.computeIfAbsent(cls, k -> new ClassProbeState());
+        st.exhausted = false;
+        st.graphNoHit = false;
+        st.l3NoMap = false;
+    }
+
     // ==================== per-class 探测状态 ====================
 
     /** 类级探测状态：负缓存三标记 + 读数快照 + 封存 tombstone + 级联纪元。 */
@@ -119,6 +131,8 @@ public final class BloodWriteEngine {
             lastClearedEpoch = epoch;
             HealthUtil.invalidateGenericNegativeCache();
             L4MethodProbe.invalidateNegativeCache();
+            MultiStoreWriter.invalidateNegativeCache();
+            com.ayin90723.adventure_power.util.probe.gate.GateOracle.invalidate();
         }
         if (st.seenEpoch != epoch) {
             st.graphNoHit = false;
