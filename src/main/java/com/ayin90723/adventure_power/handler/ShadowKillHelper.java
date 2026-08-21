@@ -9,6 +9,7 @@ import com.ayin90723.adventure_power.ability.ShadowKillAbility;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.util.DamageUtil;
 import com.ayin90723.adventure_power.util.probe.BloodWriteEngine;
+import com.ayin90723.adventure_power.util.probe.gate.GateOracle;
 import com.ayin90723.adventure_power.util.DebugLog;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import com.ayin90723.adventure_power.config.ModConfig;
@@ -234,12 +235,115 @@ public class ShadowKillHelper {
         // ①b 全 float 同步数据保险丝 — 砧板之刃[神]同款：清空所有 float 同步条目，
         //     覆盖"不联动 getHealth 的隐藏 float 条目"（插针发现不了的旁路）。
         //     目标即将被删除，副作用（缩放/动画清零）随实体消失
+        // ①c GateOracle 语义开门（v1.4.3）：engine-exhausted（数值探针全败）时改用
+        //     isAlive/isDeadOrDying 语义翻转定位存活许可（许可标志/进度/KILL_TOOL 击杀工具），
+        //     让目标走正规死亡链（战利品/事件/簿记对方自清，无幽灵残留）——开门优先、
+        //     影杀善后兜底：SYNC_DEAD 直接返回；PENDING 轮询等待（超时降级链末端自动补跑
+        //     finalizeSaturationKill）；FAILED 继续既有饱和链。淬魂磨血不触发（伤害语义
+        //     与开门语义冲突，接入点仅在处决）
         try {
-            BloodWriteEngine.execute(target, 0.0F);
+            boolean zeroed = BloodWriteEngine.execute(target, 0.0F);
+            // v1.4.3 六轮：触发判据改用容器层事实 isRemoved（五轮的 isAlive 判定被 liveness
+            // 覆写骗过——太阳神使 isAlive 覆写按真血计算，写 0 后返回 false"宣称已死"，但
+            // isRemoved=false、deathTime=0：die 从未执行，GateOpen 永不触达，移除链杀掉后
+            // Integrity 复活。改为：写入失败（exhausted）或实体尚未从世界移除（die 没跑——
+            // 影杀语境 hurt 已被拦、die 不会自动执行；死亡表演中的实体 deathTime>0 但
+            // isRemoved 仍 false，开门补正规 die 同样合理）即试语义开门。
+            // 普通怪 hurt 已死不进 saturationKill；进来的无覆写者由"不适用"快速 FAILED 零退化
+            if (!zeroed || !target.isRemoved()) {
+                GateOracle.OpenResult gate = GateOracle.tryOpen(target, source,
+                    () -> finalizeSaturationKill(target, source, attacker, serverLevel));
+                // SYNC_DEAD=正规链自清（十二轮：死亡表演型 Boss 覆写 remove 延迟容器移除，
+                // 服务端已死但客户端收不到包——模型残留直到重进；挂 pending 窗口确认移除后
+                // 补发客户端移除包，窗口末仍存活则 finalizeFallback 强制收尾）；
+                // PENDING=轮询等待（超时降级自动补跑善后）；
+                // FAILED=升级梯全败且善后已由 finalizeFallback 跑过（七轮修复：直接 return，
+                // 旧实现落回主流程二次善后——双掉装备/双发死亡事件实测实锤）；NOT_APPLICABLE=
+                // 未做任何事（无覆写/开关关/异常），继续原饱和链
+                if (gate == GateOracle.OpenResult.SYNC_DEAD) {
+                    schedulePostKillSync(target, serverLevel);
+                    return;
+                }
+                if (gate != GateOracle.OpenResult.NOT_APPLICABLE) return;
+            }
             HealthUtil.zeroAllSynchedFloats(target);
         } catch (Exception e) {
-            LOGGER.error("[ShadowKill] 归零段失败（①①b），继续移除链 target={}", target, e);
+            LOGGER.error("[ShadowKill] 归零段失败（①①b①c），继续移除链 target={}", target, e);
         }
+
+        finalizeSaturationKill(target, source, attacker, serverLevel);
+    }
+
+    /**
+     * 开门成功后的客户端同步兜底（十二轮）：死亡表演型 Boss 覆写 remove 延迟容器移除
+     * （deathTime 表演 → 表演结束才真移除），服务端 confirmDead 通过但客户端模型残留
+     * （实测退出重进才消失）。挂统一 pending 表：窗口末已移除 → 补发客户端移除包
+     * （幂等，与原版广播重复无害）；仍未移除（表演超时/异常）→ finalizeFallback 强制收尾。
+     * <p>
+     * 十三轮修复：onDead 必须覆写——PendingVerifyRegistry 对窗口内已死亡/移除的目标走
+     * onDead 提前完成分支（不调 onVerify），本末起源 killEntity 同栈立即移除实体，实体
+     * 在下个 tick END 就 isRemoved → onDead（原默认空实现）→ 任务静默完成、移除包没发。
+     */
+    private static void schedulePostKillSync(LivingEntity target, ServerLevel serverLevel) {
+        com.ayin90723.adventure_power.util.probe.PendingVerifyRegistry.register(target,
+            ModConfig.GATE_ORACLE_WAIT_TICKS.get(), new com.ayin90723.adventure_power.util.probe.PendingVerifyRegistry.PendingTask() {
+                @Override
+                public boolean onVerify(LivingEntity t) {
+                    if (t.isRemoved()) {
+                        broadcastRemovePacket(t, serverLevel);
+                        DebugLog.shadowKill("[影杀] 开门成功收尾：实体已移除，补发客户端移除包 target={}", t);
+                        return true;
+                    }
+                    return false; // 未移除 → onFail 强制收尾
+                }
+
+                @Override
+                public void onDead(LivingEntity t) {
+                    // 十三轮：窗口内已移除（killEntity 同栈立即移除的形态）走本分支而非
+                    // onVerify——此处即客户端同步的真正主路径，必须补发移除包
+                    broadcastRemovePacket(t, serverLevel);
+                    DebugLog.shadowKill("[影杀] 开门成功收尾（窗口内移除）：补发客户端移除包 target={}", t);
+                }
+
+                @Override
+                public void onFail(LivingEntity t) {
+                    DebugLog.shadowKill("[影杀] 开门后等待窗口结束仍未移除（表演超时？），强制收尾 target={}", t);
+                    try {
+                        t.remove(Entity.RemovalReason.KILLED);
+                        HealthUtil.setRemovedFieldDirect(t, Entity.RemovalReason.KILLED);
+                        broadcastRemovePacket(t, serverLevel);
+                        HealthUtil.eradicateFromWorld(t);
+                    } catch (Exception e) {
+                        LOGGER.error("[ShadowKill] 开门后强制收尾失败 target={}", t, e);
+                    }
+                }
+            });
+    }
+
+    /** 广播客户端移除包（幂等——与原版移除链的广播重复无害）。 */
+    private static void broadcastRemovePacket(LivingEntity target, ServerLevel serverLevel) {
+        try {
+            net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket packet =
+                new net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket(target.getId());
+            // 十四轮：不用 chunkSource.broadcast(target,...)——它依赖实体追踪关系，实体已
+            // removed（DISCARDED/KILLED）后追踪条目可能已被清理，无观察者包发不出去（十三轮
+            // 实测：补发日志正常输出但客户端模型仍残留）。直接对维度内所有玩家逐个发送
+            for (net.minecraft.server.level.ServerPlayer sp : serverLevel.players()) {
+                sp.connection.send(packet);
+            }
+        } catch (Exception e) {
+            LOGGER.error("[ShadowKill] 客户端移除包发送失败 target={}", target, e);
+        }
+    }
+
+    /**
+     * 影杀善后段（②~⑨）：战利品 + 死亡事件 + 五重移除链 + 客户端包 + 容器抹除 + 兜底确认。
+     * <p>
+     * v1.4.3 拆段：GateOracle 轮询型超时降级链的末端从此处补跑（finalizeFallback）——
+     * 开门等待期间不执行（防对面正规死亡链双重结算：掉两次装备/发两次事件）。
+     */
+    private static void finalizeSaturationKill(LivingEntity target, DamageSource source,
+                                               LivingEntity attacker, ServerLevel serverLevel) {
 
         // ② 强制掉落全套装备 + ③ 反射调用 dropAllDeathLoot（触发战利品表 /
         //     LivingDropsEvent / LootModifier）+ ④ 手动 post LivingDeathEvent（墓碑/任务

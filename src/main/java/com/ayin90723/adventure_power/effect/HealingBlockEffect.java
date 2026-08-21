@@ -157,6 +157,15 @@ public class HealingBlockEffect extends MobEffect {
     * 不满足 {@code health > tracked}，自然放行，无递归。
     */
    public static void clampBack(LivingEntity self, float tracked) {
+      // v1.4.3 十九轮：清盾前置（与淬魂/破敌对齐）——合成血 Boss 护盾未清时读数失真，
+      // 直接写低点会写坏真血分量；清盾后读数=真血，若真血不高于低点（回血只发生在
+      // 盾上）则钳制无事可做直接返回，否则写低点
+      if (!(self instanceof net.minecraft.world.entity.player.Player)) {
+         com.ayin90723.adventure_power.util.probe.MultiStoreWriter.clearShieldComponents(self);
+         if (HealthUtil.getEffectiveHealth(self) <= tracked) {
+            return;  // 清盾后已不超低点——回血在盾侧，盾已清零，无需再写
+         }
+      }
       // v1.4.2：五层改血引擎（磨血语义=写低点值）--L3 类静态容器/L4 广义写路径
       // 覆盖"真血藏在静态 Map/加密存储"的高级 Boss；引擎关闭时内部退回 setHealthLikeAny 行为不变
       BloodWriteEngine.execute(self, tracked);

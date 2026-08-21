@@ -149,16 +149,21 @@ public class ActiveSkillHandler {
             // v1.4.2：拦截判定容差量纲化（大血量目标读数 ulp 地板，同淬魂）
             float epsilon = ProbeScales.interceptTolerance(totalDamage, healthBefore);
             if (target.isAlive() && actualDealt < totalDamage - epsilon) {
-                float correctedHealth = Math.max(healthBefore - totalDamage, 0.0F);
+                // v1.4.3 十九轮：清盾前置（与淬魂/破敌对齐）——合成血 Boss 护盾未清时
+                // 直写"读数−伤害"写坏真血分量；目标值以清盾后读数为基
+                com.ayin90723.adventure_power.util.probe.MultiStoreWriter.clearShieldComponents(target);
+                float shieldCleared = HealthUtil.getEffectiveHealth(target);
+                float correctedHealth = Math.max(shieldCleared - totalDamage, 0.0F);
                 // v1.4.2：五层引擎（磨血语义）--L3/L4 覆盖静态 Map/加密存储型高级 Boss；
                 // 全层失败退 raw（与原 setAllHealthLikeRaw 行为等价）
                 BloodWriteEngine.execute(target, correctedHealth);
                 if (correctedHealth <= 0.0F) {
+                    // v1.4.3 十七轮定调（与淬魂一致）：不主动调 die——主动 die 制造半开门
+                    // 状态（die 事件已发、死亡流程未走完），对面当遭遇中断恢复；写 0 后
+                    // 对面自然死接管，击杀归属经 lastHurtBy 传递，处决由影杀兜底
                     target.invulnerableTime = 0;
                     target.setLastHurtByMob(player);
                     target.setLastHurtByPlayer(player);
-                    CombatAbilityHandler.setDeathScoreNegativeOne(target); // 防 die() 内部重复计数
-                    target.die(source);
                 }
             }
         }

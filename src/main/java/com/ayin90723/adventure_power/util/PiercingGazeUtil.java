@@ -242,12 +242,17 @@ public final class PiercingGazeUtil {
         // 架空参照读数：自定义血条 Boss（亚波伦）原版槽被架空，getHealthDirect 读到不动值，
         // 会导致"血量未下降"检测恒成立而每击触发直写兜底（数值错位）；取真实血量判断
         if (effectiveAmount > 0.0F && HealthUtil.getEffectiveHealth(target) >= healthBefore && target.isAlive()) {
-            DebugLog.piercingGaze("[破敌] 穿透后血量未降（{} >= {}）-> 直写兜底 {}",
-                HealthUtil.getEffectiveHealth(target), healthBefore,
-                Math.max(0.0F, healthBefore - effectiveAmount));
+            // v1.4.3 十五轮：清盾前置（与淬魂对齐）——破敌兜底直写"读数−伤害"到真血分量，
+            // 若护盾未清，合成读数失真导致分量写坏（实测血量乱跳：直写目标 1.448↔1.713
+            // 交替，即对面回血与写坏读数打架）。清盾后合成读数=真血，写入与验证对齐
+            com.ayin90723.adventure_power.util.probe.MultiStoreWriter.clearShieldComponents(target);
+            float shieldCleared = HealthUtil.getEffectiveHealth(target);
+            DebugLog.piercingGaze("[破敌] 穿透后血量未降（{} >= {}，清盾后 {}）-> 直写兜底 {}",
+                HealthUtil.getEffectiveHealth(target), healthBefore, shieldCleared,
+                Math.max(0.0F, shieldCleared - effectiveAmount));
             // v1.4.2：五层引擎（磨血语义）--L3/L4 覆盖静态 Map/加密存储型高级 Boss；
-            // 全层失败退 raw（与原 setAllHealthLikeRaw 行为等价）
-            BloodWriteEngine.execute(target, Math.max(0.0F, healthBefore - effectiveAmount));
+            // 全层失败退 raw（与原 setAllHealthLikeRaw 行为等价）；目标值以清盾后读数为基
+            BloodWriteEngine.execute(target, Math.max(0.0F, shieldCleared - effectiveAmount));
         }
         InvulClearUtil.clearCustomInvulTimers(target);
     }

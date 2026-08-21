@@ -201,6 +201,14 @@ public class CombatAbilityHandler {
         // 对玩家目标会扫到冒险者自身的真实血条备份（true_health 通道），
         // 且兜底直写（setHealthLikeAny 含对象图插针）与玩家侧防御体系冲突
         if (target instanceof Player) return;
+
+        // v1.4.3 灵魂打击（破盾，用户构思）：淬魂直击灵魂——护盾类次分量先清零（每刀维持，
+        // 对面回充下刀再清）。清盾后 getEffectiveHealth 读到的即真血：下方伤害基准/觉醒
+        // 斩杀线/兜底写入全部自动基于真血，多存储合成血 Boss（真血+护盾）恢复单分量模型
+        // （识别两级：结构级[getHealth 覆写分量集合 − 死亡判定消费字段，混淆免疫]优先，
+        // 名字词根兜底——见 MultiStoreWriter.clearShieldComponents）。普通目标零影响（负缓存空转）
+        com.ayin90723.adventure_power.util.probe.MultiStoreWriter.clearShieldComponents(target);
+
         int milestones = AbilityGate.effectiveCount(progress, AbilityIds.SOUL_QUENCH);
         Ability raw = AbilityRegistry.get(AbilityIds.SOUL_QUENCH);
         if (!(raw instanceof SoulQuenchAbility ability)) return;
@@ -259,17 +267,16 @@ public class CombatAbilityHandler {
             // （L0 hurt 已由上方完成并判定拦截；设计文档 docs/quench-upgrade-proposal.md）
             BloodWriteEngine.execute(target, correctedHealth);
             if (correctedHealth <= 0.0F) {
+                // v1.4.3 十七轮（用户定调）：淬魂不主动调 die——磨血能力的语义是"伤害"而非
+                // "处决"，主动 die 制造半开门状态（die 事件已发、死亡流程未走完），对面把
+                // 它当遭遇中断恢复（Integrity restored 实测同款根因）；且 die 拦截型 Boss
+                // 上该调用纯空转。写 0 后对面自己的 tick 死亡判定自然接管（20:40 实测：
+                // 通用直写 setTrueHealth→0 后对面 3.5 秒自己正规 died，零 restored）。
+                // 击杀归属经 lastHurtBy 传递（对面自然死时结算），死亡由影杀处决兜底
                 clearHurtTime(target);
                 target.invulnerableTime = 0;
                 target.setLastHurtByMob(attacker);
                 target.setLastHurtByPlayer(attacker);
-                setDeathScoreNegativeOne(target);  // 防止 die() 内部重复计数
-                target.die(source);
-                // 计分移到 die() 之后：死亡被取消（死亡抗拒/真实血量等救回）时不发击杀分，
-                // 避免"击杀分已发放但目标未死"的错位
-                if (!target.isAlive()) {
-                    attacker.awardKillScore(target, 1, target.level().damageSources().mobAttack(attacker));
-                }
             }
         }
 
@@ -297,24 +304,6 @@ public class CombatAbilityHandler {
         HURT_TIME_FIELD = HealthUtil.reflectField(LivingEntity.class, "f_20916_", "hurtTime");
     }
 
-    /**
-     * 将实体的 deathScore 设为 -1，阻止 die() 内部重复调用 awardKillScore。
-     * <p>
-     * 反射兜底：仅在外部 Boss 绕过 hurt()/setHealth() 直接调 die() 时触发。
-     * 若长时间不触发可考虑移除；保留以防 awardKillScore 副作用（记分板/成就统计）。
-     * public 供 ActiveSkillHandler 审判兜底路径复用。
-     */
-    /** deathScore 字段缓存（f_20897_ = deathScore；f_20920_ 是 oAttackAnim(float)，对其 setInt 会抛异常导致静默失效） */
-    private static final java.lang.reflect.Field DEATH_SCORE_FIELD =
-        HealthUtil.reflectField(LivingEntity.class, "f_20897_", "deathScore");
-
-    public static void setDeathScoreNegativeOne(LivingEntity target) {
-        try {
-            if (DEATH_SCORE_FIELD != null) {
-                DEATH_SCORE_FIELD.setInt(target, -1);
-            }
-        } catch (Exception ignored) {}
-    }
 
     // ==================== 5. 禁疗之触 — 攻击施加禁疗 ====================
 
