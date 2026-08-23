@@ -8,13 +8,11 @@ import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.AbilityGate;
+import com.ayin90723.adventure_power.util.AttributeBonusUtil;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.UUID;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraftforge.common.ForgeMod;
@@ -29,9 +27,14 @@ import net.minecraftforge.fml.common.Mod;
  * 处理 3 种非战斗能力的实际效果：
  * <ul>
  *   <li>大地之力 (digging_power) — BreakSpeed 事件提升挖掘速度</li>
- *   <li>无形之手 (extended_reach) — 设置 BLOCK_REACH 属性</li>
- *   <li>坚韧之躯 (vitality) — 设置 MAX_HEALTH 属性</li>
+ *   <li>无形之手 (extended_reach) — BLOCK_REACH / ENTITY_REACH 属性加成</li>
+ *   <li>坚韧之躯 (vitality) — MAX_HEALTH 属性加成</li>
  * </ul>
+ * <p>
+ * v1.4.3-fix 起属性加成全部走固定 UUID 的 transient modifier
+ * （与加速 SWIFT 同模式），不再写 baseValue——base 是独占资源，其他模组
+ * （体质/耐力/触及/耐力类）以 baseValue 持久化同名属性时双方每 tick 互踩，
+ * modifier 是叠加资源，任意模组共存互不干扰。
  */
 @Mod.EventBusSubscriber(modid = AdventurePower.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class ExplorationAbilityHandler {
@@ -75,8 +78,8 @@ public class ExplorationAbilityHandler {
     // ==================== 无形之手 + 坚韧之躯 — 属性管理 ====================
 
     /**
-     * 每 tick 同步无形之手（BLOCK_REACH）和坚韧之躯（MAX_HEALTH）属性值。
-     * 仅在值变化时写入。
+     * 每 tick 同步无形之手（BLOCK_REACH / ENTITY_REACH）、坚韧之躯（MAX_HEALTH）
+     * 和加速（MOVEMENT_SPEED）属性加成。仅在加成变化时写入 modifier。
      */
     /** 门禁后业务（由 PlayerTickDispatcher 调用）：无形之手 / 坚韧之躯属性同步 */
     public static void onTick(Player player, IAdventureProgress progress) {
@@ -84,17 +87,13 @@ public class ExplorationAbilityHandler {
         if (!progress.isAbilityEnabled(AbilityIds.EXTENDED_REACH)
             && !progress.isAbilityEnabled(AbilityIds.VITALITY)
             && !progress.isAbilityEnabled(AbilityIds.SWIFT)) {
-            // 但关闭的触及属性仍需补一次恢复（"关闭即恢复原值"语义，v1.3.1 起）。
-            // 仅 ORIGINAL_* 有记录才执行——从未写入过的玩家不做无用对账。
-            if (ORIGINAL_REACH.containsKey(player.getUUID())
-                || ORIGINAL_ENTITY_REACH.containsKey(player.getUUID())) {
-                syncReachAttribute(player, false,
-                    AbilityGate.effectiveCount(progress, AbilityIds.EXTENDED_REACH),
-                    progress.isFullyUnlocked());
-            }
-            // 修复：vitality/swift 同样需要关闭恢复——三能力全关时
-            // maxHealth baseValue 加成与速度 modifier 会残留（直到重新开启任一能力或登出）。
-            // sync 内部自带残留判定（无记录时按当前值判断是否本模组残留），从未启用的玩家为 no-op。
+            // 但关闭的触及属性仍需补一次移除（"关闭即移除"语义，v1.3.1 起；
+            // modifier 模式下 removeModifier 为 no-op 开销，无需 Map 记录判断）。
+            syncReachAttribute(player, false,
+                AbilityGate.effectiveCount(progress, AbilityIds.EXTENDED_REACH),
+                progress.isFullyUnlocked());
+            // 三能力全关时 maxHealth/速度加成同样需要移除（transient 登出本不残留，
+            // 但能力关闭期间不摘除会在属性面板持续显示本模组加成）。
             syncVitalityAttribute(player, false,
                 AbilityGate.effectiveCount(progress, AbilityIds.VITALITY), progress.isFullyUnlocked());
             syncSpeedAttribute(player, false,
@@ -117,7 +116,7 @@ public class ExplorationAbilityHandler {
 
     private static void syncReachAttribute(Player player, boolean enabled, int milestones, boolean fullyUnlocked) {
         Ability ability = AbilityRegistry.get(AbilityIds.EXTENDED_REACH);
-        // activeBonus = 能力开启时会写入的加成（与 enabled 无关，供残留判定用）
+        // activeBonus = 能力开启时会写入的加成（与 enabled 无关，供旧残留迁移用）
         float activeBonus = 0.0F;
         if (ability != null) {
             activeBonus = AbilityGate.awakenedPercent(ability, milestones, fullyUnlocked, Float.MAX_VALUE);
@@ -129,23 +128,10 @@ public class ExplorationAbilityHandler {
     }
 
     /**
-     * 触及属性首次写入前的原始 baseValue（登出/关闭能力恢复用，与 ORIGINAL_MAX_HEALTH 同模式）。
-     * 其他模组可能以 baseValue 形式持久化触及距离，无条件恢复默认值会覆盖其数据。
-     * BLOCK_REACH 与 ENTITY_REACH 分别记录原值（v1.3.1 起 entity 侧同样恢复原值而非默认值）。
-     */
-    private static final Map<UUID, Double> ORIGINAL_REACH = new HashMap<>();
-    private static final Map<UUID, Double> ORIGINAL_ENTITY_REACH = new HashMap<>();
-
-    /**
-     * 设置触及属性 baseValue：
-     * targetBonus &gt; 0（能力启用）时 = 默认 + targetBonus，首次真正写入前记录原值（putIfAbsent，多次启用只保留第一次）；
-     * targetBonus = 0（关闭/未解锁）时恢复首次写入前的原值而非默认值——从未记录过原值（从未写入过，
-     * 或崩溃/强杀重启 Map 清空）时做<b>残留判定</b>：当前值 ≈ 本模组开启时会写的值（默认 + activeBonus）
-     * 则判定为本模组残留，回归默认值；否则视为其他模组的修改，记录当前值为原值不覆盖
-     * （v1.3.1 起承诺：不覆盖其他模组对触及距离 baseValue 的持久化修改）。
-     *
-     * @param targetBonus 本次要写入的加成（关闭/未解锁时为 0）
-     * @param activeBonus 能力开启时会写入的加成（与 targetBonus 无关，仅用于残留判定）
+     * 触及属性 ADDITION modifier 同步（v1.4.3-fix 起，替代原 baseValue 覆盖写）：
+     * bonus &gt; 0 时挂 ADDITION 加成（默认 base + 加成，最终值 = 任意模组 base + 本模组加成）；
+     * bonus = 0（关闭/未解锁）时按固定 UUID 移除。挂载前先做旧残留迁移
+     * （v1.4.3 及之前写进 base 的加成剥除，防双份叠加）。
      */
     private static void applyReachAttr(Player player,
                                        net.minecraft.world.entity.ai.attributes.Attribute attr,
@@ -154,36 +140,13 @@ public class ExplorationAbilityHandler {
         var inst = player.getAttribute(attr);
         if (inst == null) return;
         boolean block = attr == ForgeMod.BLOCK_REACH.get();
-        Map<UUID, Double> originals = block ? ORIGINAL_REACH : ORIGINAL_ENTITY_REACH;
-        UUID uuid = player.getUUID();
 
-        if (targetBonus > 0) {
-            double expected = attr.getDefaultValue() + targetBonus;
-            if (Math.abs(inst.getBaseValue() - expected) > 0.001) {
-                originals.putIfAbsent(uuid, inst.getBaseValue());
-                inst.setBaseValue(expected);
-            }
-        } else {
-            Double restore = originals.get(uuid);
-            if (restore == null) {
-                double own = attr.getDefaultValue() + activeBonus;
-                restore = Math.abs(inst.getBaseValue() - own) <= 0.001
-                    ? attr.getDefaultValue()
-                    : inst.getBaseValue();
-                originals.putIfAbsent(uuid, restore);
-            }
-            if (Math.abs(inst.getBaseValue() - restore) > 0.001) {
-                inst.setBaseValue(restore);
-            }
-        }
+        AttributeBonusUtil.migrateLegacyBaseBonus(inst, activeBonus);
+        AttributeBonusUtil.syncTransientModifier(inst,
+            block ? REACH_BLOCK_MODIFIER_UUID : REACH_ENTITY_MODIFIER_UUID,
+            block ? "adventure_power_block_reach" : "adventure_power_entity_reach",
+            targetBonus, AttributeModifier.Operation.ADDITION);
     }
-
-    /**
-     * 最大生命首次写入前的原始 baseValue（登出/关闭能力恢复用）。
-     * 其他模组（耐力/体质类）常以 baseValue 形式持久化 maxHealth，
-     * 登出无条件重置为 20 会覆盖其存档数据且无法回滚。
-     */
-    private static final Map<UUID, Double> ORIGINAL_MAX_HEALTH = new HashMap<>();
 
     private static void syncVitalityAttribute(Player player, boolean enabled, int milestones, boolean fullyUnlocked) {
         var attr = player.getAttribute(Attributes.MAX_HEALTH);
@@ -191,45 +154,24 @@ public class ExplorationAbilityHandler {
         Ability ability = AbilityRegistry.get(AbilityIds.VITALITY);
         if (ability == null) return;
 
-        double currentVal = attr.getBaseValue();
-        // activeBonus = 启用时会写入的加成（与 enabled 无关，供残留判定用）
+        // activeBonus = 启用时会写入的加成（与 enabled 无关，供旧残留迁移用）
         // 坚韧之躯觉醒 ×1.5 向上取整（仅觉醒取整，未觉醒保持原值——避免小数配置下未觉醒 +1）
-        float bonus = AbilityGate.awakenedPercent(ability, milestones, fullyUnlocked, Float.MAX_VALUE);
+        float activeBonus = AbilityGate.awakenedPercent(ability, milestones, fullyUnlocked, Float.MAX_VALUE);
         if (fullyUnlocked) {
-            bonus = (float) Math.ceil(bonus);
+            activeBonus = (float) Math.ceil(activeBonus);
         }
 
-        if (enabled) {
-            double expected = Attributes.MAX_HEALTH.getDefaultValue() + bonus;
-            if (Math.abs(currentVal - expected) > 0.001) {
-                ORIGINAL_MAX_HEALTH.putIfAbsent(player.getUUID(), currentVal);
-                attr.setBaseValue(expected);
-                // 如果当前血量超过新上限，裁剪到新上限
-                if (player.getHealth() > expected) {
-                    clampHealthTo(player, (float) expected);
-                }
-            }
-        } else {
-            // 关闭能力：恢复到本模组记录的原值（其他模组的 baseValue 修改不被覆盖）。
-            Double restore = ORIGINAL_MAX_HEALTH.get(player.getUUID());
-            if (restore == null) {
-                // 无记录（从未启用，或服务端重启后静态 Map 清空、player.dat 已保存 20+bonus 的残留值）：
-                // 残留判定——当前值 ≈ 本模组启用时会写的值（默认+bonus）则判定为本模组残留，回归默认；
-                // 否则视为其他模组的修改，**不记录、不操作**——若无条件记录当前值为原值，
-                // 从未启用过本能力的玩家其 baseValue 会被永久"锁存"，之后其他模组的临时修改
-                // 会被本模组每 tick 还原并强制裁剪血量（三能力全关的短路分支每 tick 调用本方法）。
-                double own = Attributes.MAX_HEALTH.getDefaultValue() + bonus;
-                if (Math.abs(currentVal - own) > 0.001) return;
-                restore = Attributes.MAX_HEALTH.getDefaultValue();
-                ORIGINAL_MAX_HEALTH.put(player.getUUID(), restore);
-            }
-            if (Math.abs(currentVal - restore) > 0.001) {
-                // 裁剪血量到目标上限以下再调低上限，防止血量卡在异常值
-                if (player.getHealth() > restore) {
-                    clampHealthTo(player, restore.floatValue());
-                }
-                attr.setBaseValue(restore);
-            }
+        // 旧残留迁移必须在挂 modifier 前执行（先剥 base 残留，modifier 再加成）
+        AttributeBonusUtil.migrateLegacyBaseBonus(attr, activeBonus);
+        AttributeBonusUtil.syncTransientModifier(attr, VITALITY_HEALTH_MODIFIER_UUID,
+            "adventure_power_vitality", enabled ? activeBonus : 0.0,
+            AttributeModifier.Operation.ADDITION);
+
+        // 若当前血量超过新上限，裁剪到新上限（modifier 移除/降级、或迁移剥 base 均可能降上限）。
+        // 无条件检查：clamp 后 health ≤ max 不再触发，开销为两次读数；防"降上限后
+        // 血量卡在异常值"（v1.4.3 及之前的"值变化才裁"不覆盖迁移路径）。
+        if (player.getHealth() > attr.getValue()) {
+            clampHealthTo(player, (float) attr.getValue());
         }
     }
 
@@ -251,8 +193,18 @@ public class ExplorationAbilityHandler {
     }
 
     /** 加速·移速加成的 modifier UUID（固定，用于移除/更新） */
-    private static final UUID SWIFT_SPEED_MODIFIER_UUID =
+    private static final java.util.UUID SWIFT_SPEED_MODIFIER_UUID =
         java.util.UUID.fromString("c4f2a3b1-7d8e-4a6b-9c0d-1e2f3a4b5c6d");
+
+    /** 无形之手触及加成的固定 modifier UUID（方块 / 实体分别） */
+    private static final java.util.UUID REACH_BLOCK_MODIFIER_UUID =
+        java.util.UUID.fromString("4e1d3b5c-9f6a-4d3e-8b2c-2f8a9b0c1d2e");
+    private static final java.util.UUID REACH_ENTITY_MODIFIER_UUID =
+        java.util.UUID.fromString("5f2e4c6d-0a7b-4e4f-9c3d-3a9b0c1d2e3f");
+
+    /** 坚韧之躯 maxHealth 加成的固定 modifier UUID */
+    private static final java.util.UUID VITALITY_HEALTH_MODIFIER_UUID =
+        java.util.UUID.fromString("6a3f5d7e-1b8c-4f5a-8d4e-4b0c1d2e3f4a");
 
     private static void syncSpeedAttribute(Player player, boolean enabled, int milestones, boolean fullyUnlocked) {
         var attr = player.getAttribute(Attributes.MOVEMENT_SPEED);
@@ -318,7 +270,7 @@ public class ExplorationAbilityHandler {
     // ==================== 维度切换/重生恢复 ====================
 
     /**
-     * 维度切换或重生后恢复属性值。
+     * 维度切换或重生后恢复属性加成（Clone 重置属性，modifier 随实例销毁丢失）。
      */
     @SubscribeEvent
     public static void onPlayerClone(PlayerEvent.Clone event) {
@@ -348,46 +300,31 @@ public class ExplorationAbilityHandler {
     // ==================== 登出清理 ====================
 
     /**
-     * 登出时恢复属性为原始值（本模组写入前的值），防止残留影响且不覆盖其他模组的持久化数据。
+     * 登出时移除本模组属性加成 modifier（transient 本不落盘，移除仅为对称清理），
+     * 不残留影响其他世界/角色。base 自始至终未被本模组写入，无需恢复。
      */
     @SubscribeEvent
     public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         Player player = event.getEntity();
         if (player.level().isClientSide()) return;
-        UUID uuid = player.getUUID();
 
-        var reachAttr = player.getAttribute(ForgeMod.BLOCK_REACH.get());
-        if (reachAttr != null) {
-            // 仅当本模组实际写入过才恢复原值——从未解锁无形之手的玩家跳过，
-            // 避免覆盖其他模组对触及距离 baseValue 的持久化修改
-            Double restore = ORIGINAL_REACH.get(uuid);
-            if (restore != null && Math.abs(reachAttr.getBaseValue() - restore) > 0.001) {
-                reachAttr.setBaseValue(restore);
+        if (ForgeMod.BLOCK_REACH.get() != null) {
+            var reachAttr = player.getAttribute(ForgeMod.BLOCK_REACH.get());
+            if (reachAttr != null) {
+                reachAttr.removeModifier(REACH_BLOCK_MODIFIER_UUID);
             }
         }
-        ORIGINAL_REACH.remove(uuid);
         if (ForgeMod.ENTITY_REACH.get() != null) {
             var entityReachAttr = player.getAttribute(ForgeMod.ENTITY_REACH.get());
             if (entityReachAttr != null) {
-                // 与 BLOCK_REACH 一致：仅本模组实际写入过才恢复原值，从未解锁无形之手的玩家跳过
-                Double restore = ORIGINAL_ENTITY_REACH.get(uuid);
-                if (restore != null && Math.abs(entityReachAttr.getBaseValue() - restore) > 0.001) {
-                    entityReachAttr.setBaseValue(restore);
-                }
+                entityReachAttr.removeModifier(REACH_ENTITY_MODIFIER_UUID);
             }
         }
-        ORIGINAL_ENTITY_REACH.remove(uuid);
 
         var healthAttr = player.getAttribute(Attributes.MAX_HEALTH);
         if (healthAttr != null) {
-            // 与 BLOCK_REACH 一致：仅本模组实际写入过才恢复原值——从未解锁坚韧之躯的玩家跳过，
-            // 避免覆盖其他模组对 maxHealth baseValue 的持久化修改
-            Double restore = ORIGINAL_MAX_HEALTH.get(uuid);
-            if (restore != null && Math.abs(healthAttr.getBaseValue() - restore) > 0.001) {
-                healthAttr.setBaseValue(restore);
-            }
+            healthAttr.removeModifier(VITALITY_HEALTH_MODIFIER_UUID);
         }
-        ORIGINAL_MAX_HEALTH.remove(uuid);
 
         var speedAttr = player.getAttribute(Attributes.MOVEMENT_SPEED);
         if (speedAttr != null) {

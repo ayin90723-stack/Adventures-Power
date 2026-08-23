@@ -13,9 +13,7 @@ import com.ayin90723.adventure_power.util.ProgressCache;
 import com.ayin90723.adventure_power.util.RejectHealthManipUtil;
 import com.mojang.logging.LogUtils;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import net.minecraft.ChatFormatting;
 import net.minecraft.nbt.CompoundTag;
@@ -83,8 +81,16 @@ public class PlayerStateHandler {
     private static final UUID AWAKEN_UNDYING_WEAPON_UUID =
         UUID.fromString("b2c3d4e5-f6a7-8901-bcde-f12345678901");
 
-    /** 庇护激活前的原始移动速度（恢复时还原，不覆盖其他模组修改） */
-    private static final Map<UUID, Double> ORIGINAL_MOVE_SPEED = new HashMap<>();
+    /** 庇护速度 modifier 的固定 UUID（v1.4.3-fix 起替代 base 覆盖写——base 是独占
+     *  资源，庇护期间写 base=0 会与其他模组的移速 base 对账互踩，且结束后"恢复原值"
+     *  无法得知对方最新值；modifier 挂载/移除不触碰 base） */
+    private static final UUID SANCTUARY_SPEED_MODIFIER_UUID =
+        UUID.fromString("8c5b7f9a-3dae-4b7c-af6a-6d2e3f4a5b6c");
+
+    /** 非觉醒庇护锁速哨兵：ADDITION -5.0，MOVEMENT_SPEED 属性 clamp 下限为 0，
+     *  默认 base 0.1 + (-5.0) → 0，任何外部 base 修改/正 modifier 加成（正常量级
+     *  ≤0.x）都无法把结果抬离 0——绝对定身。若外部挂 -5 量级负加成本就意图定身。 */
+    private static final double SANCTUARY_LOCK_SENTINEL = -5.0;
 
     // ========================================================================
     //  1. 灵魂绑定 (SoulBind) — 死亡保 Buff + 经验
@@ -588,28 +594,41 @@ public class PlayerStateHandler {
         boolean inSanctuary = progress.getSanctuaryInvulEnd() > sanctuaryNow
             && progress.isAbilityEnabled(AbilityIds.ACTIVE_SKILL);
         var sanctuarySpeedAttr = player.getAttribute(Attributes.MOVEMENT_SPEED);
-        if (inSanctuary && sanctuarySpeedAttr != null) {
-            double target = progress.isFullyUnlocked()
-                ? 0.1 * ModConfig.AWAKEN_SANCTUARY_SPEED.get()
-                : 0.0;
-            if (Math.abs(sanctuarySpeedAttr.getBaseValue() - target) > 0.001) {
-                // 首次激活：记录原始移动速度（恢复时还原，不覆盖其他模组修改）
-                ORIGINAL_MOVE_SPEED.putIfAbsent(player.getUUID(), sanctuarySpeedAttr.getBaseValue());
-                sanctuarySpeedAttr.setBaseValue(target);
-            }
-        } else if (!inSanctuary && sanctuarySpeedAttr != null) {
-            Double original = ORIGINAL_MOVE_SPEED.remove(player.getUUID());
-            if (original != null) {
-                sanctuarySpeedAttr.setBaseValue(original);
+        if (sanctuarySpeedAttr == null) return;
+
+        if (inSanctuary) {
+            double amount;
+            if (progress.isFullyUnlocked()) {
+                // 觉醒：减速移动（目标 = 0.1×配置，相对默认 base 0.1 精确压速；
+                // 其他模组改 base 时目标值会偏移，觉醒语义为"慢速移动"非绝对锁死，可接受）
+                double target = 0.1 * ModConfig.AWAKEN_SANCTUARY_SPEED.get();
+                amount = target - 0.1;
             } else {
-                // 无记录（服务端重启后静态 Map 清空，而 player.dat 可能已落盘庇护目标值）：
-                // 残留判定——当前值 ≈ 本模组庇护写入值（0 或 0.1×配置，均远低于原版 0.1）
-                // 则判定为本模组残留，回归原版默认 0.1；否则视为其他模组的修改，不覆盖。
-                // 与 ExplorationAbilityHandler 的 maxHealth/reach 残留判定同模式。
-                double sanctuaryTarget = progress.isFullyUnlocked()
-                    ? 0.1 * ModConfig.AWAKEN_SANCTUARY_SPEED.get()
-                    : 0.0;
-                if (Math.abs(sanctuarySpeedAttr.getBaseValue() - sanctuaryTarget) <= 0.001) {
+                // 非觉醒：哨兵负值绝对锁 0（见 SANCTUARY_LOCK_SENTINEL 注释）
+                amount = SANCTUARY_LOCK_SENTINEL;
+            }
+            var existing = sanctuarySpeedAttr.getModifier(SANCTUARY_SPEED_MODIFIER_UUID);
+            if (existing == null || Math.abs(existing.getAmount() - amount) > 0.001) {
+                if (existing != null) {
+                    sanctuarySpeedAttr.removeModifier(SANCTUARY_SPEED_MODIFIER_UUID);
+                }
+                sanctuarySpeedAttr.addTransientModifier(new AttributeModifier(
+                    SANCTUARY_SPEED_MODIFIER_UUID, "adventure_power_sanctuary",
+                    amount, AttributeModifier.Operation.ADDITION));
+            }
+        } else {
+            var existing = sanctuarySpeedAttr.getModifier(SANCTUARY_SPEED_MODIFIER_UUID);
+            if (existing != null) {
+                sanctuarySpeedAttr.removeModifier(SANCTUARY_SPEED_MODIFIER_UUID);
+            }
+            // 旧版（v1.4.3 及之前）庇护写 base 的残留迁移：崩溃/强杀场景下 base 可能
+            // 残留庇护目标值（0 或 0.1×配置），还原原版默认 0.1——防止玩家移动永久
+            // 锁死。幂等：还原后 base=0.1 不再触发；非本模组残留值不匹配不动作
+            // （与旧版"当前值 ≈ 本模组庇护写入值则回归 0.1"的残留判定同语义）。
+            double base = sanctuarySpeedAttr.getBaseValue();
+            double awakenTarget = 0.1 * ModConfig.AWAKEN_SANCTUARY_SPEED.get();
+            if (Math.abs(base) <= 0.001 || Math.abs(base - awakenTarget) <= 0.001) {
+                if (Math.abs(base - 0.1) > 0.001) {
                     sanctuarySpeedAttr.setBaseValue(0.1);
                 }
             }
