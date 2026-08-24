@@ -153,7 +153,7 @@ public class ActiveSkillHandler {
                 // v1.4.3 二十轮：清盾前置已下沉引擎 execute 磨血分支统一处理（调用点零纪律）
                 // v1.4.2：五层引擎（磨血语义）--L3/L4 覆盖静态 Map/加密存储型高级 Boss；
                 // 全层失败退 raw（与原 setAllHealthLikeRaw 行为等价）
-                BloodWriteEngine.execute(target, correctedHealth);
+                BloodWriteEngine.execute(target, correctedHealth, com.ayin90723.adventure_power.util.DebugLog.EngineCaller.JUDGMENT);
                 if (correctedHealth <= 0.0F) {
                     // v1.4.3 十七轮定调（与淬魂一致）：不主动调 die——主动 die 制造半开门
                     // 状态（die 事件已发、死亡流程未走完），对面当遭遇中断恢复；写 0 后

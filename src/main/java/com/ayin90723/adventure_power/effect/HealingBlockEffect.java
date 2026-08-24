@@ -162,7 +162,7 @@ public class HealingBlockEffect extends MobEffect {
       // 通道的值闸/验证自然不写血（目标值=读数−0 无降向空间）——无需调用点预判
       // v1.4.2：五层改血引擎（磨血语义=写低点值）--L3 类静态容器/L4 广义写路径
       // 覆盖"真血藏在静态 Map/加密存储"的高级 Boss；引擎关闭时内部退回 setHealthLikeAny 行为不变
-      BloodWriteEngine.execute(self, tracked);
+      BloodWriteEngine.execute(self, tracked, com.ayin90723.adventure_power.util.DebugLog.EngineCaller.HEALING_BLOCK);
       // v1.4.0 审查修复：模组内部写血必须包 INTERNAL_HEALTH_WRITE 标记（与
       // ExplorationAbilityHandler.clampHealthTo 同款）——否则一旦目标为冒险者
       // （未来开放 PVP 禁疗或外部数据包写入 NBT 标记），此调用会被自家
@@ -346,7 +346,7 @@ public class HealingBlockEffect extends MobEffect {
             // 如果被其他模组取消（复活），强制归零血量并放行死亡
             // v1.4.2：五层引擎处决归零（覆盖静态 Map/加密存储型；全层失败退 raw 清零原版+自定义血条）
             if (event.isCanceled()) {
-               BloodWriteEngine.execute(entity, 0.0F);
+               BloodWriteEngine.execute(entity, 0.0F, com.ayin90723.adventure_power.util.DebugLog.EngineCaller.HEALING_BLOCK);
                event.setCanceled(false);
             }
          }

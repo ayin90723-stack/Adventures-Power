@@ -16,8 +16,6 @@ public class ModConfig {
     public static final BooleanValue DEBUG_LOG_SOUL_QUENCH;
     /** 禁疗之触调试日志 */
     public static final BooleanValue DEBUG_LOG_HEALING_BLOCK;
-    /** 插针/通用直写调试日志（门禁判定/字段命中/对象图遍历） */
-    public static final BooleanValue DEBUG_LOG_PROBE;
     /** 影杀调试日志 */
     public static final BooleanValue DEBUG_LOG_SHADOW_KILL;
     /** 破敌之眼调试日志 */
@@ -77,6 +75,8 @@ public class ModConfig {
     public static final IntValue GATE_ORACLE_WAIT_TICKS;
 
     // --- 破敌之眼 ---
+    /** 穿透兜底补刀上限（目标最大生命值比例，v1.4.4：防饰品加伤放大后 clamp 0 变处决写 0；最大生命基准防等比收敛） */
+    public static final DoubleValue PIERCING_GAZE_FALLBACK_CAP_PERCENT;
     public static final BooleanValue PIERCING_GAZE_FEEDBACK_ENABLED;
     public static final IntValue PIERCING_GAZE_FEEDBACK_PARTICLE_COUNT;
 
@@ -213,8 +213,6 @@ public class ModConfig {
             .define("debug_log_soul_quench", false);
         DEBUG_LOG_HEALING_BLOCK = BUILDER.comment("禁疗之触调试日志（需 debug_log 开启）")
             .define("debug_log_healing_block", false);
-        DEBUG_LOG_PROBE = BUILDER.comment("插针/通用直写调试日志：门禁判定/字段命中/对象图遍历（需 debug_log 开启）")
-            .define("debug_log_probe", false);
         DEBUG_LOG_SHADOW_KILL = BUILDER.comment("影杀调试日志（需 debug_log 开启）")
             .define("debug_log_shadow_kill", false);
         DEBUG_LOG_PIERCING_GAZE = BUILDER.comment("破敌之眼调试日志（需 debug_log 开启）")
@@ -304,6 +302,8 @@ public class ModConfig {
         BUILDER.pop();
 
         BUILDER.push("破敌之眼");
+        PIERCING_GAZE_FALLBACK_CAP_PERCENT = BUILDER.comment("破敌之眼穿透兜底补刀上限（目标最大生命值比例，默认 1%）——穿透后血量未降（Boss 免疫/hurt 被拦）时兜底最多补刀该比例：原公式\"血量−穿透伤害\"在伤害被饰品加伤放大到 ≥ 血量时 clamp 0 变成处决写 0（UomWither 血量 0 直接触发其终式，满搭配饰下\"秒杀\"观感实测）；最大生命基准每刀恒定（等差，约 100 刀磨完归零→正规终式收尾——当前生命基准会等比收敛[血越低每刀越少]配合保活 Boss=磨血僵局打不死，实测推翻）")
+            .defineInRange("piercing_gaze_fallback_cap_percent", 0.01, 0.0, 1.0);
         PIERCING_GAZE_FEEDBACK_ENABLED = BUILDER.comment("穿透成功时播放屏障破碎音效+粒子反馈")
             .define("piercing_gaze_feedback_enabled", true);
         PIERCING_GAZE_FEEDBACK_PARTICLE_COUNT = BUILDER.comment("穿透反馈粒子数量")

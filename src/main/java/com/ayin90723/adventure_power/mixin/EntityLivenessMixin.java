@@ -43,6 +43,17 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(value = Entity.class, priority = 10000)
 public abstract class EntityLivenessMixin {
 
+    /**
+     * 日志去重（v1.4.4）：{@code isRemoved()} 是 MC 极高频读接口——战斗时实体追踪/
+     * AI 目标/伤害链/其他模组扫描每 tick 数十次调用，被保护玩家（backup>0）每次
+     * 调用都命中本注入，逐条 INFO 日志实测刷屏（2 分钟战斗 11 万条，占日志 74%）。
+     * 按实体按 tick 只记一条（该 tick 的拦截活动粒度，值随 tick 推进自动失效）。
+     * 弱 key 防泄漏（实体 GC 即释放）；基准用实体所在维度 gameTime（与实体生命周期
+     * 绑定，跨维度各自独立）；level 为 null（极端时点）时统一落 0 桶退化为首条记录。
+     */
+    private static final java.util.Map<Entity, Long> LAST_LOGGED_TICK =
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
     private static boolean debugLog() {
         return ModConfig.DEBUG_LOG.get() && ModConfig.DEBUG_LOG_TRUE_HEALTH.get();
     }
@@ -64,8 +75,13 @@ public abstract class EntityLivenessMixin {
         if (progress == null) return;
         if (progress.getBackupHealth() > 0.0F) {
             if (debugLog()) {
-                DebugLog.trueHealth("[MME-TrueHealth] isRemoved() 强制 false（容器抹除防线）" +
-                    " backup=" + progress.getBackupHealth());
+                long tick = self.level() != null ? self.level().getGameTime() : 0L;
+                Long last = LAST_LOGGED_TICK.get(self);
+                if (last == null || last.longValue() != tick) {
+                    LAST_LOGGED_TICK.put(self, tick);
+                    DebugLog.trueHealth("[MME-TrueHealth] isRemoved() 强制 false（容器抹除防线）" +
+                        " backup=" + progress.getBackupHealth());
+                }
             }
             cir.setReturnValue(false);
         }

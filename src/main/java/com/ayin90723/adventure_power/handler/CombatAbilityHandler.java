@@ -265,7 +265,7 @@ public class CombatAbilityHandler {
                 healthBefore, correctedHealth, actualDealt);
             // 五层引擎：L1 通用 setter → L2 对象图插针 → L3 类静态容器 → 封存补探 → exhausted
             // （L0 hurt 已由上方完成并判定拦截；设计文档 docs/quench-upgrade-proposal.md）
-            BloodWriteEngine.execute(target, correctedHealth);
+            BloodWriteEngine.execute(target, correctedHealth, DebugLog.EngineCaller.SOUL_QUENCH);
             if (correctedHealth <= 0.0F) {
                 // v1.4.3 十七轮（用户定调）：淬魂不主动调 die——磨血能力的语义是"伤害"而非
                 // "处决"，主动 die 制造半开门状态（die 事件已发、死亡流程未走完），对面把

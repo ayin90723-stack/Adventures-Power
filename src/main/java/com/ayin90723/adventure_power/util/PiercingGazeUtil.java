@@ -242,13 +242,27 @@ public final class PiercingGazeUtil {
         // 架空参照读数：自定义血条 Boss（亚波伦）原版槽被架空，getHealthDirect 读到不动值，
         // 会导致"血量未下降"检测恒成立而每击触发直写兜底（数值错位）；取真实血量判断
         if (effectiveAmount > 0.0F && HealthUtil.getEffectiveHealth(target) >= healthBefore && target.isAlive()) {
-            DebugLog.piercingGaze("[破敌] 穿透后血量未降（{} >= {}）-> 直写兜底 {}",
-                HealthUtil.getEffectiveHealth(target), healthBefore,
-                Math.max(0.0F, healthBefore - effectiveAmount));
+            // v1.4.4 收紧（UomWither 实测）：effectiveAmount 是穿透补 post 的事件链结算值
+            // （饰品加伤可放大），原公式 Math.max(0, healthBefore - effectiveAmount) 在
+            // 伤害 ≥ 血量时 clamp 0——磨血语义意外变成处决写 0（Boss 血量 0 直接触发其终式，
+            // 满搭配饰下"秒杀"观感）。兜底只补"未造成的那部分伤害"，上限 =
+            // 目标最大生命 × piercing_gaze_fallback_cap_percent（默认 1%）：
+            // 最大生命基准每刀恒定（等差，约 100 刀磨完归零→正规终式收尾）；当前生命基准会
+            // 等比收敛（血 1.0 时每刀 0.01）配合保活 Boss（血量>0 不死）=磨血僵局，实测打不死。
+            // 基准用 getMaxHealth()（与淬魂 hpRatio 同源——UomWither 该类覆写返回血条满值
+            // 49360；初版用 getAttribute(MAX_HEALTH).getValue() 读到 32400 低估约 34%）。
+            // 注意：getMaxHealth() 覆写在 Boss 终式期返回 0.3999 显示值（cap 塌陷无碍——终式
+            // 归零由淬魂磨血收尾/影杀处决接管）；null 属性 fallback 已不需要（getMaxHealth 恒有）
+            float maxHp = target.getMaxHealth();
+            float fallbackCap = maxHp * ModConfig.PIERCING_GAZE_FALLBACK_CAP_PERCENT.get().floatValue();
+            float fallbackDamage = Math.min(effectiveAmount, fallbackCap);
+            DebugLog.piercingGaze("[破敌] 穿透后血量未降（{} >= {}）-> 兜底补刀（上限 {}，实际 {}）",
+                HealthUtil.getEffectiveHealth(target), healthBefore, fallbackCap, fallbackDamage);
             // v1.4.2：五层引擎（磨血语义）--L3/L4 覆盖静态 Map/加密存储型高级 Boss；
             // 全层失败退 raw（与原 setAllHealthLikeRaw 行为等价）。
             // v1.4.3 二十轮：清盾前置已下沉引擎 execute 磨血分支统一处理（调用点零纪律）
-            BloodWriteEngine.execute(target, Math.max(0.0F, healthBefore - effectiveAmount));
+            BloodWriteEngine.execute(target, Math.max(healthBefore - fallbackDamage, 0.0F),
+                DebugLog.EngineCaller.PIERCING_GAZE);
         }
         InvulClearUtil.clearCustomInvulTimers(target);
     }

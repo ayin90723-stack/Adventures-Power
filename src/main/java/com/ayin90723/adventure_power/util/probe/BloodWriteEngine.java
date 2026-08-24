@@ -93,14 +93,20 @@ public final class BloodWriteEngine {
     /**
      * 淬魂兜底直写入口：hurt() 被拦截后由 {@code handleSoulQuench} 调用，
      * 走 L1→L2→L3→封存补探→exhausted 的完整梯子。
+     * <p>
+     * v1.4.4：调用方参数（{@code caller}）——引擎探针日志按调用方能力开关归属
+     * （淬魂→淬魂开关 / 破敌→破敌开关 / 影杀→影杀开关 / 禁疗→禁疗开关 / 审判→淬魂开关），
+     * 调用点显式传递（编译期零纪律），引擎入口设置 ThreadLocal 上下文，重入保持外层。
      *
      * @param target        目标（非玩家；PVP 禁用在调用方）
-     * @param targetHealth  期望写入的血量值（读数−伤害，降向）
+     * @param targetHealth  期望写入的血量值（读数−伤害，降向；处决语义传 0）
+     * @param caller        调用方（日志归属）
      * @return true 表示某层通道命中或 raw 显示层兜底已执行；false 表示 engine-exhausted 静默
      */
-    public static boolean execute(LivingEntity target, float targetHealth) {
+    public static boolean execute(LivingEntity target, float targetHealth, DebugLog.EngineCaller caller) {
         // 重入守卫（子代理审查修）：禁疗 HEAD → L4 探针 m(eps) 在 tracked<eps 时再次触发 HEAD
-        // → 嵌套 execute → 同方法再探 → 无限递归（SOE）。重入时跳过走梯直接 raw（v1.4.1 行为）。
+        // → 嵌套 execute → 同方法再探 → 无限递归（SOE）。重入时跳过走梯直接 raw（v1.4.1 行为）；
+        // 不设置调用方上下文——保持外层调用方（嵌套日志归属外层）
         if (REENTRANT.get()) {
             HealthUtil.setAllHealthLikeRaw(target, targetHealth);
             return true;
@@ -111,6 +117,7 @@ public final class BloodWriteEngine {
             return true;
         }
         REENTRANT.set(true);
+        DebugLog.EngineCaller prevCaller = DebugLog.setEngineCaller(caller);
         try {
             // 二十轮：磨血语义统一清盾前置（自引擎入口下沉——原散布在淬魂/破敌/禁疗钳制×2/审判
             // 五个调用点，每新增调用点都要记得手动加，破敌漏加实测血量乱跳）。写入正确性是引擎
@@ -130,6 +137,7 @@ public final class BloodWriteEngine {
             }
             return executeInner(target, targetHealth);
         } finally {
+            DebugLog.restoreEngineCaller(prevCaller);
             REENTRANT.set(false);
         }
     }

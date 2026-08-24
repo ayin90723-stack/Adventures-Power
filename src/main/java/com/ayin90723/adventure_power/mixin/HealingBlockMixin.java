@@ -57,7 +57,7 @@ public class HealingBlockMixin {
             // 禁疗语义：cancel 拒绝回血请求无条件执行，写低点交给引擎（清盾后读数≤低点时
             // 引擎磨血通道自然无降向空间不写血）
             // v1.4.2：五层引擎（磨血语义）覆盖静态 Map/加密存储型高级 Boss
-            BloodWriteEngine.execute(self, tracked);
+            BloodWriteEngine.execute(self, tracked, com.ayin90723.adventure_power.util.DebugLog.EngineCaller.HEALING_BLOCK);
             ci.cancel();
         }
     }

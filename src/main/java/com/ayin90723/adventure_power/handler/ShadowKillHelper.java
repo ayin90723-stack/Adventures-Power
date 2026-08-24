@@ -242,7 +242,7 @@ public class ShadowKillHelper {
         //     finalizeSaturationKill）；FAILED 继续既有饱和链。淬魂磨血不触发（伤害语义
         //     与开门语义冲突，接入点仅在处决）
         try {
-            boolean zeroed = BloodWriteEngine.execute(target, 0.0F);
+            boolean zeroed = BloodWriteEngine.execute(target, 0.0F, com.ayin90723.adventure_power.util.DebugLog.EngineCaller.SHADOW_KILL);
             // v1.4.3 六轮：触发判据改用容器层事实 isRemoved（五轮的 isAlive 判定被 liveness
             // 覆写骗过——太阳神使 isAlive 覆写按真血计算，写 0 后返回 false"宣称已死"，但
             // isRemoved=false、deathTime=0：die 从未执行，GateOpen 永不触达，移除链杀掉后
