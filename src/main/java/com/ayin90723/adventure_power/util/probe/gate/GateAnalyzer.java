@@ -149,6 +149,24 @@ public final class GateAnalyzer {
         public boolean isEmpty() {
             return candidates.isEmpty() && killTools.isEmpty();
         }
+
+        /**
+         * 死亡拦截判定（{@code util.DeathFinalizer} 补完原版 die 前的门禁）：
+         * die / isAlive / isDeadOrDying 存在模组层覆写即视为拦死者--裸调 die() 会触发
+         * 对面的中断/复活逻辑（十七轮半开门同款根因），死亡补完只对干净目标执行。
+         * <p>
+         * hurt / remove / kill 覆写<b>不算</b>：拦伤害不拦死亡（fdbosses 调 super 扣血型）、
+         * 死亡表演延迟移除（remove 覆写）都不阻止 die() 完整走完（掉落/事件/dead 标志）。
+         */
+        public boolean hasDeathInterception() {
+            for (Overrider ov : overrides) {
+                MethodKind k = ov.kind();
+                if (k == MethodKind.DIE || k == MethodKind.IS_ALIVE || k == MethodKind.IS_DEAD_OR_DYING) {
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 
     private static final Map<Class<?>, GatePlan> PLANS = new ConcurrentHashMap<>();

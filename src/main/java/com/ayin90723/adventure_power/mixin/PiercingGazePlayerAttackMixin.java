@@ -81,15 +81,20 @@ public class PiercingGazePlayerAttackMixin {
         // 架空参照读数：自定义血条 Boss（亚波伦）原版槽被架空，扣血检测必须用真实血量，
         // 否则普通命中也会被误判"未扣血"而恒走穿透三连（满额直写、数值错位）
         float healthBefore = HealthUtil.getEffectiveHealth(living);
+        // 吸收基线（v1.4.5）：穿透"实际生效"判定含吸收--伤害被吸收心吃掉时血量不动但
+        // 吸收下降，算生效不算拦截（吸收是原版减伤行为而非无敌，穿透不越权绕过它）。
+        // 旧判定只看血量，会对吸收怪误判"未扣血"重跑穿透三连（与 Layer 2 的 actuallyHurt
+        // 双倍结算）+ 兜底每刀额外磨 1%
+        float absorptionBefore = living.getAbsorptionAmount();
         // 本次 attack 作用域隔离：记录 post 计数基线，consume 只反映"本次 hurt 期间"的新增
-        //（环境噪声 hurt（怪物互殴等）在两次 attack 之间的 post 计入基线，不会被误消费）
+        //（环境噪声 hurt（怪物互殴等）在两次 attack 之间的 post 计入基线，不会被下次消费）
         PiercingGazeUtil.beginVanillaHurtScope();
         boolean hurtResult = target.hurt(source, amount);
 
-        // 实际扣血就放行（不管 hurtResult 真假）。用 getEffectiveHealth 直读真实血量，
+        // 实际生效（扣血或扣吸收）就放行（不管 hurtResult 真假）。用 getEffectiveHealth 直读真实血量，
         // 防 Boss 用 ASM/Mixin 改写 getHealth() 返回假值（Fantasy Ending delta 式）。
-        // 覆盖：① 普攻原版怪 ② fdbosses 调 super 扣血但 return false ③ Boss 假成功/拦截
-        if (HealthUtil.getEffectiveHealth(living) < healthBefore) {
+        // 覆盖：① 普攻原版怪 ② fdbosses 调 super 扣血但 return false ③ Boss 假成功/拦截 ④ 吸收怪
+        if (HealthUtil.getEffectiveHealth(living) + living.getAbsorptionAmount() < healthBefore + absorptionBefore) {
             // 扣血了，放行。仅当原版管线未 post 事件时补发 LivingHurtEvent——
             // 正常环境 hurt() 内 ForgeHooks.onLivingHurt（或 Layer 2.5 手动 post）已发过，
             // 重复补发会让淬魂/嗜血/禁疗等监听器同 tick 双倍结算（影杀已有 SHADOW_KILL_TICKED 去重）。
@@ -125,7 +130,7 @@ public class PiercingGazePlayerAttackMixin {
         try {
             float effective = PiercingGazeUtil.postHurtEvent(living, source, amount);
             PiercingGazeUtil.invokeActuallyHurt(living, source, effective);
-            PiercingGazeUtil.afterPierceFallback(living, effective, healthBefore);
+            PiercingGazeUtil.afterPierceFallback(living, source, effective, healthBefore, absorptionBefore);
             // 穿透反馈（穿透三连 = 真穿透；同目标同 tick 节流防三连刷屏）
             PiercingGazeUtil.pierceFeedback(living);
         } finally {

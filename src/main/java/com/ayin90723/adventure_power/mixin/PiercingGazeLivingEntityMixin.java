@@ -71,6 +71,10 @@ public abstract class PiercingGazeLivingEntityMixin {
      *  此时 getHealth() 是扣血后值，若用作 afterPierceFallback 的参照会被判定"血量未恢复"
      *  而对普通命中重复直写（双重扣血） */
     private static final ThreadLocal<Float> PIERCING_HEALTH_BEFORE = new ThreadLocal<>();
+    /** 本层伤害结算前的伤害吸收量（onHurtEnter 缓存）--穿透"实际生效"判定含吸收（v1.4.5）：
+     *  吸收心吃掉伤害时血量不动但吸收下降，算生效不算拦截，否则会对吸收怪误判"未扣血"
+     *  重跑穿透三连（双 actuallyHurt）+ 兜底每刀额外磨血 */
+    private static final ThreadLocal<Float> PIERCING_ABSORPTION_BEFORE = new ThreadLocal<>();
     // 注：事件已 post 标记（VANILLA_HURT_EVENT_POSTED）与消费方法已移至 PiercingGazeUtil——
     // @Mixin 类禁止非 private static 方法（Mixin Applicator 会尝试混入目标类导致 InvalidMixinException）。
     // 事件已发判定统一走 PiercingGazeUtil.peek/consumeVanillaHurtEventPosted（单一来源 = CombatAbilityHandler 监听器）：
@@ -78,10 +82,10 @@ public abstract class PiercingGazeLivingEntityMixin {
     // 旧 Layer 2.5 @Redirect(method="m_6469_", target=onLivingHurt) 是死靶（require=0 静默失效），
     // 导致 PIERCING_EVENT_POSTED 恒 false、对"super 扣血但 return false"的 Boss 重复结算——已移除该 redirect。
 
-    /** 递归调用栈帧：保存外层 (inPiercing, healthBefore) 两态，healthBefore 可为 null */
-    private record PiercingStackFrame(boolean inPiercing, Float healthBefore, long postedBase) {}
+    /** 递归调用栈帧：保存外层 (inPiercing, healthBefore, absorptionBefore) 三态，均可为 null */
+    private record PiercingStackFrame(boolean inPiercing, Float healthBefore, Float absorptionBefore, long postedBase) {}
 
-    /** 递归调用栈：保存外层 (IN_PIERCING, HEALTH_BEFORE) 两态，hurt HEAD 压栈、RETURN 弹栈 */
+    /** 递归调用栈：保存外层 (IN_PIERCING, HEALTH_BEFORE, ABSORPTION_BEFORE) 三态，hurt HEAD 压栈、RETURN 弹栈 */
     private static final ThreadLocal<Deque<PiercingStackFrame>> PIERCING_STACK = ThreadLocal.withInitial(ArrayDeque::new);
 
     @Inject(method = "m_6469_", at = @At("HEAD"))
@@ -94,21 +98,24 @@ public abstract class PiercingGazeLivingEntityMixin {
             stack.clear();
             PiercingGazeUtil.IN_PIERCING.set(false);
             PIERCING_HEALTH_BEFORE.remove();
+            PIERCING_ABSORPTION_BEFORE.remove();
         }
         // 压栈保存外层状态，重置本层（递归 hurt 不污染外层）。
         // postedBase = 本层开始时的 post 计数：本层"是否已 post" = 当前计数 > postedBase，
         // 嵌套 hurt 的新增 post 只影响其自身基准，外层判定不受污染（计数方案天然栈式隔离，
-        // 无需清除/恢复布尔——旧布尔方案嵌套未 post 的 hurt 会清掉外层标记导致外层误判）
+        // 无需清除/恢复布尔--旧布尔方案嵌套未 post 的 hurt 会清掉外层标记导致外层误判）
         stack.push(new PiercingStackFrame(
-            PiercingGazeUtil.IN_PIERCING.get(), PIERCING_HEALTH_BEFORE.get(),
+            PiercingGazeUtil.IN_PIERCING.get(), PIERCING_HEALTH_BEFORE.get(), PIERCING_ABSORPTION_BEFORE.get(),
             PiercingGazeUtil.getVanillaHurtEventPostCount()
         ));
         PiercingGazeUtil.IN_PIERCING.set(false);
         // 缓存伤害结算前的真实血量（架空参照读数：自定义血条 Boss 原版槽被架空，
         // getHealthDirect 读到不动值会导致兜底检测永远误判"血量未下降"而双重扣血；
         // 防 getHealth 被 ASM/TrueHealth 篡改则靠架空参照的差值判定回退到 DataItem）
+        // 吸收基线同刻缓存：穿透"实际生效"判定 = 血量与吸收均未下降才算拦截
         LivingEntity self = (LivingEntity) (Object) this;
         PIERCING_HEALTH_BEFORE.set(HealthUtil.getEffectiveHealth(self));
+        PIERCING_ABSORPTION_BEFORE.set(self.getAbsorptionAmount());
     }
 
     /**
@@ -183,15 +190,17 @@ public abstract class PiercingGazeLivingEntityMixin {
                 // （如亚波伦 RevelationFix 的 redirectSetHealth）。
                 float healthBefore = PIERCING_HEALTH_BEFORE.get() != null
                     ? PIERCING_HEALTH_BEFORE.get() : self.getHealth();
+                float absorptionBefore = PIERCING_ABSORPTION_BEFORE.get() != null
+                    ? PIERCING_ABSORPTION_BEFORE.get() : self.getAbsorptionAmount();
 
                 if (wasBlocked) {
                     if (posted) {
-                        // 原版管线已完整结算（actuallyHurt → onLivingHurt → 扣血），Boss 仅把
-                        // 返回值改为 false（"调 super 扣血但 return false"类，如 fdbosses）——
+                        // 原版管线已完整结算（actuallyHurt -> onLivingHurt -> 扣血），Boss 仅把
+                        // 返回值改为 false（"调 super 扣血但 return false"类，如 fdbosses）--
                         // 放行 + 血量兜底即可，重复 post/actuallyHurt 会双倍结算
                         //（旧 2.5 redirect 死靶时 posted 恒 false，此分支从不命中导致双倍）。
                         cir.setReturnValue(true);
-                        PiercingGazeUtil.afterPierceFallback(self, amount, healthBefore);
+                        PiercingGazeUtil.afterPierceFallback(self, source, amount, healthBefore, absorptionBefore);
                         // 穿透反馈（posted+blocked = Boss 拦截后原版管线已结算的穿透）
                         PiercingGazeUtil.pierceFeedback(self);
                     } else {
@@ -203,17 +212,17 @@ public abstract class PiercingGazeLivingEntityMixin {
                         // 递归层 HEAD 压栈捕获到本层 IN_PIERCING=true 即可跳过穿透阻断递归
                         PiercingGazeUtil.IN_PIERCING.set(true);
                         float effectiveAmount = PiercingGazeUtil.postHurtEvent(self, source, amount);
-                        // actuallyHurt 直写 + 血量兜底 + 清无敌字段
+                        // actuallyHurt 直写 + 血量兜底 + 死亡结算补完 + 清无敌字段
                         PiercingGazeUtil.invokeActuallyHurt(self, source, effectiveAmount);
                         cir.setReturnValue(true);
-                        PiercingGazeUtil.afterPierceFallback(self, effectiveAmount, healthBefore);
+                        PiercingGazeUtil.afterPierceFallback(self, source, effectiveAmount, healthBefore, absorptionBefore);
                         // 穿透反馈（情况 A = Boss 完全拦截后的补 post + actuallyHurt 穿透）
                         PiercingGazeUtil.pierceFeedback(self);
                     }
                 } else {
                     // 情况 B：正常流程，actuallyHurt 已由原版管线执行（事件已按其结算），
                     // 只做兜底（不重复 actuallyHurt / post）
-                    PiercingGazeUtil.afterPierceFallback(self, amount, healthBefore);
+                    PiercingGazeUtil.afterPierceFallback(self, source, amount, healthBefore, absorptionBefore);
                 }
             }
         } finally {
@@ -227,10 +236,16 @@ public abstract class PiercingGazeLivingEntityMixin {
                 } else {
                     PIERCING_HEALTH_BEFORE.remove();
                 }
+                if (outer.absorptionBefore() != null) {
+                    PIERCING_ABSORPTION_BEFORE.set(outer.absorptionBefore());
+                } else {
+                    PIERCING_ABSORPTION_BEFORE.remove();
+                }
             } else {
                 // 栈空（最外层 hurt 退出）-> 彻底清理，防 ThreadLocal 泄漏
                 PiercingGazeUtil.IN_PIERCING.remove();
                 PIERCING_HEALTH_BEFORE.remove();
+                PIERCING_ABSORPTION_BEFORE.remove();
             }
         }
     }

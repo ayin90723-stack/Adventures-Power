@@ -49,12 +49,16 @@ public final class DebugLog {
 
     /**
      * 引擎探针日志门禁：总开关 && 调用方能力开关。
-     * 调用方为 null（引擎外异常路径）时静默——探针日志只在引擎执行链内产生。
+     * 调用方为 null（引擎外异常路径）时静默--探针日志只在引擎执行链内产生。
      */
     private static boolean probeGate() {
         if (!ModConfig.DEBUG_LOG.get()) return false;
         EngineCaller caller = ENGINE_CALLER.get();
-        if (caller == null) return false;
+        return caller != null && callerSubGate(caller);
+    }
+
+    /** 调用方能力子开关（淬魂/审判共用淬魂开关：审判无独立调试开关，搭车记录） */
+    private static boolean callerSubGate(EngineCaller caller) {
         return switch (caller) {
             case SOUL_QUENCH, JUDGMENT -> ModConfig.DEBUG_LOG_SOUL_QUENCH.get();
             case PIERCING_GAZE -> ModConfig.DEBUG_LOG_PIERCING_GAZE.get();
@@ -83,6 +87,15 @@ public final class DebugLog {
 
     public static void probe(String format, Object... args) {
         if (probeGate()) {
+            LOGGER.info(format, args);
+        }
+    }
+
+    // ==================== 死亡结算补完（按调用方能力开关归属，同引擎探针归属原则） ====================
+
+    /** 死亡结算补完日志（v1.4.5 DeathFinalizer）：总开关 + 调用方能力开关 */
+    public static void deathFinalize(EngineCaller caller, String format, Object... args) {
+        if (caller != null && ModConfig.DEBUG_LOG.get() && callerSubGate(caller)) {
             LOGGER.info(format, args);
         }
     }

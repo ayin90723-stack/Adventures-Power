@@ -267,12 +267,18 @@ public class CombatAbilityHandler {
             // （L0 hurt 已由上方完成并判定拦截；设计文档 docs/quench-upgrade-proposal.md）
             BloodWriteEngine.execute(target, correctedHealth, DebugLog.EngineCaller.SOUL_QUENCH);
             if (correctedHealth <= 0.0F) {
-                // v1.4.3 十七轮（用户定调）：淬魂不主动调 die——磨血能力的语义是"伤害"而非
-                // "处决"，主动 die 制造半开门状态（die 事件已发、死亡流程未走完），对面把
-                // 它当遭遇中断恢复（Integrity restored 实测同款根因）；且 die 拦截型 Boss
-                // 上该调用纯空转。写 0 后对面自己的 tick 死亡判定自然接管（20:40 实测：
-                // 通用直写 setTrueHealth→0 后对面 3.5 秒自己正规 died，零 restored）。
-                // 击杀归属经 lastHurtBy 传递（对面自然死时结算），死亡由影杀处决兜底
+                // v1.4.5 原则修正（原十七轮"写 0 后对面自然死接管"的前提不成立：die() 服务端
+                // 唯一调用点是 hurt() 尾部，直写 0 后普通怪只会被 tickDeath 20 tick 静默移除，
+                // 零掉落零经验零事件；"对面自己正规 died"是个别 Boss 自带死亡检查的个例）：
+                //  - 磨血区间（写值>0）不碰死亡流程（不变）；
+                //  - 本兜底的致死一刀由两条路径收口死亡结算，此处不直接调 DeathFinalizer：
+                //    ① 管线内触发（事件由外层 hurt 的 actuallyHurt post）--兜底写发生在
+                //    外层 hurt 内部，其尾部 die 检查兜住（直接补会双发 LivingDeathEvent，
+                //    die 的事件 post 在 dead 守卫之前，击杀回馈类监听器双结算）；
+                //    ② 破敌手动 post 语境--穿透三连收口的 afterPierceFallback 已统一
+                //    调 DeathFinalizer 补完原版 die；
+                //  - 拦死者不裸调 die（半开门/被对面当遭遇中断恢复，十七轮教训）--处决=影杀。
+                // 下方归属补偿保留：兜住拦死者稍后自然死与第三方手动 post 的边角
                 clearHurtTime(target);
                 target.invulnerableTime = 0;
                 target.setLastHurtByMob(attacker);

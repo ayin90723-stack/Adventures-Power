@@ -8,6 +8,7 @@ import com.ayin90723.adventure_power.util.SyncUtil;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.DamageUtil;
+import com.ayin90723.adventure_power.util.DeathFinalizer;
 import com.ayin90723.adventure_power.util.probe.BloodWriteEngine;
 import com.ayin90723.adventure_power.util.probe.ProbeScales;
 import com.ayin90723.adventure_power.util.FriendlyFireProtection;
@@ -155,12 +156,14 @@ public class ActiveSkillHandler {
                 // 全层失败退 raw（与原 setAllHealthLikeRaw 行为等价）
                 BloodWriteEngine.execute(target, correctedHealth, com.ayin90723.adventure_power.util.DebugLog.EngineCaller.JUDGMENT);
                 if (correctedHealth <= 0.0F) {
-                    // v1.4.3 十七轮定调（与淬魂一致）：不主动调 die——主动 die 制造半开门
-                    // 状态（die 事件已发、死亡流程未走完），对面当遭遇中断恢复；写 0 后
-                    // 对面自然死接管，击杀归属经 lastHurtBy 传递，处决由影杀兜底
+                    // v1.4.5 致死收尾（原"写 0 后对面自然死"前提不成立，见 CombatAbilityHandler
+                    // 淬魂兜底注释）：审判为主动技能，兜底执行时自己的 hurt 已返回、无外层
+                    // 管线会补 die--必须显式补完原版死亡结算，否则目标 20 tick 后被 tickDeath
+                    // 静默移除（零掉落零经验零事件）。拦死者由 DeathFinalizer 门禁跳过（处决=影杀）
                     target.invulnerableTime = 0;
                     target.setLastHurtByMob(player);
                     target.setLastHurtByPlayer(player);
+                    DeathFinalizer.completeVanillaDeath(target, source, com.ayin90723.adventure_power.util.DebugLog.EngineCaller.JUDGMENT);
                 }
             }
         }

@@ -31,10 +31,11 @@ import java.util.WeakHashMap;
  * 重复逻辑（攻击者追溯 / 门禁检查 / 发事件 / 直写伤害 / 血量兜底 / 清无敌字段）
  * 统一收口于此，保证各层穿透行为一致。
  *
- * <h3>穿透结算两段式</h3>
+ * <h3>穿透结算收口</h3>
  * <ul>
  *   <li>{@link #invokeActuallyHurt} - 直写伤害，绕过 hurt() 内的护甲/无敌判定</li>
  *   <li>{@link #afterPierceFallback} - 血量直写兜底（防 Boss 注入 setHealth 恢复血量）
+ *       + 死亡结算补完（v1.4.5：穿透绕过 hurt 尾部的 die 调用点，致死时补完原版死亡）
  *       + 清自定义无敌计时器（防下次 hurt 提前 return false 锁死影杀 NBT）</li>
  * </ul>
  * 调用方按场景组合：actuallyHurt 未执行时（Layer 0 / Layer 2 情况 A/C）两段都调；
@@ -223,25 +224,42 @@ public final class PiercingGazeUtil {
     }
 
     /**
-     * 穿透后兜底 - 血量直写 + 清自定义无敌字段。
+     * 穿透后兜底 - 血量直写 + 死亡结算补完 + 清自定义无敌字段。
      * <p>
      * <b>血量直写兜底</b>：部分 Boss（如亚波伦 RevelationFix）通过注入 {@code setHealth()}
      * 在 {@code actuallyHurt()} 后将血量恢复至损伤前水平。若检测到血量未实际扣除，
      * 强制直写 {@code DataItem.value} 字段绕过 {@code SynchedEntityData.set()} 及一切
      * {@code setHealth()} 覆写拦截。
      * <p>
+     * <b>吸收感知（v1.4.5）</b>："实际生效"判定此前只看血量--伤害被伤害吸收心吃掉时
+     * 血量不动，会被误判"未扣血"：Layer 0 会对吸收怪重跑穿透三连（与 Layer 2 的
+     * actuallyHurt 双倍结算），本兜底的"血量未降"检测也会恒成立（每刀额外磨 1%）。
+     * 吸收是原版减伤行为而非无敌，穿透不越权绕过它--判据改为"血量与吸收均未下降"
+     * 才确认拦截。
+     * <p>
+     * <b>死亡结算补完（v1.4.5）</b>：穿透三连绕过 hurt()，其尾部的 die() 调用点不会
+     * 执行--目标被打到致死时无人调 die（原版 die 服务端唯一调用点是 hurt() 尾部，
+     * 直写 0 后只会被 tickDeath 20 tick 静默移除，零掉落零经验零事件）。统一在
+     * 三连收口（本方法）补完原版死亡；拦死者由 {@link DeathFinalizer} 内部门禁跳过
+     * （处决=影杀）。
+     * <p>
      * <b>清自定义无敌字段</b>：部分 Boss（如 Goety Apostle）在 {@code actuallyHurt()} 中设置
      * {@code moddedInvul} 等字段，不清除会导致下次 hurt() 检测到 >0 直接 return false 且不调
      * super.hurt()，锁死影杀 NBT 影子血量更新。
      *
      * @param target 目标实体
+     * @param source 击杀伤害源（死亡结算补完的掉落归属来源）
      * @param effectiveAmount 实际生效的伤害量
-     * @param healthBefore actuallyHurt 执行前的血量（用于检测血量是否被恢复）
+     * @param healthBefore actuallyHurt 执行前的血量（血量直写的写入参照）
+     * @param absorptionBefore 伤害结算前的伤害吸收量（拦截判定基准，与 healthBefore 配对）
      */
-    public static void afterPierceFallback(LivingEntity target, float effectiveAmount, float healthBefore) {
+    public static void afterPierceFallback(LivingEntity target, DamageSource source, float effectiveAmount,
+                                           float healthBefore, float absorptionBefore) {
         // 架空参照读数：自定义血条 Boss（亚波伦）原版槽被架空，getHealthDirect 读到不动值，
-        // 会导致"血量未下降"检测恒成立而每击触发直写兜底（数值错位）；取真实血量判断
-        if (effectiveAmount > 0.0F && HealthUtil.getEffectiveHealth(target) >= healthBefore && target.isAlive()) {
+        // 会导致"血量未下降"检测恒成立而每击触发直写兜底（数值错位）；取真实血量判断。
+        // 吸收感知：吸收心吃掉伤害时血量不动但吸收下降，不算拦截（原版行为非无敌）
+        if (effectiveAmount > 0.0F && target.isAlive()
+            && HealthUtil.getEffectiveHealth(target) + target.getAbsorptionAmount() >= healthBefore + absorptionBefore) {
             // v1.4.4 收紧（UomWither 实测）：effectiveAmount 是穿透补 post 的事件链结算值
             // （饰品加伤可放大），原公式 Math.max(0, healthBefore - effectiveAmount) 在
             // 伤害 ≥ 血量时 clamp 0——磨血语义意外变成处决写 0（Boss 血量 0 直接触发其终式，
@@ -265,6 +283,9 @@ public final class PiercingGazeUtil {
                 DebugLog.EngineCaller.PIERCING_GAZE);
         }
         InvulClearUtil.clearCustomInvulTimers(target);
+        // 死亡结算补完：穿透绕过 hurt() 尾部的 die 调用点，致死一刀在此补完原版死亡
+        // （同时覆盖 actuallyHurt 直调致死与上方兜底直写致死两种情况）
+        DeathFinalizer.completeVanillaDeath(target, source, DebugLog.EngineCaller.PIERCING_GAZE);
     }
 
     /**
