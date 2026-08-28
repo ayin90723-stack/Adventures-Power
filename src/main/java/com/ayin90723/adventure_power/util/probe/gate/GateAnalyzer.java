@@ -143,15 +143,24 @@ public final class GateAnalyzer {
          * 正常死亡。无 DIE 覆写时值无意义（hasDeathInterception 不消费）。
          */
         final boolean dieCallsSuper;
+        /**
+         * die 执行链自足（v1.4.6-fix 第四类豁免）：从最子类 die 覆写沿 super 调用链模拟
+         * ——链上任一环节直接调用 dropAllDeathLoot（m_6668_，掉落/经验所在的死亡结算体）
+         * 或链通到原版 LivingEntity.die，即"调 die 必有完整死亡结算"。自足重写型
+         * （Cataclysm Animation_Monsters 型：不调 super 但把原版 die 全套复制重写，掉落
+         * 只存在于覆写体内）的专属判据。无 DIE 覆写时值无意义（不消费）。
+         */
+        final boolean dieSelfContained;
         /** 首杀升级梯裁决产物（GateOracle 写入；验证失败时作废置 null 走完整梯）。 */
         volatile Object resolved;
 
         GatePlan(List<Overrider> overrides, List<StateCandidate> candidates,
-                 List<KillToolCandidate> killTools, boolean dieCallsSuper) {
+                 List<KillToolCandidate> killTools, boolean dieCallsSuper, boolean dieSelfContained) {
             this.overrides = overrides;
             this.candidates = candidates;
             this.killTools = killTools;
             this.dieCallsSuper = dieCallsSuper;
+            this.dieSelfContained = dieSelfContained;
         }
 
         public boolean isEmpty() {
@@ -191,6 +200,9 @@ public final class GateAnalyzer {
          *   <li><b>killTool 型</b>：覆写体内发现自家静态击杀工具调用（本末起源型：die 覆写
          *       调 BMUtil.killEntity 类工具 = 正规击杀）。</li>
          * </ol>
+         * <b>v1.4.6-fix 第四类（自足重写型）</b>：die 执行链自足（{@code dieSelfContained}，
+         * 灾变 Cataclysm 基类型：不调 super 但把原版 die 全套复制重写，掉落/经验/AfterDefeatBoss
+         * 只存在于覆写体内——补完 die = 完整正常死亡，不调反而零掉落）。
          * 二段背景：十六轮淬魂归零刀主动调 die 正是这两类目标的死亡启动器（保命锁锁血量、
          * 锁不住已启动的死亡序列），十七轮防半开门移除后死亡启动器空缺，v1.4.5/v1.4.6 的
          * 门禁未接住——实测太阳神使/本末起源陷入"写 0 被钩回 1.0"死循环。liveness 覆写
@@ -203,7 +215,7 @@ public final class GateAnalyzer {
             for (Overrider ov : overrides) {
                 MethodKind k = ov.kind();
                 if (k == MethodKind.DIE) {
-                    if (dieCallsSuper || selfKillCapable) {
+                    if (dieCallsSuper || dieSelfContained || selfKillCapable) {
                         continue;
                     }
                     return true;
@@ -230,6 +242,8 @@ public final class GateAnalyzer {
         List<Overrider> overrides = new ArrayList<>();
         // die 覆写链 super 调用累计（链上全部 DIE 覆写均调 super 才算良性演出型；v1.4.6 细化）
         boolean dieCallsSuper = true;
+        // DIE 覆写子→父序发现记录 {callsSuper, dropsLoot}（dieSelfContained 执行链模拟用；v1.4.6-fix）
+        List<boolean[]> dieChain = new ArrayList<>();
         // 阶段一：实体类 → 模组父类链，LivingEntity 前（原版/Forge 层覆写不算模组层意图）
         for (Class<?> c = cls; c != null && c != Object.class && c != net.minecraft.world.entity.LivingEntity.class;
              c = c.getSuperclass()) {
@@ -239,14 +253,16 @@ public final class GateAnalyzer {
                 String desc = methodDesc(m);
                 overrides.add(new Overrider(m.getName(), desc, kind));
                 if (kind == MethodKind.DIE) {
-                    dieCallsSuper &= dieCallsSuperIn(c, m.getName(), desc);
+                    boolean callsSuper = dieCallsSuperIn(c, m.getName(), desc);
+                    dieCallsSuper &= callsSuper;
+                    dieChain.add(new boolean[]{callsSuper, dieDropsLootIn(c, m.getName(), desc)});
                 }
             }
         }
         if (overrides.isEmpty()) {
             DebugLog.probe("[GateOracle] {} 类链无 liveness 覆写（isAlive/isDeadOrDying/die/kill/remove/hurt），不适用",
                 cls.getSimpleName());
-            return new GatePlan(List.of(), List.of(), List.of(), false);
+            return new GatePlan(List.of(), List.of(), List.of(), false, false);
         }
         // 阶段二+三：对每个覆写方法跑 ASM 一跳消费分析
         List<StateCandidate> candidates = new ArrayList<>();
@@ -256,9 +272,11 @@ public final class GateAnalyzer {
         }
         // 名字启发仅排序：alive/permit/flag/gate 词根的许可候选优先（非混淆目标受益，混淆目标退化结构序）
         candidates.sort((a, b) -> Integer.compare(nameScore(b), nameScore(a)));
-        DebugLog.probe("[GateOracle] {} 分析：覆写={} 候选={} killTool={} die调super={}",
-            cls.getSimpleName(), overrides.size(), candidates, killTools, dieCallsSuper);
-        return new GatePlan(List.copyOf(overrides), List.copyOf(candidates), List.copyOf(killTools), dieCallsSuper);
+        boolean dieSelfContained = simulateDieSelfContained(dieChain);
+        DebugLog.probe("[GateOracle] {} 分析：覆写={} 候选={} killTool={} die调super={} die自足={}",
+            cls.getSimpleName(), overrides.size(), candidates, killTools, dieCallsSuper, dieSelfContained);
+        return new GatePlan(List.copyOf(overrides), List.copyOf(candidates), List.copyOf(killTools),
+            dieCallsSuper, dieSelfContained);
     }
 
     /**
@@ -283,6 +301,45 @@ public final class GateAnalyzer {
             }
         }
         return false;
+    }
+
+    /**
+     * die 覆写体的掉落结算调用检测（v1.4.6-fix 第四类豁免判据）：覆写体内直接调用
+     * {@code dropAllDeathLoot}（SRG m_6668_ / dev 双名，desc 固定 (DamageSource)V）= 覆写
+     * 自带完整死亡结算。自足重写型（灾变 Cataclysm Animation_Monsters 型）的专属标志：
+     * 不调 super 但把原版 die 全套复制重写——掉落/经验/战后处理<b>只存在于覆写体内</b>，
+     * 不补完 die 就是零掉落零经验（tickDeath 只播演出不调 die）。owner 不校验：方法名 +
+     * desc 已特异（protected 方法，仅继承体系内有意义），且编译器对继承方法的 owner 写法
+     * （声明类/引用类）不稳定。字节码读不到返回 false（保守，走链模拟的自然结论）。
+     */
+    private static boolean dieDropsLootIn(Class<?> declaring, String name, String desc) {
+        MethodNode mn = findMethodNode(declaring, name, desc);
+        if (mn == null) return false;
+        for (AbstractInsnNode insn : mn.instructions) {
+            if (insn instanceof MethodInsnNode min
+                && (insn.getOpcode() == org.objectweb.asm.Opcodes.INVOKEVIRTUAL
+                    || insn.getOpcode() == org.objectweb.asm.Opcodes.INVOKESPECIAL)
+                && (min.name.equals("m_6668_") || min.name.equals("dropAllDeathLoot"))
+                && min.desc.equals("(Lnet/minecraft/world/damagesource/DamageSource;)V")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * die 执行链自足模拟（v1.4.6-fix）：从最子类 DIE 覆写沿 super 调用链推演实际会执行的
+     * 死亡结算——任一环节直接调 dropAllDeathLoot（自足重写型）或链通到无覆写层
+     * （= 原版 LivingEntity.die，必含掉落结算）即自足；链中途断裂（环节不调 super 且自身
+     * 无掉落调用）则该目标的 die 不保证完整结算。与 {@code dieCallsSuper} 的区别：后者
+     * 只认"全链调 super"，覆盖不了"不调 super 但自带全套"的重写型（漏判即零掉落）。
+     */
+    private static boolean simulateDieSelfContained(List<boolean[]> dieChain) {
+        for (boolean[] link : dieChain) {
+            if (link[1]) return true;
+            if (!link[0]) return false;
+        }
+        return true;
     }
 
     /** 名字启发排序分（PERMIT 词根加分；结构分类不变，只影响尝试顺序）。 */

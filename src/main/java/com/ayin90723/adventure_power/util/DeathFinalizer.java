@@ -30,7 +30,10 @@ import org.slf4j.Logger;
  *       与正常击杀完全一致（DYING 姿态 + 20 tick 死亡动画 + 死亡音效），<b>不是处决</b>；</li>
  *   <li>拦死者（die/isAlive/isDeadOrDying 有模组层覆写）不裸调 die--会触发对面的
  *       中断/复活逻辑（十七轮半开门同款根因）。处决只在影杀（玩家没开影杀就是
- *       没要这个服务，能力开关自由选择）；防复活在禁疗之触（FORCE_KILL 链）。</li>
+ *       没要这个服务，能力开关自由选择）；防复活在禁疗之触（FORCE_KILL 链）。
+ *       die 覆写四类良性形态不算拦死者（调 super 演出型 / deathSequence 型 /
+ *       killTool 型 / 自足重写型[覆写自带掉落结算全套，v1.4.6-fix 灾变 Cataclysm
+ *       型]），照常补完--见 {@code GateAnalyzer.GatePlan#hasDeathInterception()}。</li>
  * </ul>
  *
  * <h3>幂等</h3>
@@ -75,9 +78,12 @@ public final class DeathFinalizer {
 
             // 拦死者门禁：die/isAlive/isDeadOrDying 有模组层覆写即跳过（per-class 缓存，
             // 普通怪首次反射扫描后终身命中缓存）。hurt/remove/kill 覆写不算--拦伤害
-            // 不拦死亡（fdbosses 调 super 扣血型）/死亡表演延迟移除都不阻止 die 完整走完
+            // 不拦死亡（fdbosses 调 super 扣血型）/死亡表演延迟移除都不阻止 die 完整走完。
+            // die 覆写四类良性豁免：调 super（演出型）/ deathSequence / killTool /
+            // 自足重写型（v1.4.6-fix：覆写自带 dropAllDeathLoot 全套死亡结算，如灾变
+            // Cataclysm 基类--掉落只存在于覆写体内，跳过补完 = 零掉落零经验）
             if (GateAnalyzer.analyze(target).hasDeathInterception()) {
-                DebugLog.deathFinalize(caller, "[死亡结算] {} 存在拦截型死亡覆写（die 不调 super / liveness 覆写），跳过 die 补完（处决=影杀）", target);
+                DebugLog.deathFinalize(caller, "[死亡结算] {} 存在拦截型死亡覆写（die 链不自足 / liveness 覆写），跳过 die 补完（处决=影杀）", target);
                 return;
             }
 
