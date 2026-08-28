@@ -42,11 +42,19 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  * 覆盖两类 Boss：① 重写 hurt return false 不调 super；② 重写 hurt return true 假成功未扣血。
  * 两种都走穿透三连（postHurtEvent + actuallyHurt + 血量直写兜底）。
  *
+ * <h3>调用点竞争与 priority（2026-08-28）</h3>
+ * 整合包核心 chapter_of_yuusha_3_core 的 minecraft.PlayerMixin 对同一调用点
+ * （Player.attack 内 target.hurt）挂了同优先级 @Redirect（透传原版 + 主手无限剑时
+ * hurtEnemy 补刀）。Mixin 的 @Redirect 独占调用点：同优先级时后注册者整体 Skipped
+ * ——本层曾在该整合包中完全失效（latest.log 实锤 @Redirect conflict）。
+ * priority 提到 1100（&gt;1000）后本层先应用持有调用点，对方 onHurt 让位
+ * （其无限剑补刀分支随之失效，经确认可接受：普通武器场景对方行为本就等同原版透传）。
+ *
  * @see PiercingGazeMixin
  * @see PiercingGazeLivingEntityMixin
  * @see PiercingGazeUtil
  */
-@Mixin(Player.class)
+@Mixin(value = Player.class, priority = 1100)
 public class PiercingGazePlayerAttackMixin {
 
     /**
