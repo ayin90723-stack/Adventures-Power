@@ -276,10 +276,18 @@ public final class PiercingGazeUtil {
             float fallbackDamage = Math.min(effectiveAmount, fallbackCap);
             DebugLog.piercingGaze("[破敌] 穿透后血量未降（{} >= {}）-> 兜底补刀（上限 {}，实际 {}）",
                 HealthUtil.getEffectiveHealth(target), healthBefore, fallbackCap, fallbackDamage);
+            // v1.4.6 修复（亚波伦实测）：写入基准取 max(当前读数, healthBefore)——healthBefore
+            // 失真低值时（亚波伦 getHealth ASM 覆写伪装值 33.0 经 Layer 2 的 ThreadLocal
+            // fallback 裸读路径泄入），原公式 execute(healthBefore - fallback) 会把高血目标
+            // 一击跳崖写到伪装值附近（实测 620 血被写到 31.62 = 33.0 - 1.38，"空手一击秒残血"）。
+            // max 取高者：正常穿透（before 正确、actuallyHurt 已扣血）当前 < before → 基准 =
+            // before（原逻辑不变）；before 失真低值 → 基准 = 当前读数（磨血语义 = 从当前再扣
+            // 一截），对 UomWither 终式显示值污染（当前 0.3999 < before 真血）同样取 before 不变
+            float baseline = Math.max(HealthUtil.getEffectiveHealth(target), healthBefore);
             // v1.4.2：五层引擎（磨血语义）--L3/L4 覆盖静态 Map/加密存储型高级 Boss；
             // 全层失败退 raw（与原 setAllHealthLikeRaw 行为等价）。
             // v1.4.3 二十轮：清盾前置已下沉引擎 execute 磨血分支统一处理（调用点零纪律）
-            BloodWriteEngine.execute(target, Math.max(healthBefore - fallbackDamage, 0.0F),
+            BloodWriteEngine.execute(target, Math.max(baseline - fallbackDamage, 0.0F),
                 DebugLog.EngineCaller.PIERCING_GAZE);
         }
         InvulClearUtil.clearCustomInvulTimers(target);

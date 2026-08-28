@@ -25,13 +25,10 @@ import net.minecraft.world.BossEvent.BossBarColor;
 import net.minecraft.world.BossEvent.BossBarOverlay;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
-import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent.Phase;
 import net.minecraftforge.event.TickEvent.ServerTickEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
@@ -89,10 +86,6 @@ public class ShadowKillHelper {
     private static String missingKey(UUID attackerId, UUID targetId) {
         return attackerId + ":" + targetId;
     }
-
-    /** dropAllDeathLoot 反射缓存（m_6668_ = dropAllDeathLoot(DamageSource)） */
-    private static final java.lang.reflect.Method DROP_ALL_DEATH_LOOT =
-        HealthUtil.reflectMethod(LivingEntity.class, "m_6668_", "dropAllDeathLoot", DamageSource.class);
 
     /**
      * 每攻击者对每目标的影子血量 BossBar：attacker UUID -> target UUID -> bar。
@@ -222,8 +215,11 @@ public class ShadowKillHelper {
      * 未捕获异常会中断同事件的其他监听器且后续层全部跳过（Boss 停留"0 血未移除"
      * 中间态）。各段独立降级捕获：归零段/战利品段失败不阻断移除段；移除段（⑥~⑨）
      * 逐层捕获，保证任一层失败其余层仍执行。
+     * <p>
+     * v1.4.6：善后段②~⑨提权为 {@link com.ayin90723.adventure_power.util.ExecutionFinalizer}
+     * （处决语义所有者共用工具：影杀处决 + 禁疗终局层"不许活"兜底），本类只保留归零段①①b①c。
      */
-    private static void saturationKill(LivingEntity target, DamageSource source, LivingEntity attacker) {
+    private static void saturationKill(LivingEntity target, DamageSource source) {
         Level level = target.level();
         if (!(level instanceof ServerLevel serverLevel)) return;
 
@@ -239,8 +235,8 @@ public class ShadowKillHelper {
         //     isAlive/isDeadOrDying 语义翻转定位存活许可（许可标志/进度/KILL_TOOL 击杀工具），
         //     让目标走正规死亡链（战利品/事件/簿记对方自清，无幽灵残留）——开门优先、
         //     影杀善后兜底：SYNC_DEAD 直接返回；PENDING 轮询等待（超时降级链末端自动补跑
-        //     finalizeSaturationKill）；FAILED 继续既有饱和链。淬魂磨血不触发（伤害语义
-        //     与开门语义冲突，接入点仅在处决）
+        //     ExecutionFinalizer 善后段，v1.4.6 提权自 finalizeSaturationKill）；FAILED 继续
+        //     既有饱和链。淬魂磨血不触发（伤害语义与开门语义冲突，接入点仅在处决）
         try {
             boolean zeroed = BloodWriteEngine.execute(target, 0.0F, com.ayin90723.adventure_power.util.DebugLog.EngineCaller.SHADOW_KILL);
             // v1.4.3 六轮：触发判据改用容器层事实 isRemoved（五轮的 isAlive 判定被 liveness
@@ -252,7 +248,8 @@ public class ShadowKillHelper {
             // 普通怪 hurt 已死不进 saturationKill；进来的无覆写者由"不适用"快速 FAILED 零退化
             if (!zeroed || !target.isRemoved()) {
                 GateOracle.OpenResult gate = GateOracle.tryOpen(target, source,
-                    () -> finalizeSaturationKill(target, source, attacker, serverLevel));
+                    () -> com.ayin90723.adventure_power.util.ExecutionFinalizer.finalizeKill(
+                        target, source, serverLevel, DebugLog.EngineCaller.SHADOW_KILL));
                 // SYNC_DEAD=正规链自清（十二轮：死亡表演型 Boss 覆写 remove 延迟容器移除，
                 // 服务端已死但客户端收不到包——模型残留直到重进；挂 pending 窗口确认移除后
                 // 补发客户端移除包，窗口末仍存活则 finalizeFallback 强制收尾）；
@@ -261,7 +258,8 @@ public class ShadowKillHelper {
                 // 旧实现落回主流程二次善后——双掉装备/双发死亡事件实测实锤）；NOT_APPLICABLE=
                 // 未做任何事（无覆写/开关关/异常），继续原饱和链
                 if (gate == GateOracle.OpenResult.SYNC_DEAD) {
-                    schedulePostKillSync(target, serverLevel);
+                    com.ayin90723.adventure_power.util.ExecutionFinalizer.schedulePostKillSync(
+                        target, serverLevel, DebugLog.EngineCaller.SHADOW_KILL);
                     return;
                 }
                 if (gate != GateOracle.OpenResult.NOT_APPLICABLE) return;
@@ -271,160 +269,8 @@ public class ShadowKillHelper {
             LOGGER.error("[ShadowKill] 归零段失败（①①b①c），继续移除链 target={}", target, e);
         }
 
-        finalizeSaturationKill(target, source, attacker, serverLevel);
-    }
-
-    /**
-     * 开门成功后的客户端同步兜底（十二轮）：死亡表演型 Boss 覆写 remove 延迟容器移除
-     * （deathTime 表演 → 表演结束才真移除），服务端 confirmDead 通过但客户端模型残留
-     * （实测退出重进才消失）。挂统一 pending 表：窗口末已移除 → 补发客户端移除包
-     * （幂等，与原版广播重复无害）；仍未移除（表演超时/异常）→ finalizeFallback 强制收尾。
-     * <p>
-     * 十三轮修复：onDead 必须覆写——PendingVerifyRegistry 对窗口内已死亡/移除的目标走
-     * onDead 提前完成分支（不调 onVerify），本末起源 killEntity 同栈立即移除实体，实体
-     * 在下个 tick END 就 isRemoved → onDead（原默认空实现）→ 任务静默完成、移除包没发。
-     */
-    private static void schedulePostKillSync(LivingEntity target, ServerLevel serverLevel) {
-        com.ayin90723.adventure_power.util.probe.PendingVerifyRegistry.register(target,
-            ModConfig.GATE_ORACLE_WAIT_TICKS.get(), new com.ayin90723.adventure_power.util.probe.PendingVerifyRegistry.PendingTask() {
-                @Override
-                public boolean onVerify(LivingEntity t) {
-                    if (t.isRemoved()) {
-                        broadcastRemovePacket(t, serverLevel);
-                        DebugLog.shadowKill("[影杀] 开门成功收尾：实体已移除，补发客户端移除包 target={}", t);
-                        return true;
-                    }
-                    return false; // 未移除 → onFail 强制收尾
-                }
-
-                @Override
-                public void onDead(LivingEntity t) {
-                    // 十三轮：窗口内已移除（killEntity 同栈立即移除的形态）走本分支而非
-                    // onVerify——此处即客户端同步的真正主路径，必须补发移除包
-                    broadcastRemovePacket(t, serverLevel);
-                    DebugLog.shadowKill("[影杀] 开门成功收尾（窗口内移除）：补发客户端移除包 target={}", t);
-                }
-
-                @Override
-                public void onFail(LivingEntity t) {
-                    DebugLog.shadowKill("[影杀] 开门后等待窗口结束仍未移除（表演超时？），强制收尾 target={}", t);
-                    try {
-                        t.remove(Entity.RemovalReason.KILLED);
-                        HealthUtil.setRemovedFieldDirect(t, Entity.RemovalReason.KILLED);
-                        broadcastRemovePacket(t, serverLevel);
-                        HealthUtil.eradicateFromWorld(t);
-                    } catch (Exception e) {
-                        LOGGER.error("[ShadowKill] 开门后强制收尾失败 target={}", t, e);
-                    }
-                }
-            });
-    }
-
-    /** 广播客户端移除包（幂等——与原版移除链的广播重复无害）。 */
-    private static void broadcastRemovePacket(LivingEntity target, ServerLevel serverLevel) {
-        try {
-            net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket packet =
-                new net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket(target.getId());
-            // 十四轮：不用 chunkSource.broadcast(target,...)——它依赖实体追踪关系，实体已
-            // removed（DISCARDED/KILLED）后追踪条目可能已被清理，无观察者包发不出去（十三轮
-            // 实测：补发日志正常输出但客户端模型仍残留）。直接对维度内所有玩家逐个发送
-            for (net.minecraft.server.level.ServerPlayer sp : serverLevel.players()) {
-                sp.connection.send(packet);
-            }
-        } catch (Exception e) {
-            LOGGER.error("[ShadowKill] 客户端移除包发送失败 target={}", target, e);
-        }
-    }
-
-    /**
-     * 影杀善后段（②~⑨）：战利品 + 死亡事件 + 五重移除链 + 客户端包 + 容器抹除 + 兜底确认。
-     * <p>
-     * v1.4.3 拆段：GateOracle 轮询型超时降级链的末端从此处补跑（finalizeFallback）——
-     * 开门等待期间不执行（防对面正规死亡链双重结算：掉两次装备/发两次事件）。
-     */
-    private static void finalizeSaturationKill(LivingEntity target, DamageSource source,
-                                               LivingEntity attacker, ServerLevel serverLevel) {
-
-        // ② 强制掉落全套装备 + ③ 反射调用 dropAllDeathLoot（触发战利品表 /
-        //     LivingDropsEvent / LootModifier）+ ④ 手动 post LivingDeathEvent（墓碑/任务
-        //     模组可正常处理）+ ⑤ 善后清理 —— 战利品/事件段失败不阻断移除
-        try {
-            for (EquipmentSlot slot : EquipmentSlot.values()) {
-                ItemStack equipment = target.getItemBySlot(slot);
-                if (!equipment.isEmpty()) {
-                    target.spawnAtLocation(equipment.copy());
-                    target.setItemSlot(slot, ItemStack.EMPTY);
-                }
-            }
-            if (DROP_ALL_DEATH_LOOT != null) {
-                DROP_ALL_DEATH_LOOT.invoke(target, source);
-            }
-        } catch (Exception e) {
-            LOGGER.error("[ShadowKill] 战利品段失败（②③），继续移除链 target={}", target, e);
-        }
-        try {
-            MinecraftForge.EVENT_BUS.post(new LivingDeathEvent(target, source));
-            target.unRide();
-            target.ejectPassengers();
-        } catch (Exception e) {
-            LOGGER.error("[ShadowKill] 死亡事件/善后段失败（④⑤），继续移除链 target={}", target, e);
-        }
-
-        // ⑥ 五重移除链 — 逐层递增，确保无 Boss 可拦截（逐层捕获：任一层失败其余层仍执行）
-        try {
-            target.remove(Entity.RemovalReason.KILLED);                             // 标准路径
-        } catch (Exception e) {
-            LOGGER.error("[ShadowKill] 移除层1失败 target={}", target, e);
-        }
-        try {
-            target.remove(Entity.RemovalReason.DISCARDED);                          // 双保险
-        } catch (Exception e) {
-            LOGGER.error("[ShadowKill] 移除层2失败 target={}", target, e);
-        }
-        try {
-            HealthUtil.removeDirect(target, Entity.RemovalReason.KILLED);           // 反射 remove() — 绕过 Java 覆写
-        } catch (Exception e) {
-            LOGGER.error("[ShadowKill] 移除层3失败 target={}", target, e);
-        }
-        try {
-            HealthUtil.setRemovedFieldDirect(target, Entity.RemovalReason.KILLED);  // 字段直写 — 绕过一切 Mixin
-        } catch (Exception e) {
-            LOGGER.error("[ShadowKill] 移除层4失败 target={}", target, e);
-        }
-        // 第5层：CHANGED_DIMENSION 兜底 — 部分 Boss 的 Mixin 仅拦截 KILLED/DISCARDED
-        try {
-            HealthUtil.setRemovedDirect(target, Entity.RemovalReason.CHANGED_DIMENSION);
-        } catch (Exception e) {
-            LOGGER.error("[ShadowKill] 移除层5失败 target={}", target, e);
-        }
-
-        // ⑦ 客户端同步 — 强制通知所有追踪此实体的玩家其已被移除
-        try {
-            net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket packet =
-                new net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket(target.getId());
-            serverLevel.getChunkSource().broadcast(target, packet);
-        } catch (Exception e) {
-            LOGGER.error("[ShadowKill] 客户端移除包发送失败（⑦） target={}", target, e);
-        }
-
-        // ⑧ 内部结构抹除 — 从 EntityLookup/EntityTickList/EntitySection 中直接删除实体
-        try {
-            HealthUtil.eradicateFromWorld(target);
-        } catch (Exception e) {
-            LOGGER.error("[ShadowKill] 容器抹除失败（⑧） target={}", target, e);
-        }
-
-        // ⑨ 最终确认 — 若防护 Boss 在移除链中清除了标记（极端场景），兜底重写 removalReason
-        try {
-            if (!target.isRemoved()) {
-                DebugLog.shadowKill("[影杀] 移除标记被清除，兜底重写 target={}", target);
-                HealthUtil.setRemovedFieldDirect(target, Entity.RemovalReason.KILLED);
-            }
-            DebugLog.shadowKill("[影杀] 饱和式秒杀完成 target={} removed={} reason={}",
-                target, target.isRemoved(), target.getRemovalReason());
-        } catch (Exception e) {
-            LOGGER.error("[ShadowKill] 兜底确认失败（⑨） target={}", target, e);
-        }
+        com.ayin90723.adventure_power.util.ExecutionFinalizer.finalizeKill(
+            target, source, serverLevel, DebugLog.EngineCaller.SHADOW_KILL);
     }
 
     // ==================== 影杀辅助：BossBar ====================
@@ -587,7 +433,7 @@ public class ShadowKillHelper {
             KILLING.remove(target.getUUID());
         }
         if (target.isAlive()) {
-            saturationKill(target, killSource, attacker);
+            saturationKill(target, killSource);
         }
     }
 

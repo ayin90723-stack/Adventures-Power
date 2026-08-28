@@ -189,7 +189,10 @@ public abstract class PiercingGazeLivingEntityMixin {
                 // 用于检测 Boss 是否通过注入 setHealth() 在伤害后恢复血量
                 // （如亚波伦 RevelationFix 的 redirectSetHealth）。
                 float healthBefore = PIERCING_HEALTH_BEFORE.get() != null
-                    ? PIERCING_HEALTH_BEFORE.get() : self.getHealth();
+                    ? PIERCING_HEALTH_BEFORE.get() : HealthUtil.getEffectiveHealth(self);
+                // v1.4.6：fallback 改架空参照——原裸 self.getHealth() 是 v1.3.4 架空参照
+                // 统一的漏网点，亚波伦 getHealth ASM 覆写伪装值（33.0）曾经此泄入
+                // afterPierceFallback 的写入基准（620 血被一击写到 31.62 = 33.0 - 1.38）
                 float absorptionBefore = PIERCING_ABSORPTION_BEFORE.get() != null
                     ? PIERCING_ABSORPTION_BEFORE.get() : self.getAbsorptionAmount();
 

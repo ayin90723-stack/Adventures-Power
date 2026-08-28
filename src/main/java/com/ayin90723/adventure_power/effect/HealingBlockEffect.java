@@ -2,12 +2,17 @@ package com.ayin90723.adventure_power.effect;
 
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.config.ModConfig;
+import com.ayin90723.adventure_power.mixin.LivingEntityFieldsAccessor;
 import com.ayin90723.adventure_power.util.DebugLog;
+import com.ayin90723.adventure_power.util.ExecutionFinalizer;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import com.ayin90723.adventure_power.util.PersistentDataKeys;
 import com.ayin90723.adventure_power.util.probe.BloodWriteEngine;
+import com.ayin90723.adventure_power.util.probe.PendingVerifyRegistry;
+import com.ayin90723.adventure_power.util.probe.gate.GateOracle;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectCategory;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -29,6 +34,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -68,6 +74,10 @@ public class HealingBlockEffect extends MobEffect {
    private static final Map<UUID, TrackedEntry> TRACKED_HEALTH = new ConcurrentHashMap<>();
    /** 觉醒易伤到期时间内存表（双源之一，防 getPersistentData() 重写丢失） */
    private static final Map<UUID, Long> VULN_END = new ConcurrentHashMap<>();
+   /** FORCE_KILL 标记内存表（v1.4.6 双源化）：HIGHEST 打标与 LOWEST 消费在同一次事件分发内
+    *  配对，双写双清与 NBT 同步——重写 getPersistentData() 返回空 tag 的 Boss（亚波伦型）
+    *  NBT 写入即丢，单源 NBT 会让死亡锁定与终局复验对这类实体双双失效 */
+   private static final Set<UUID> FORCE_KILL_MARKED = ConcurrentHashMap.newKeySet();
    /** 跨维度传送宽限期：记录实体连续未在维度中找到的 tick 数，防止传送时误清理 */
    private static final Map<UUID, Integer> MISSING_TICKS = new ConcurrentHashMap<>();
 
@@ -111,20 +121,29 @@ public class HealingBlockEffect extends MobEffect {
 
    /** 向目标施加禁疗之触标记，持续时间单位：tick */
    public static void apply(LivingEntity target, int durationTicks) {
-      long endTime = target.level().getGameTime() + durationTicks;
+      long gameTime = target.level().getGameTime();
+      long endTime = gameTime + durationTicks;
       // 内存表记录（血量低点 + 到期时间）—— 双源核心：
       // getPersistentData() 被重写返回空 tag 的实体（如亚波伦）NBT 标记写入即丢，
       // isActive() 回退查此表，钳制链不因 NBT 失效
       // 基准血量用架空参照（getEffectiveHealth）：自定义血条实体（亚波伦）原版槽架空，
       // getHealthDirect 读到的是不动值，钳制基准必须取真实血量
-      TRACKED_HEALTH.put(target.getUUID(), new TrackedEntry(HealthUtil.getEffectiveHealth(target), endTime));
+      // v1.4.6 续期保留低点：未过期条目续期时基准取 min(旧低点, 当前读数)——防"绕过拦截
+      // 的回血（字段直写，setHealth HEAD 拦不到）+ 同 tick 攻击 apply 重锚"把钳制线洗白抬高；
+      // 过期条目（语义上已是新一轮禁疗）与新目标基准 = 当前读数
+      UUID targetId = target.getUUID();
+      TrackedEntry existing = TRACKED_HEALTH.get(targetId);
+      float current = HealthUtil.getEffectiveHealth(target);
+      float baseline = (existing != null && gameTime <= existing.endTime)
+         ? Math.min(existing.health, current) : current;
+      TRACKED_HEALTH.put(targetId, new TrackedEntry(baseline, endTime));
       // NBT 持久化（正常实体重启后可恢复；对重写 getPersistentData 的实体静默无效）
       target.getPersistentData().putLong(NBT_KEY, endTime);
       // 验证 NBT 是否真正持久化：重写 getPersistentData() 的实体（亚波伦）再次读取为空，
       // 只能依赖内存表回退；正常实体返回 true
       boolean nbtPersist = target.getPersistentData().contains(NBT_KEY);
-      DebugLog.healingBlock("[禁疗] 标记写入: 内存表={}hp NBT持久={} endTime={}（gameTime={}）",
-         HealthUtil.getEffectiveHealth(target), nbtPersist, endTime, target.level().getGameTime());
+      DebugLog.healingBlock("[禁疗] 标记写入: 低点={}hp（当前读数={}，{}） NBT持久={} endTime={}（gameTime={}）",
+         baseline, current, existing != null ? "续期保留低点" : "新锚定", nbtPersist, endTime, gameTime);
       // 同时施加 MobEffect 作为视觉指示器
       MobEffect visualEffect = ModEffects.HEALING_BLOCK.get();
       if (visualEffect != null) {
@@ -272,6 +291,9 @@ public class HealingBlockEffect extends MobEffect {
       public static void onLivingDeathPreMark(LivingDeathEvent event) {
          if (isActive(event.getEntity())) {
             event.getEntity().getPersistentData().putBoolean(FORCE_KILL_KEY, true);
+            // v1.4.6 双源：内存表兜底——重写 getPersistentData() 返回空 tag 的 Boss
+            // NBT 写入即丢，单源会让 FORCE_KILL 链（死亡锁定+终局复验）对这类实体失效
+            FORCE_KILL_MARKED.add(event.getEntity().getUUID());
          }
       }
 
@@ -296,6 +318,15 @@ public class HealingBlockEffect extends MobEffect {
                   found.add(uuid);
                   TrackedEntry entry = TRACKED_HEALTH.get(uuid);
                   if (entry != null) {
+                     // v1.4.6：过期清理下沉本层——过期清理此前只挂 LivingTickEvent，不触发该
+                     // 事件的实体（覆写 tick 不调 super 型）标记过期后仍被本层持续钳制（过度
+                     // 执行，违背"到期即失效"语义）；与 onLivingTick 同款清理（内存表双源，
+                     // NBT 侧读取处自带 endTime 防御）
+                     if (level.getGameTime() > entry.endTime) {
+                        TRACKED_HEALTH.remove(uuid);
+                        VULN_END.remove(uuid);
+                        continue;
+                     }
                      // 架空参照读数：自定义血条实体（亚波伦）原版槽被架空，
                      // getHealthDirect 读到不动值会导致回血检测永远 false，钳制失效
                      float current = HealthUtil.getEffectiveHealth(living);
@@ -341,15 +372,105 @@ public class HealingBlockEffect extends MobEffect {
          entity.getPersistentData().remove(NBT_KEY);
          entity.getPersistentData().remove(VULN_NBT_KEY);
          CompoundTag data = entity.getPersistentData();
-         if (data.contains(FORCE_KILL_KEY) && data.getBoolean(FORCE_KILL_KEY)) {
+         // v1.4.6 双源查询：NBT || 内存表（空 tag Boss 的 NBT 通道丢失，内存表兜底）；
+         // 消费即双清（打标与消费在同一次事件分发内配对）
+         boolean forceKill = (data.contains(FORCE_KILL_KEY) && data.getBoolean(FORCE_KILL_KEY))
+            || FORCE_KILL_MARKED.contains(entity.getUUID());
+         FORCE_KILL_MARKED.remove(entity.getUUID());
+         if (forceKill) {
             data.remove(FORCE_KILL_KEY);
             // 如果被其他模组取消（复活），强制归零血量并放行死亡
             // v1.4.2：五层引擎处决归零（覆盖静态 Map/加密存储型；全层失败退 raw 清零原版+自定义血条）
             if (event.isCanceled()) {
                BloodWriteEngine.execute(entity, 0.0F, com.ayin90723.adventure_power.util.DebugLog.EngineCaller.HEALING_BLOCK);
                event.setCanceled(false);
+               // v1.4.6：终局复验（docs/execution-finality-proposal.md §3）——归零放行后挂
+               // pending 窗口观察 die 的结果，防"die 覆写型/die 后拉回型"复活（标记已清、
+               // 钳制已停，无人再管的禁疗承诺缺口，详见类内 scheduleFinalityRecheck）
+               scheduleFinalityRecheck(entity, event.getSource());
             }
          }
+      }
+
+      // ==================== v1.4.6 终局复验 ====================
+
+      /** 终局复验 per-target 去重（弱 key 随目标回收；事件与 ServerTick END 均主线程，无并发） */
+      private static final Map<LivingEntity, Boolean> FINALITY_RECHECK_ACTIVE = new WeakHashMap<>();
+
+      /**
+       * 终局复验（v1.4.6，docs/execution-finality-proposal.md §3.1/§3.2）：FORCE_KILL
+       * 归零 + uncancel 放行 die 后挂 pending 窗口，窗口末单点裁决三态：
+       * <ul>
+       *   <li>{@code isRemoved}（容器事实）→ 原版链自清（uncancel 后 die 正常走完 →
+       *       tickDeath 移除），完成；</li>
+       *   <li>{@code deathTime > 0} → 死亡流程已启动（演出型/正常死亡动画），容忍不干预；</li>
+       *   <li>{@code !isRemoved && deathTime==0} → 真被拉回（die 覆写型 / die 后拉回型）→
+       *       GateOracle 开门梯（成功 = 正规死亡链自清）/ 开关关或全败 → ExecutionFinalizer
+       *       处决善后（"不许活"兜底）。</li>
+       * </ul>
+       * onDead 分支必须复查容器事实（六轮教训：表层 {@code !isAlive()} 会被 liveness 覆写
+       * 谎报——归零后"宣称已死"但 isRemoved=false / deathTime=0，die 从未执行），与裁决
+       * 三态处置路径合流；正常死亡动画中（deathTime&gt;0 未移除）同样容忍不误杀。
+       * <p>
+       * 语义门禁天然满足（触发语境 = FORCE_KILL 分支本身）；GateOracle PENDING 衔接：开门梯
+       * 进入轮询等待后由其内部 pending 任务接管（超时降级自动补跑 finalizeFallback），复验
+       * 任务使命结束不重复挂。
+       */
+      private static void scheduleFinalityRecheck(LivingEntity target, DamageSource source) {
+         if (target.level().isClientSide()) return;
+         if (!(target.level() instanceof ServerLevel serverLevel)) return;
+         if (target instanceof net.minecraft.world.entity.player.Player) return; // PVP 门禁防御性复查（标记只打非玩家目标）
+         if (FINALITY_RECHECK_ACTIVE.put(target, Boolean.TRUE) != null) return; // per-target 去重
+         DebugLog.healingBlock("[禁疗] 终局复验挂起：uncancel 放行 die，{} tick 后裁决 target={}",
+            ModConfig.GATE_ORACLE_WAIT_TICKS.get(), target);
+         PendingVerifyRegistry.register(target, ModConfig.GATE_ORACLE_WAIT_TICKS.get(),
+            new PendingVerifyRegistry.PendingTask() {
+               @Override
+               public boolean onVerify(LivingEntity t) {
+                  FINALITY_RECHECK_ACTIVE.remove(t);
+                  return adjudicateFinality(t, source, serverLevel);
+               }
+
+               @Override
+               public void onDead(LivingEntity t) {
+                  FINALITY_RECHECK_ACTIVE.remove(t);
+                  // 六轮教训：!isAlive 谎报不算死——isRemoved 为真才完成，否则与裁决三态合流
+                  adjudicateFinality(t, source, serverLevel);
+               }
+            });
+      }
+
+      /**
+       * 裁决三态 + 处置（onVerify/onDead 合流入口）。恒返回 true（处置已交棒，任务完成）。
+       * <p>
+       * tryOpen 返回值按方案 §3.1 四态契约处置：FAILED 时善后已由 finalizeFallback 在
+       * GateOracle 内部跑过，直接 return 勿双跑（各段不幂等——双掉装备/双发事件）；
+       * gate_oracle_enabled=false 时 tryOpen 返回 NOT_APPLICABLE → 直接处决善后
+       * （终局性 = 禁疗能力承诺，开关只控制"是否尝试正规死亡链"这一手段）。
+       */
+      private static boolean adjudicateFinality(LivingEntity t, DamageSource source, ServerLevel serverLevel) {
+         if (t.isRemoved()) {
+            DebugLog.healingBlock("[禁疗] 终局复验：目标已移除（原版链自清），完成 target={}", t);
+            return true;
+         }
+         int deathTime = ((LivingEntityFieldsAccessor) t).adventure_power$getDeathTime();
+         if (deathTime > 0) {
+            DebugLog.healingBlock("[禁疗] 终局复验：死亡流程已启动（deathTime={}），容忍不干预 target={}",
+               deathTime, t);
+            return true;
+         }
+         DebugLog.healingBlock("[禁疗] 终局复验：真被拉回（die 覆写/拉回型）→ 开门梯/处决善后 target={}", t);
+         GateOracle.OpenResult gate = GateOracle.tryOpen(t, source,
+            () -> ExecutionFinalizer.finalizeKill(t, source, serverLevel,
+               com.ayin90723.adventure_power.util.DebugLog.EngineCaller.HEALING_BLOCK));
+         switch (gate) {
+            case SYNC_DEAD -> ExecutionFinalizer.schedulePostKillSync(t, serverLevel,
+               com.ayin90723.adventure_power.util.DebugLog.EngineCaller.HEALING_BLOCK);
+            case PENDING, FAILED -> { /* 开门在飞 / 善后已在 tryOpen 内部跑过（勿双跑） */ }
+            case NOT_APPLICABLE -> ExecutionFinalizer.finalizeKill(t, source, serverLevel,
+               com.ayin90723.adventure_power.util.DebugLog.EngineCaller.HEALING_BLOCK);
+         }
+         return true;
       }
    }
 }

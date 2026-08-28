@@ -137,17 +137,40 @@ public final class GateAnalyzer {
         final List<Overrider> overrides;
         final List<StateCandidate> candidates;
         final List<KillToolCandidate> killTools;
+        /**
+         * die 覆写链全部含 INVOKESPECIAL 父类 die 调用（v1.4.6 细化）：演出型良性覆写
+         * （掉落/事件/dead 标志由父类链最终 LivingEntity.die 保证）——补完 die = 完整
+         * 正常死亡。无 DIE 覆写时值无意义（hasDeathInterception 不消费）。
+         */
+        final boolean dieCallsSuper;
         /** 首杀升级梯裁决产物（GateOracle 写入；验证失败时作废置 null 走完整梯）。 */
         volatile Object resolved;
 
-        GatePlan(List<Overrider> overrides, List<StateCandidate> candidates, List<KillToolCandidate> killTools) {
+        GatePlan(List<Overrider> overrides, List<StateCandidate> candidates,
+                 List<KillToolCandidate> killTools, boolean dieCallsSuper) {
             this.overrides = overrides;
             this.candidates = candidates;
             this.killTools = killTools;
+            this.dieCallsSuper = dieCallsSuper;
         }
 
         public boolean isEmpty() {
             return candidates.isEmpty() && killTools.isEmpty();
+        }
+
+        /**
+         * 类存在 deathSequence 词根候选：die 覆写是自家死亡演出的启动器（写
+         * deathSequenceActive=true 后自己跑演出），调 die 与 GateOracle 的死亡序列触发
+         * 模式（直接写该字段）殊途同归——十六轮认证的正确死亡路径。
+         */
+        public boolean hasDeathSequenceGate() {
+            for (StateCandidate sc : candidates) {
+                String n = sc.name.toLowerCase();
+                if (n.contains("deathsequence") || n.contains("death_sequence")) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /**
@@ -157,11 +180,38 @@ public final class GateAnalyzer {
          * <p>
          * hurt / remove / kill 覆写<b>不算</b>：拦伤害不拦死亡（fdbosses 调 super 扣血型）、
          * 死亡表演延迟移除（remove 覆写）都不阻止 die() 完整走完（掉落/事件/dead 标志）。
+         * <p>
+         * <b>v1.4.6 细化（die 覆写二分 + 二段）</b>：die 覆写满足任一即<b>良性死亡启动器</b>，
+         * 不算拦死者（补完 die = 启动对面的正规死亡链）：
+         * <ol>
+         *   <li><b>调 super</b>（链上全部覆写含 INVOKESPECIAL 父类 die）= 演出型（钢铁守护者
+         *       型：死亡动画挂 die 覆写里、掉落由父类链保证）；</li>
+         *   <li><b>deathSequence 型</b>：类有 deathsequence 词根候选（太阳神使型：die 覆写
+         *       启动自家死亡演出，与 GateOracle 死亡序列触发模式等价）；</li>
+         *   <li><b>killTool 型</b>：覆写体内发现自家静态击杀工具调用（本末起源型：die 覆写
+         *       调 BMUtil.killEntity 类工具 = 正规击杀）。</li>
+         * </ol>
+         * 二段背景：十六轮淬魂归零刀主动调 die 正是这两类目标的死亡启动器（保命锁锁血量、
+         * 锁不住已启动的死亡序列），十七轮防半开门移除后死亡启动器空缺，v1.4.5/v1.4.6 的
+         * 门禁未接住——实测太阳神使/本末起源陷入"写 0 被钩回 1.0"死循环。liveness 覆写
+         * （isAlive/isDeadOrDying）对上述 ②③ 型同样豁免（其 liveness 覆写是自家演出/击杀
+         * 体系的一部分，非谎报拦截）；其余 liveness 覆写维持拦截（谎报型无良性形态）。
+         * 字节码读不到按拦截处理（保守，零退化）。
          */
         public boolean hasDeathInterception() {
+            boolean selfKillCapable = hasDeathSequenceGate() || !killTools.isEmpty();
             for (Overrider ov : overrides) {
                 MethodKind k = ov.kind();
-                if (k == MethodKind.DIE || k == MethodKind.IS_ALIVE || k == MethodKind.IS_DEAD_OR_DYING) {
+                if (k == MethodKind.DIE) {
+                    if (dieCallsSuper || selfKillCapable) {
+                        continue;
+                    }
+                    return true;
+                }
+                if (k == MethodKind.IS_ALIVE || k == MethodKind.IS_DEAD_OR_DYING) {
+                    if (selfKillCapable) {
+                        continue;
+                    }
                     return true;
                 }
             }
@@ -178,19 +228,25 @@ public final class GateAnalyzer {
 
     private static GatePlan scan(Class<?> cls) {
         List<Overrider> overrides = new ArrayList<>();
+        // die 覆写链 super 调用累计（链上全部 DIE 覆写均调 super 才算良性演出型；v1.4.6 细化）
+        boolean dieCallsSuper = true;
         // 阶段一：实体类 → 模组父类链，LivingEntity 前（原版/Forge 层覆写不算模组层意图）
         for (Class<?> c = cls; c != null && c != Object.class && c != net.minecraft.world.entity.LivingEntity.class;
              c = c.getSuperclass()) {
             for (java.lang.reflect.Method m : c.getDeclaredMethods()) {
                 MethodKind kind = WATCHED.get(m.getName());
                 if (kind == null) continue;
-                overrides.add(new Overrider(m.getName(), methodDesc(m), kind));
+                String desc = methodDesc(m);
+                overrides.add(new Overrider(m.getName(), desc, kind));
+                if (kind == MethodKind.DIE) {
+                    dieCallsSuper &= dieCallsSuperIn(c, m.getName(), desc);
+                }
             }
         }
         if (overrides.isEmpty()) {
             DebugLog.probe("[GateOracle] {} 类链无 liveness 覆写（isAlive/isDeadOrDying/die/kill/remove/hurt），不适用",
                 cls.getSimpleName());
-            return new GatePlan(List.of(), List.of(), List.of());
+            return new GatePlan(List.of(), List.of(), List.of(), false);
         }
         // 阶段二+三：对每个覆写方法跑 ASM 一跳消费分析
         List<StateCandidate> candidates = new ArrayList<>();
@@ -200,9 +256,33 @@ public final class GateAnalyzer {
         }
         // 名字启发仅排序：alive/permit/flag/gate 词根的许可候选优先（非混淆目标受益，混淆目标退化结构序）
         candidates.sort((a, b) -> Integer.compare(nameScore(b), nameScore(a)));
-        DebugLog.probe("[GateOracle] {} 分析：覆写={} 候选={} killTool={}",
-            cls.getSimpleName(), overrides.size(), candidates, killTools);
-        return new GatePlan(List.copyOf(overrides), List.copyOf(candidates), List.copyOf(killTools));
+        DebugLog.probe("[GateOracle] {} 分析：覆写={} 候选={} killTool={} die调super={}",
+            cls.getSimpleName(), overrides.size(), candidates, killTools, dieCallsSuper);
+        return new GatePlan(List.copyOf(overrides), List.copyOf(candidates), List.copyOf(killTools), dieCallsSuper);
+    }
+
+    /**
+     * die 覆写的 super 链检测（v1.4.6 拦死者门禁细化）：覆写体含 INVOKESPECIAL 调用
+     * <b>父类</b> die（owner = 覆写声明类的 superclass，SRG m_6667_ / dev die 双名）=
+     * 演出型良性覆写——掉落/事件/dead 标志由父类链（最终 LivingEntity.die）保证，
+     * DeathFinalizer 补完 die 即完整正常死亡。owner 必须精确匹配直接父类（INVOKESPECIAL
+     * 的语义就是 super 分派；匹配任意祖先会误放过"绕过中间覆写直调 LivingEntity.die"的
+     * 形态——中间层死亡逻辑被跳过）。字节码读不到/无 super 调用返回 false（保守按拦截）。
+     */
+    private static boolean dieCallsSuperIn(Class<?> declaring, String name, String desc) {
+        MethodNode mn = findMethodNode(declaring, name, desc);
+        if (mn == null) return false;
+        String superName = declaring.getSuperclass().getName().replace('.', '/');
+        for (AbstractInsnNode insn : mn.instructions) {
+            if (insn instanceof MethodInsnNode min
+                && insn.getOpcode() == org.objectweb.asm.Opcodes.INVOKESPECIAL
+                && min.owner.equals(superName)
+                && (min.name.equals("m_6667_") || min.name.equals("die"))
+                && min.desc.equals(desc)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 名字启发排序分（PERMIT 词根加分；结构分类不变，只影响尝试顺序）。 */

@@ -77,7 +77,7 @@ public final class DeathFinalizer {
             // 普通怪首次反射扫描后终身命中缓存）。hurt/remove/kill 覆写不算--拦伤害
             // 不拦死亡（fdbosses 调 super 扣血型）/死亡表演延迟移除都不阻止 die 完整走完
             if (GateAnalyzer.analyze(target).hasDeathInterception()) {
-                DebugLog.deathFinalize(caller, "[死亡结算] {} 存在模组层死亡覆写，跳过 die 补完（处决=影杀）", target);
+                DebugLog.deathFinalize(caller, "[死亡结算] {} 存在拦截型死亡覆写（die 不调 super / liveness 覆写），跳过 die 补完（处决=影杀）", target);
                 return;
             }
 
