@@ -42,19 +42,24 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  * 覆盖两类 Boss：① 重写 hurt return false 不调 super；② 重写 hurt return true 假成功未扣血。
  * 两种都走穿透三连（postHurtEvent + actuallyHurt + 血量直写兜底）。
  *
- * <h3>调用点竞争与 priority（2026-08-28）</h3>
+ * <h3>调用点竞争与让位定案（2026-08-28 两轮实测）</h3>
  * 整合包核心 chapter_of_yuusha_3_core 的 minecraft.PlayerMixin 对同一调用点
- * （Player.attack 内 target.hurt）挂了同优先级 @Redirect（透传原版 + 主手无限剑时
- * hurtEnemy 补刀）。Mixin 的 @Redirect 独占调用点：同优先级时后注册者整体 Skipped
- * ——本层曾在该整合包中完全失效（latest.log 实锤 @Redirect conflict）。
- * priority 提到 1100（&gt;1000）后本层先应用持有调用点，对方 onHurt 让位
- * （其无限剑补刀分支随之失效，经确认可接受：普通武器场景对方行为本就等同原版透传）。
+ * （Player.attack 内 target.hurt）挂了同优先级（1000）@Redirect（透传原版 + 主手
+ * 无限剑时 hurtEnemy 补刀）。Mixin 的 @Redirect 独占调用点：同优先级时后注册者整体
+ * Skipped——本层在该整合包中失效（WARN，因本层 require=0 不致命）。
+ * <p>
+ * 曾尝试 priority 1100 抢先应用（对方让位），实测**启动即崩**：对方 mixin 配置
+ * {@code "injectors": {"defaultRequire": 1}}，其 @Redirect 被顶掉后 0/1 注入成功，
+ * Mixin 判定 Critical injection failure 抛 MixinTransformerError（日志实锤）。
+ * 对方未写 require=0，抢占路线在对方不配合的前提下不可行——定案保持默认优先级
+ * 让位：本层在该整合包中不生效（Layer 1/2 仍完整覆盖其余穿透场景），其他无冲突
+ * 环境不受影响。
  *
  * @see PiercingGazeMixin
  * @see PiercingGazeLivingEntityMixin
  * @see PiercingGazeUtil
  */
-@Mixin(value = Player.class, priority = 1100)
+@Mixin(Player.class)
 public class PiercingGazePlayerAttackMixin {
 
     /**
