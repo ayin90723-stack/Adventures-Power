@@ -39,8 +39,10 @@ import net.minecraft.world.phys.AABB;
 import net.minecraftforge.event.entity.living.LivingAttackEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
+import net.minecraftforge.event.entity.living.MobEffectEvent;
 
 import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.eventbus.api.Event;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -459,13 +461,43 @@ public class PlayerStateHandler {
     // ========================================================================
 
     /**
-     * 净魂通过 {@link #onTick} 中每 tick 清除残留负面效果实现。
+     * 净魂拦截为三层：Mixin 源头拦截（{@code PurifiedSoulMixin}，canBeAffected HEAD
+     * 直返 false，主路径）→ 事件层兜底（{@link #onMobEffectApplicable}，Applicable
+     * DENY，Mixin 注入点被抢占/覆写时接住）→ tick 兜底清除（{@link #onTick}，覆盖
+     * 前两层都拦不到的旁路——NBT 直注 / forceAddEffect 等不查 canBeAffected 的路径）。
      * <p>
-     * 不再使用 {@code MobEffectEvent.Applicable}——该事件在 Forge 1.20.1 中不可取消，
-     * RevelationFix 等模组的 Mixin 会对其 {@code setCanceled()} 抛出
-     * {@link UnsupportedOperationException}。
-     * tick 兜底方案延迟最多 1 tick，玩家无感知。
+     * 历史注：v1.3.7 前曾用 {@code MobEffectEvent.Applicable} 的 {@code setCanceled()}
+     * ——该事件在 Forge 1.20.1 不可取消，RevelationFix 等模组的 Mixin 下会抛
+     * {@link UnsupportedOperationException}，此路不通遂转 Mixin。事件层回归用的是
+     * HasResult 正解 {@code setResult(Event.Result.DENY)}，与 setCanceled 是两回事。
      */
+
+    /**
+     * 净魂事件层兜底 —— {@code MobEffectEvent.Applicable} 拒绝施加负面效果。
+     * <p>
+     * Forge 对 {@code canBeAffected} 的 patch 是在方法体内 post 本事件：主路径 Mixin
+     * 在 @HEAD 直接返回 false 时事件根本不会发出，此监听平时零命中、零开销。当注入点
+     * 被抢占或覆写时（同方法更高优先级 @Overwrite/@Redirect 抢点，或 ASM 整体替换
+     * 方法体——v1.4.4 破敌 Layer 0 被 @Redirect 抢占的同款事故），方法体回到含
+     * Forge patch 的原版形态，事件照常发出，此处接住：HARMFUL →
+     * {@code setResult(Event.Result.DENY)}，canBeAffected 返回 false。
+     * <p>
+     * 优先级 LOWEST：HasResult 事件最后设置者生效，尽量晚执行以减少 DENY 被后序
+     * 监听器覆写回 DEFAULT 的机会。门禁与 Mixin 层完全一致，服务端判定（客户端效果
+     * 图标由服务端同步决定，单侧拦截即可）。
+     */
+    @SubscribeEvent(priority = EventPriority.LOWEST)
+    public static void onMobEffectApplicable(MobEffectEvent.Applicable event) {
+        if (!(event.getEntity() instanceof Player player)) return;
+        if (player.level().isClientSide()) return;
+        if (event.getEffectInstance().getEffect().getCategory() != MobEffectCategory.HARMFUL) return;
+
+        var progress = ProgressCache.get(player);
+        if (progress != null && (progress.isAdventurer() || progress.isFullyUnlocked())
+              && progress.isAbilityEnabled(AbilityIds.PURIFIED_SOUL)) {
+            event.setResult(Event.Result.DENY);
+        }
+    }
 
     // ========================================================================
     //  3 & 4. 翱翔 (Soar) + 净魂兜底 + 受击坚韧兜底 — 每 Tick

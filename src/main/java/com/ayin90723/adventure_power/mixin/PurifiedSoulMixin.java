@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * 净魂 — 从源头拦截负面效果。
+ * 净魂 — 从源头拦截负面效果（主路径）。
  * <p>
  * 注入 {@code LivingEntity.canBeAffected(MobEffectInstance)} HEAD，
  * 当玩家启用净魂能力且效果类别为 HARMFUL 时直接返回 false，
@@ -20,6 +20,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * <p>
  * 替代之前 {@code MobEffectEvent.Applicable} 的 {@code setCanceled} 方案——
  * 该事件在 Forge 1.20.1 中不可取消，与 RevelationFix 等模组不兼容。
+ * <p>
+ * 本注入点被抢占/覆写时（同方法更高优先级 @Overwrite/@Redirect 抢点，或 ASM 整体
+ * 替换方法体）由事件层兜底接住——见 {@code PlayerStateHandler#onMobEffectApplicable}
+ * （Applicable + setResult(DENY)，HasResult 正解，非 setCanceled）；
+ * 两层都拦不到的旁路（NBT 直注 / forceAddEffect）由 PlayerStateHandler tick 兜底清除。
  */
 @Mixin(value = LivingEntity.class, priority = 2000)
 public class PurifiedSoulMixin {
