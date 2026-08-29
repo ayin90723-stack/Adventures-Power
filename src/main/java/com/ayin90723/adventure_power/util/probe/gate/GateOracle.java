@@ -161,7 +161,8 @@ public final class GateOracle {
             // resolved 快路径（首杀升级梯裁决产物）：同模式直用，验证照常，失败作废重走梯
             Object resolved = plan.resolved;
             if (resolved instanceof ResolvedPlan rp) {
-                if (applyResolved(rp)) return outcomeOf(rp.mode());
+                OpenResult r = applyResolved(rp);
+                if (r != null) return r;
                 plan.resolved = null;
             }
             // 梯级0：KILL_TOOL（§6 顺序纪律限定——无探针需求，验证=死亡事件本身）
@@ -189,10 +190,15 @@ public final class GateOracle {
                 }
             }
             for (GateAnalyzer.StateCandidate sc : plan.candidates) {
-                if (execComboVerify(sc)) {
+                ComboOutcome co = execComboVerify(sc);
+                if (co != ComboOutcome.FAIL) {
                     plan.resolved = new ResolvedPlan("EXEC_COMBO", sc);
                     DebugLog.probe("[GateOracle] EXEC_COMBO 开门成功（候选={} → 正规死亡链自清）", sc);
-                    return OpenResult.SYNC_DEAD;
+                    // 审查修 P2#1：同步硬证据=SYNC_DEAD、异步窗口挂起=PENDING——原实现两者
+                    // 都按同步成功返回，复活型对手（confirmDead 后仍被拉回，死亡事件已发过）
+                    // 的 OPENING 靠 LivingDeathEvent 兜底失效时永久残留 → 之后 tryOpen 恒
+                    // PENDING 影杀善后永不执行；且 schedulePostKillSync 被跳过致客户端模型残留
+                    return co == ComboOutcome.SYNC ? OpenResult.SYNC_DEAD : OpenResult.PENDING;
                 }
             }
             DebugLog.probe("[GateOracle] 全部候选组合验证失败（写死态+die 均未启动正规死亡），补纯 die() 终结尝试");
@@ -218,7 +224,7 @@ public final class GateOracle {
                 writeCandidateValue(sc, Boolean.TRUE);
                 DebugLog.probe("[GateOracle] 死亡序列触发模式：激活 {} → 等待对面演出启动", sc);
                 PendingVerifyRegistry.register(target, ModConfig.GATE_ORACLE_WAIT_TICKS.get(),
-                    new PendingVerifyRegistry.PendingTask() {
+                    PendingVerifyRegistry.TaskKind.GATE, new PendingVerifyRegistry.PendingTask() {
                         @Override
                         public boolean onVerify(LivingEntity t) {
                             if (confirmDead()) {
@@ -236,6 +242,15 @@ public final class GateOracle {
                         }
 
                         @Override
+                        public void onCancel() {
+                            // 弱引用死亡收尾（防御性：匿名任务捕获 GateAttempt.this 强引用
+                            // target，弱引用在 entry 存续期间实际不会为 null，本分支当前
+                            // 不可达——OPENING 残留的真实兜底是 onLivingDeath + onDead/onFail
+                            // 裁决路径。保留以防任务结构将来改为不捕获外部 this）
+                            OPENING.remove(target.getUUID());
+                        }
+
+                        @Override
                         public void onFail(LivingEntity t) {
                             DebugLog.probe("[GateOracle] 死亡序列触发失败（窗口内未启动演出），还原候选退常规梯", sc);
                             writeCandidateValue(sc, orig);
@@ -250,7 +265,8 @@ public final class GateOracle {
 
         /**
          * EXEC_COMBO 组合验证：快照候选现值 → 写死态 → 同栈 die() → confirmDead
-         * （正规死亡链证据）。失败还原候选返回 false；成功保留死态（不还原——门已开）。
+         * （正规死亡链证据）。失败还原候选返回 FAIL；confirmDead 同步通过返回 SYNC；
+         * die 事件已发但硬证据未出（死亡流程异步启动中）挂窗口等裁决返回 ASYNC。
          * <p>
          * 十五轮补充：die() 同栈已发 LivingDeathEvent 但硬证据（removed/deathTime）未出时
          * （死亡序列异步启动型——deathSequenceActive 表演下一 tick 才递增 deathTime），
@@ -259,12 +275,12 @@ public final class GateOracle {
          * 的半开门状态被回滚，对面的遭遇系统把已发事件的死亡当"中断"恢复（实测
          * restored 二阶段复制）。
          */
-        private boolean execComboVerify(GateAnalyzer.StateCandidate sc) {
+        private ComboOutcome execComboVerify(GateAnalyzer.StateCandidate sc) {
             try {
                 Object deadVal = deadValueOf(sc);
-                if (deadVal == null) return false;
+                if (deadVal == null) return ComboOutcome.FAIL;
                 Object orig = snapshotCandidate(sc);
-                if (orig == null) return false; // 介质不可读——该候选不可行
+                if (orig == null) return ComboOutcome.FAIL; // 介质不可读——该候选不可行
                 writeCandidateValue(sc, deadVal);
                 boolean diePosted;
                 try {
@@ -275,25 +291,28 @@ public final class GateOracle {
                     diePosted = false;
                 }
                 if (confirmDead()) {
-                    return true;
+                    return ComboOutcome.SYNC;
                 }
                 if (diePosted) {
                     // die 事件已发但死亡流程异步启动中——挂窗口等硬证据（十五轮：异步确认）
                     scheduleComboConfirm(sc, orig);
-                    return true; // 视为开门中——由 pending 裁决终态
+                    return ComboOutcome.ASYNC; // 视为开门中——由 pending 裁决终态
                 }
                 writeCandidateValue(sc, orig);
-                return false;
+                return ComboOutcome.FAIL;
             } catch (Exception e) {
-                return false;
+                return ComboOutcome.FAIL;
             }
         }
+
+        /** EXEC_COMBO 验证结果：SYNC=同栈硬证据确认死亡；ASYNC=die 事件已发挂窗口等裁决；FAIL=还原候选。 */
+        private enum ComboOutcome { SYNC, ASYNC, FAIL }
 
         /** EXEC_COMBO 异步确认（十五轮）：窗口末 removed/deathTime → 成功自清；否则还原候选退影杀。 */
         private void scheduleComboConfirm(GateAnalyzer.StateCandidate sc, Object orig) {
             DebugLog.probe("[GateOracle] die 已发事件但死亡流程异步启动中，挂窗口等待硬证据（候选={}）", sc);
             PendingVerifyRegistry.register(target, ModConfig.GATE_ORACLE_WAIT_TICKS.get(),
-                new PendingVerifyRegistry.PendingTask() {
+                PendingVerifyRegistry.TaskKind.GATE, new PendingVerifyRegistry.PendingTask() {
                     @Override
                     public boolean onVerify(LivingEntity t) {
                         if (confirmDead()) {
@@ -308,6 +327,13 @@ public final class GateOracle {
                     @Override
                     public void onDead(LivingEntity t) {
                         OPENING.remove(t.getUUID());  // 审查修 P1#1：窗口内死亡终结开门尝试
+                    }
+
+                    @Override
+                    public void onCancel() {
+                        // 弱引用死亡收尾（防御性：匿名任务捕获外部 this 强引用 target，
+                        // 当前不可达——见 triggerDeathSequence 同款注释）
+                        OPENING.remove(target.getUUID());
                     }
 
                     @Override
@@ -369,49 +395,53 @@ public final class GateOracle {
             }
         }
 
-        /** resolved 快路径执行（验证失败返回 false 由调用方作废重走梯）。 */
-        private boolean applyResolved(ResolvedPlan rp) {
+        /**
+         * resolved 快路径执行（审查修 P2#1：返回结果 OpenResult——EXEC_COMBO 需区分
+         * 同步确认与异步窗口两种"成功"；失败返回 null 由调用方作废重走梯）。
+         */
+        private OpenResult applyResolved(ResolvedPlan rp) {
             return switch (rp.mode()) {
-                case "KILL_TOOL" -> invokeKillTool((GateAnalyzer.KillToolCandidate) rp.handle()) && confirmDead();
+                case "KILL_TOOL" -> invokeKillTool((GateAnalyzer.KillToolCandidate) rp.handle()) && confirmDead()
+                    ? OpenResult.SYNC_DEAD : null;
                 // 审查修 P1#3：EXEC_COMBO 回放（原缺失——resolved 写了但 default->false 立即作废，
                 // 每次击杀重走全梯，命中前的失败候选各调一次 die() 副作用按候选数重复）
                 case "EXEC_COMBO" -> {
                     GateAnalyzer.StateCandidate sc = (GateAnalyzer.StateCandidate) rp.handle();
                     active = sc;
-                    yield execComboVerify(sc);  // 快照→写死态→die→confirmDead→失败还原，内部自洽
+                    yield switch (execComboVerify(sc)) {  // 快照→写死态→die→confirmDead→失败还原，内部自洽
+                        case SYNC -> OpenResult.SYNC_DEAD;
+                        case ASYNC -> OpenResult.PENDING;
+                        case FAIL -> null;
+                    };
                 }
                 case "POLL_SILENT" -> {
                     GateAnalyzer.StateCandidate sc = (GateAnalyzer.StateCandidate) rp.handle();
                     active = sc;
                     probeDeadValue = deadValueOf(sc);
-                    if (probeDeadValue == null) yield false;
+                    if (probeDeadValue == null) yield null;
                     writeKillStateSilently();
                     scheduleWait(this::onTimeoutLoud);
-                    yield true; // PENDING 语义：等待窗口是验证的一部分
+                    yield OpenResult.PENDING; // 等待窗口是验证的一部分
                 }
                 case "LOUD_SET" -> {
                     GateAnalyzer.StateCandidate sc = (GateAnalyzer.StateCandidate) rp.handle();
                     active = sc;
                     probeDeadValue = deadValueOf(sc);
-                    if (probeDeadValue == null) yield false;
+                    if (probeDeadValue == null) yield null;
                     loudWrite();
                     scheduleWait(this::onTimeoutDie);
-                    yield true;
+                    yield OpenResult.PENDING;
                 }
                 case "INLINE_DIE" -> {
                     try {
                         target.die(source);
                     } catch (Exception e) {
-                        yield false;
+                        yield null;
                     }
-                    yield confirmDead();
+                    yield confirmDead() ? OpenResult.SYNC_DEAD : null;
                 }
-                default -> false;
+                default -> null;
             };
-        }
-
-        private static OpenResult outcomeOf(String mode) {
-            return "INLINE_DIE".equals(mode) || "KILL_TOOL".equals(mode) ? OpenResult.SYNC_DEAD : OpenResult.PENDING;
         }
 
         // ==================== 等待/降级链 ====================
@@ -423,23 +453,31 @@ public final class GateOracle {
          * 当前不可达。 */
         private void scheduleWait(Runnable onTimeout) {
             int wait = ModConfig.GATE_ORACLE_WAIT_TICKS.get();
-            PendingVerifyRegistry.register(target, wait, new PendingVerifyRegistry.PendingTask() {
-                @Override
-                public boolean onVerify(LivingEntity t) {
-                    return isDeadish(t); // 窗口到点仍未死 → onFail 降级
-                }
+            PendingVerifyRegistry.register(target, wait, PendingVerifyRegistry.TaskKind.GATE,
+                new PendingVerifyRegistry.PendingTask() {
+                    @Override
+                    public boolean onVerify(LivingEntity t) {
+                        return isDeadish(t); // 窗口到点仍未死 → onFail 降级
+                    }
 
-                @Override
-                public void onDead(LivingEntity t) {
-                    OPENING.remove(t.getUUID());
-                    DebugLog.probe("[GateOracle] 开门成功：等待窗口内目标进入死亡（正规链自清）");
-                }
+                    @Override
+                    public void onDead(LivingEntity t) {
+                        OPENING.remove(t.getUUID());
+                        DebugLog.probe("[GateOracle] 开门成功：等待窗口内目标进入死亡（正规链自清）");
+                    }
 
-                @Override
-                public void onFail(LivingEntity t) {
-                    onTimeout.run();
-                }
-            });
+                    @Override
+                    public void onCancel() {
+                        // 弱引用死亡收尾（防御性：匿名任务捕获外部 this 强引用 target，
+                        // 当前不可达——见 triggerDeathSequence 同款注释）
+                        OPENING.remove(target.getUUID());
+                    }
+
+                    @Override
+                    public void onFail(LivingEntity t) {
+                        onTimeout.run();
+                    }
+                });
         }
 
         /** 梯级2：响写（data.set() 触发回调链——回调型死亡逻辑挂在通知上，写入必须"响"）。 */

@@ -131,6 +131,9 @@ public class NetworkHandler {
         AdventureSyncRequestPacket.SYNC_REQUEST_COOLDOWN.remove(uuid);
         SkillSwitchPacket.SWITCH_COOLDOWN.remove(uuid);
         ActiveSkillPacket.SKILL_COOLDOWN.remove(uuid);
+        // 审查修 P3#2/P3#3：新增限频表同步清理
+        BuffTogglePacket.BUFF_TOGGLE_COOLDOWN.remove(uuid);
+        DoubleJumpPacket.JUMP_COOLDOWN.remove(uuid);
     }
 
     // ===== 包定义 =====
@@ -149,12 +152,32 @@ public class NetworkHandler {
                 ctx.get().setPacketHandled(true);
                 return;
             }
-            runOnServer(ctx, player -> DoubleJumpHandler.handleDoubleJump(player));
+            // 审查修 P3#3：补 5 tick 限频——恶意客户端在地面刷空包时每 tick 落地清零
+            // AIR_JUMPED 标记，每包都付全价 resolve + 校验 + 施力 + 粒子（无任何节流）
+            runOnServer(ctx, player -> {
+                var server = player.getServer();
+                if (server == null) return;
+                long now = server.getTickCount();
+                java.util.UUID uuid = player.getUUID();
+                Long last = JUMP_COOLDOWN.get(uuid);
+                if (last != null && now - last < 5) return;
+                JUMP_COOLDOWN.put(uuid, now);
+                DoubleJumpHandler.handleDoubleJump(player);
+            });
         }
+
+        /** 二段跳请求限频表（审查修 P3#3；登出清理走 clearCooldowns） */
+        static final java.util.Map<java.util.UUID, Long> JUMP_COOLDOWN =
+            new java.util.concurrent.ConcurrentHashMap<>();
     }
 
     /** 客户端→服务端：切换某个效果的排除状态 */
     public static class BuffTogglePacket {
+        /** Buff 切换限频表（审查修 P3#2：本包带 persistentData 写 + 回包放大，与其他
+         *  C2S 包同基准 5 tick 限频；登出清理走 clearCooldowns） */
+        static final java.util.Map<java.util.UUID, Long> BUFF_TOGGLE_COOLDOWN =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
         public final String effectId;
 
         public BuffTogglePacket(String effectId) { this.effectId = effectId; }
@@ -177,6 +200,15 @@ public class NetworkHandler {
             runOnServer(ctx, player -> {
                 // 门禁补全：黑名单只对恩赐永驻有意义，需能力启用；effectId 必须是已注册效果，
                 // 否则任意字符串会永久写入 persistentData 撑大 NBT
+                var server = player.getServer();
+                if (server != null) {
+                    // 审查修 P3#2：5 tick 限频（每包 persistentData 读写 + 回包放大）
+                    long now = server.getTickCount();
+                    java.util.UUID uuid = player.getUUID();
+                    Long last = BUFF_TOGGLE_COOLDOWN.get(uuid);
+                    if (last != null && now - last < 5) return;
+                    BUFF_TOGGLE_COOLDOWN.put(uuid, now);
+                }
                 if (!AdventureProgressCapability.isAdventurer(player)
                     && !AdventureProgressCapability.isFullyUnlocked(player)) return;
                 var progressOpt = AdventureProgressCapability.getAdventureProgress(player);

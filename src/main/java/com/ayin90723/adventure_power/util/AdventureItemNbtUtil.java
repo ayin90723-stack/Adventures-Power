@@ -69,9 +69,19 @@ public final class AdventureItemNbtUtil {
         }
         if (anyMilestone) {
             progress.activateAdventurer();
-            // 如果所有里程碑都已恢复，也恢复 fullyUnlocked
-            if (progress.getUnlockedMilestoneCount() >= all.size()) {
+            // 审查修 P3#2：注册表为空（里程碑系统 enabled:false）时 all.size()==0，
+            // 0 >= 0 恒真会把仅有指令解锁记录的玩家误激活 fullyUnlocked（不可逆，
+            // 违背"永不回退"不变式）——空注册表跳过全解锁判定
+            // 审查修 P3#5：玩家佩戴"冒险的终点"本身即全解锁的强证据，直接恢复
+            // fullyUnlocked（数据包扩张 10→12 + capability 损毁叠加时，10 < 12 的
+            // 数量判定会永远丢失觉醒状态）
+            if (all.isEmpty() && playerHasAdventureEnd(player)) {
                 progress.activateFullyUnlocked();
+            }
+            if (!all.isEmpty() && progress.getUnlockedMilestoneCount() >= all.size()) {
+                progress.activateFullyUnlocked();
+            }
+            if (progress.isFullyUnlocked()) {
                 // 恢复路径同时升级饰品：持有「开始」的全部解锁玩家替换为「终点」
                 //（与 grantMilestone 的级联行为一致；无饰品时 replaceBeginWithEnd 无操作）
                 replaceBeginWithEnd(player);
@@ -123,11 +133,18 @@ public final class AdventureItemNbtUtil {
         }
     }
 
-    /** 向指定冒险饰品写入里程碑解锁状态 NBT */
+    /** 向指定冒险饰品写入里程碑解锁状态 NBT。
+     *  审查修 P2#1：注册表外的死 ID（/reload 缩水窗口期 capability 保留下来的解锁记录）
+     *  同样回写 true——只按注册表写会在注册表恢复前把死 ID 键覆写成 false，第三层备份销毁。 */
     public static void writeMilestonesToStack(ItemStack stack, IAdventureProgress progress) {
         CompoundTag tag = stack.getOrCreateTag();
         for (Milestone m : MilestoneRegistry.getAll()) {
             tag.putBoolean(PersistentDataKeys.milestoneNbtKey(m.id()), progress.isMilestoneUnlocked(m.id()));
+        }
+        for (String id : progress.getUnlockedMilestoneIds()) {
+            if (!MilestoneRegistry.contains(id)) {
+                tag.putBoolean(PersistentDataKeys.milestoneNbtKey(id), true);
+            }
         }
         // 指令后门解锁的被禁用能力（含解锁时刻里程碑数，第三层备份）
         CompoundTag grantedTag = new CompoundTag();

@@ -33,6 +33,9 @@ public class DeathDefyHandler {
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onPlayerDeath(LivingDeathEvent event) {
+        // 审查修 P3#2：同优先级其他模组监听器（复活类机制）先取消死亡时不再白耗一次免死
+        // 冷却——玩家实际未被本能力救回，取消+回血+写冷却全属无效消耗
+        if (event.isCanceled()) return;
         if (!(event.getEntity() instanceof Player player)) return;
         if (player.level().isClientSide()) return;
 

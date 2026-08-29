@@ -76,8 +76,13 @@ public class HealingBlockEffect extends MobEffect {
    private static final Map<UUID, Long> VULN_END = new ConcurrentHashMap<>();
    /** FORCE_KILL 标记内存表（v1.4.6 双源化）：HIGHEST 打标与 LOWEST 消费在同一次事件分发内
     *  配对，双写双清与 NBT 同步——重写 getPersistentData() 返回空 tag 的 Boss（亚波伦型）
-    *  NBT 写入即丢，单源 NBT 会让死亡锁定与终局复验对这类实体双双失效 */
-   private static final Set<UUID> FORCE_KILL_MARKED = ConcurrentHashMap.newKeySet();
+    *  NBT 写入即丢，单源 NBT 会让死亡锁定与终局复验对这类实体双双失效。
+    *  value = 打标时刻 gameTime（审查修 P3#1：事件分发被第三方处理器异常打断时 LOWEST
+    *  不执行、条目永久残留，之后该 Boss 与禁疗无关的复活会被误处决——ServerTick END
+    *  过期清理超窗条目） */
+   private static final Map<UUID, Long> FORCE_KILL_MARKED = new ConcurrentHashMap<>();
+   /** FORCE_KILL 标记过期窗口（tick）：正常分发内打标-消费同 tick 完成，窗口远大于任何合法间隔 */
+   private static final long FORCE_KILL_MARK_EXPIRY = 100L;
    /** 跨维度传送宽限期：记录实体连续未在维度中找到的 tick 数，防止传送时误清理 */
    private static final Map<UUID, Integer> MISSING_TICKS = new ConcurrentHashMap<>();
 
@@ -292,8 +297,15 @@ public class HealingBlockEffect extends MobEffect {
          if (isActive(event.getEntity())) {
             event.getEntity().getPersistentData().putBoolean(FORCE_KILL_KEY, true);
             // v1.4.6 双源：内存表兜底——重写 getPersistentData() 返回空 tag 的 Boss
-            // NBT 写入即丢，单源会让 FORCE_KILL 链（死亡锁定+终局复验）对这类实体失效
-            FORCE_KILL_MARKED.add(event.getEntity().getUUID());
+            // NBT 写入即丢，单源会让 FORCE_KILL 链（死亡锁定+终局复验）对这类实体失效。
+            // 复查修 P3#2：打标时刻统一用主世界时钟——超窗清理在 onServerTickEnd 用
+            // overworld().getGameTime() 比对，两处基准不一致时（维度时钟偏移 ≥ 窗口）
+            // 残留条目永不清理
+            net.minecraft.server.MinecraftServer server = event.getEntity().getServer();
+            long markedAt = server != null
+                ? server.overworld().getGameTime()
+                : event.getEntity().level().getGameTime();
+            FORCE_KILL_MARKED.put(event.getEntity().getUUID(), markedAt);
          }
       }
 
@@ -308,7 +320,7 @@ public class HealingBlockEffect extends MobEffect {
       @SubscribeEvent
       public static void onServerTickEnd(TickEvent.ServerTickEvent event) {
          if (event.phase != TickEvent.Phase.END) return;
-         if (TRACKED_HEALTH.isEmpty()) return;
+         if (TRACKED_HEALTH.isEmpty() && FORCE_KILL_MARKED.isEmpty()) return;
 
          Set<UUID> found = new HashSet<>();
          for (ServerLevel level : event.getServer().getAllLevels()) {
@@ -359,6 +371,22 @@ public class HealingBlockEffect extends MobEffect {
                MISSING_TICKS.remove(uuid); // 找到后重置计数
             }
          }
+         // 审查修 P3#1：FORCE_KILL 标记过期清理——打标（HIGHEST）与消费（LOWEST）依赖
+         // 同一次事件分发完整跑完，第三方处理器异常会打断分发、LOWEST 不执行，条目
+         // 永久残留；之后该 Boss 与禁疗无关的复活会被误处决。超窗条目双清（NBT + 内存）
+         long now = event.getServer().overworld().getGameTime();
+         for (UUID uuid : new ArrayList<>(FORCE_KILL_MARKED.keySet())) {
+            Long markedAt = FORCE_KILL_MARKED.get(uuid);
+            if (markedAt == null || now - markedAt <= FORCE_KILL_MARK_EXPIRY) continue;
+            FORCE_KILL_MARKED.remove(uuid);
+            for (ServerLevel level : event.getServer().getAllLevels()) {
+               Entity entity = level.getEntity(uuid);
+               if (entity != null) {
+                  entity.getPersistentData().remove(FORCE_KILL_KEY);
+                  break;
+               }
+            }
+         }
       }
 
       /** 最终保障：LOWEST 优先级兜底，检测 ForceKill 标记并强制死亡 */
@@ -375,7 +403,7 @@ public class HealingBlockEffect extends MobEffect {
          // v1.4.6 双源查询：NBT || 内存表（空 tag Boss 的 NBT 通道丢失，内存表兜底）；
          // 消费即双清（打标与消费在同一次事件分发内配对）
          boolean forceKill = (data.contains(FORCE_KILL_KEY) && data.getBoolean(FORCE_KILL_KEY))
-            || FORCE_KILL_MARKED.contains(entity.getUUID());
+            || FORCE_KILL_MARKED.containsKey(entity.getUUID());
          FORCE_KILL_MARKED.remove(entity.getUUID());
          if (forceKill) {
             data.remove(FORCE_KILL_KEY);
@@ -424,6 +452,7 @@ public class HealingBlockEffect extends MobEffect {
          DebugLog.healingBlock("[禁疗] 终局复验挂起：uncancel 放行 die，{} tick 后裁决 target={}",
             ModConfig.GATE_ORACLE_WAIT_TICKS.get(), target);
          PendingVerifyRegistry.register(target, ModConfig.GATE_ORACLE_WAIT_TICKS.get(),
+            PendingVerifyRegistry.TaskKind.GATE,
             new PendingVerifyRegistry.PendingTask() {
                @Override
                public boolean onVerify(LivingEntity t) {

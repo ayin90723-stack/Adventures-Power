@@ -150,7 +150,7 @@ public final class MultiStoreWriter {
      * 审查修 P2#7：delay=2——写入若发生在实体 tick 内调用链（非包处理窗口），同 tick END 在
      * 对面下一轮对账之前到达，delay=1 会漏检回刷且任务已移除；2 个 END 保证对面至少跑完一轮。 */
     private static void scheduleReverify(LivingEntity target, float expected) {
-        PendingVerifyRegistry.register(target, 2, new PendingVerifyRegistry.PendingTask() {
+        PendingVerifyRegistry.register(target, 2, PendingVerifyRegistry.TaskKind.REVERIFY, new PendingVerifyRegistry.PendingTask() {
             @Override
             public boolean onVerify(LivingEntity t) {
                 // 单边判定：读数更低 = 写住了（甚至被继续打，正常）；读数回升 = 对面重算回刷
@@ -162,7 +162,10 @@ public final class MultiStoreWriter {
             public void onFail(LivingEntity t) {
                 PATHS.remove(t);
                 TICK_REVERTED.add(t.getClass());
-                PendingVerifyRegistry.cancelAll(t);
+                // 审查修 P1#1：按归属只清复验任务——原 cancelAll 全删会把同实体挂起中的
+                // GateOracle 等待裁决任务一并静默删除（无回调），OPENING 残留 + 死序列候选
+                // 残留无人还原 → 之后 tryOpen 恒 PENDING，Boss 卡"0 血不死"不可击杀
+                PendingVerifyRegistry.cancelAll(t, PendingVerifyRegistry.TaskKind.REVERIFY);
                 DebugLog.probe("[多存储] {} 下 tick 复验失败（读数被对账回刷，tick 延迟耦合），封存该类多存储通道",
                     t.getClass().getSimpleName());
             }
@@ -268,15 +271,27 @@ public final class MultiStoreWriter {
                     && Math.abs(afterRead - (before + (bNew - v))) <= driftTol) {
                     return HealthUtil.dataItemSlotPath(slotId);
                 }
-                HealthUtil.writeDataItemFloat(item, v); // 还原，下一个候选
+                if (!HealthUtil.writeDataItemFloat(item, v)) {
+                    // 审查修 P3#6：还原失败静默残留会让 B 分量读数带一个偏差量——显式记录便于排查
+                    DebugLog.probe("[多存储] DataItem 候选还原失败（槽 {}），值可能残留", slotId);
+                }
             }
         }
         // ② 对象图插针（值闸参照 override：找"值 ≈ bCur"的 float 字段；内部命中写 bNew 并缓存通路）
         if (HealthUtil.probeGraphFull(target, bNew, false, bCur)) {
             GraphWritePath bPath = HealthUtil.getCachedGraphPath(target);
             HealthUtil.dropCachedWritePath(target); // B 通路从单分量缓存摘出，归 MultiStorePath 管
-            if (bPath != null && !bPath.reverse()) {
-                return bPath;
+            if (bPath != null) {
+                // 复查修 P2#4：实体 key 路径命中时不入缓存（HealthUtil P3#4 防泄漏），
+                // getCachedGraphPath 可能返回更早的陈旧条目——校验通路现值确为刚写入的
+                // bNew 才接管；失败放回 null 回落既有梯（bNew 残留在真命中字段，读数已降
+                // 方向无害），不用陈旧路径写还原值（会把无关字段改写成 bCur）
+                Float cur = HealthUtil.readGraphPathValue(target, bPath);
+                if (cur != null && !bPath.reverse()
+                    && Math.abs(cur - bNew) <= ProbeScales.driftTolerance(
+                        ProbeScales.epsilon(Math.max(bNew, 1.0F)))) {
+                    return bPath;
+                }
             }
         }
         return null;
@@ -382,7 +397,10 @@ public final class MultiStoreWriter {
         if (info != null) {
             for (GateAnalyzer.CompMember sec : info.secondaries()) {
                 ShieldPath p = resolveCompMember(target, sec);
-                if (p != null && applyShieldZero(target, p, reading)) {
+                // 审查修 P2#2：逐候选重读即时基准——多候选共享同一基准读数时，第一条真盾清零
+                // 的下降量会让后续无关候选的验证被误判成功（非盾字段被永久缓存进 SHIELD_PATHS
+                // 每刀清零）。基准必须反映"该候选清零前一刻"的合成读数
+                if (p != null && applyShieldZero(target, p, HealthUtil.getEffectiveHealth(target))) {
                     found.add(p);
                 }
             }
@@ -410,6 +428,10 @@ public final class MultiStoreWriter {
         }
         if (found.isEmpty()) {
             NO_SHIELD.add(cls);
+            // 审查修 P3#7：真血通路注入与"盾是否清成"是两件事——结构定位成功的类
+            // （PRIMARY_FIELDS 命中）即使盾清零全败也不能被 NO_SHIELD 封存短路，
+            // 否则引擎某刀作废 per-instance 插针缓存后定向直写通路丢失且永不重建
+            injectPrimaryPath(target, cls);
             return;
         }
         SHIELD_PATHS.put(cls, found);
@@ -549,7 +571,8 @@ public final class MultiStoreWriter {
                     f.setAccessible(true);
                     if (!(f.get(null) instanceof EntityDataAccessor<?> acc)) continue;
                     ShieldPath p = new ShieldPath(ShieldPath.SLOT, acc.getId(), null, null, null);
-                    if (applyShieldZero(target, p, reading)) {
+                    // 审查修 P2#2：逐候选重读即时基准（与结构级同口径）
+                    if (applyShieldZero(target, p, HealthUtil.getEffectiveHealth(target))) {
                         found.add(p);
                     }
                 } catch (Exception ignored) {
@@ -570,7 +593,8 @@ public final class MultiStoreWriter {
                 try {
                     f.setAccessible(true);
                     ShieldPath p = new ShieldPath(ShieldPath.FIELD, -1, f, null, null);
-                    if (applyShieldZero(target, p, reading)) {
+                    // 审查修 P2#2：逐候选重读即时基准（与结构级同口径）
+                    if (applyShieldZero(target, p, HealthUtil.getEffectiveHealth(target))) {
                         found.add(p);
                     }
                 } catch (Exception ignored) {
@@ -603,13 +627,15 @@ public final class MultiStoreWriter {
                 }
                 try {
                     m.setAccessible(true);
-                    float verifyTh = ProbeScales.verifyThreshold(ProbeScales.epsilon(Math.max(reading, 0.0F)));
+                    // 审查修 P2#2：逐候选重读即时基准（与结构级同口径）
+                    float base = HealthUtil.getEffectiveHealth(target);
+                    float verifyTh = ProbeScales.verifyThreshold(ProbeScales.epsilon(Math.max(base, 0.0F)));
                     Object oldObj = getter.invoke(target);
                     float old = oldObj instanceof Number n ? n.floatValue() : Float.NaN;
                     if (Float.isNaN(old) || old <= 0.0F) continue;
                     Object zero = pts[0] == double.class ? (Object) Double.valueOf(0.0) : (Object) Float.valueOf(0.0F);
                     m.invoke(target, zero);
-                    if (HealthUtil.getEffectiveHealth(target) < reading - verifyTh) {
+                    if (HealthUtil.getEffectiveHealth(target) < base - verifyTh) {
                         found.add(new ShieldPath(ShieldPath.METHOD, -1, null, m, getter));
                     } else {
                         Object restore = pts[0] == double.class ? (Object) Double.valueOf(old) : (Object) Float.valueOf(old);

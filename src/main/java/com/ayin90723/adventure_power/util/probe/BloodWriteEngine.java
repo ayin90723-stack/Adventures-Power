@@ -312,7 +312,8 @@ public final class BloodWriteEngine {
     static boolean staticMapStrike(LivingEntity target, float writeValue) {
         Class<?> cls = target.getClass();
 
-        // 缓存快路径：句柄→当前 Map 实例→put 攻击值；解析失败视为漂移作废重扫
+        // 缓存快路径：句柄→当前 Map 实例→put 攻击值（写后联动验证，审查修 P3#2）；
+        // 解析失败视为漂移作废重扫
         StaticMapPath cached = L3_CACHE.get(cls);
         if (cached != null && applyAttack(target, cached, writeValue)) {
             return true;
@@ -330,19 +331,26 @@ public final class BloodWriteEngine {
                     if (!(f.get(null) instanceof Map<?, ?> rawMap)) continue;
                     Map<Object, Object> map = (Map<Object, Object>) rawMap;
                     for (KeyKind kind : KeyKind.values()) {
-                        Object key = kind.keyOf(target);
-                        if (key == null) continue;
-                        // key 已存在（运行时缓存型血量表必然已有本实体条目）→ 快照旧值探针后还原；
-                        // key 不存在（冷缓存）→ 孤儿探测后 remove（无旧值可写回，文档 §9）
-                        boolean existed = map.containsKey(key);
-                        Object oldVal = existed ? map.get(key) : null;
-                        if (probeStaticMap(target, map, key, existed, oldVal)) {
-                            // 命中：落攻击值 + 缓存句柄
-                            map.put(key, writeValue);
-                            L3_CACHE.put(cls, new StaticMapPath(f, kind));
-                            DebugLog.probe("[L3] 静态容器命中 {}#{} key={} (条目原{}) → {}",
-                                c.getSimpleName(), f.getName(), kind, existed ? "已存在" : "不存在", writeValue);
-                            return true;
+                        // 审查修 P2#3：per-kind 异常隔离——TreeMap 类 Map 对跨类型 key 的
+                        // containsKey/put 会抛 ClassCastException，原实现异常直接跳出字段级
+                        // catch，NAME/UUID_STRING 等本可命中的 kind 被拦腰截断（L3 整体误封存）
+                        try {
+                            Object key = kind.keyOf(target);
+                            if (key == null) continue;
+                            // key 已存在（运行时缓存型血量表必然已有本实体条目）→ 快照旧值探针后还原；
+                            // key 不存在（冷缓存）→ 孤儿探测后 remove（无旧值可写回，文档 §9）
+                            boolean existed = map.containsKey(key);
+                            Object oldVal = existed ? map.get(key) : null;
+                            if (probeStaticMap(target, map, key, existed, oldVal)) {
+                                // 命中：落攻击值 + 缓存句柄
+                                map.put(key, writeValue);
+                                L3_CACHE.put(cls, new StaticMapPath(f, kind));
+                                DebugLog.probe("[L3] 静态容器命中 {}#{} key={} (条目原{}) → {}",
+                                    c.getSimpleName(), f.getName(), kind, existed ? "已存在" : "不存在", writeValue);
+                                return true;
+                            }
+                        } catch (Exception ignored) {
+                            // 跨类型 key / 探测异常 → 下一 kind
                         }
                     }
                 } catch (Exception ignored) {
@@ -354,13 +362,34 @@ public final class BloodWriteEngine {
         return false;
     }
 
-    /** 缓存快路径攻击写入。 */
+    /**
+     * 缓存快路径攻击写入（审查修 P3#2：补写后联动验证——与慢路径 probeStaticMap 同款闭环。
+     * 原实现 put 即 return true，对方改版换血量源后缓存命中静默空转且无失效信号[不触发
+     * onPositiveCacheDrift 级联]，引擎恒返回 true 让调用方误判磨血成功）。
+     * 预期下降量按写前条目值推算（部分联动型合成血：合成读数 = map 分量 + B，B 不变时
+     * 读数下降量 = mapBefore − writeValue，与纯源场景统一）。
+     */
     @SuppressWarnings("unchecked")
     private static boolean applyAttack(LivingEntity target, StaticMapPath path, float writeValue) {
         try {
             if (!(path.field.get(null) instanceof Map<?, ?> rawMap)) return false;
+            Map<Object, Object> map = (Map<Object, Object>) rawMap;
             Object key = path.kind.keyOf(target);
-            ((Map<Object, Object>) rawMap).put(key, writeValue);
+            float before = target.getHealth();
+            Object prev = map.get(key);
+            map.put(key, writeValue);
+            float after = target.getHealth();
+            float eps = ProbeScales.epsilon(Math.max(before, 1.0F));
+            float driftTol = ProbeScales.driftTolerance(eps);
+            // 读数异常上升 = 通路指向错误宿主
+            if (after > before + driftTol) return false;
+            if (prev instanceof Number n) {
+                float expectedDrop = n.floatValue() - writeValue;
+                float actualDrop = before - after;
+                if (expectedDrop >= ProbeScales.verifyThreshold(eps) && actualDrop < expectedDrop - driftTol) {
+                    return false;
+                }
+            }
             return true;
         } catch (Exception e) {
             return false;
@@ -381,21 +410,37 @@ public final class BloodWriteEngine {
         // 读数恒不变 → 验证必败）。联动验证关心"变化+指向"，与 probeGraph/门禁统一用 getHealth()。
         float reading = target.getHealth();
         float eps = ProbeScales.epsilon(reading);
-        map.put(key, reading - eps);
+        // 审查修 P2#3：探针 put 也纳入异常防护——TreeMap 类 Map 跨类型 key 的 ClassCastException
+        // 抛在 put（compareTo）时不再中断本方法，直接下一 kind
+        try {
+            map.put(key, reading - eps);
+        } catch (Exception e) {
+            return false; // 写入未生效，无需还原
+        }
         float after;
         try {
             after = target.getHealth();
         } catch (Exception e) {
-            return false; // finally 仍会还原
-        } finally {
-            if (existed) {
-                map.put(key, oldVal); // 条目原存在：还原 = 写回快照旧值
-            } else {
-                map.remove(key);      // 条目原不存在：还原 = remove（孤儿条目规则）
-            }
+            restoreEntryQuietly(map, key, existed, oldVal);
+            return false; // 探测读数失败，仍需还原
         }
+        // 还原（审查修 P3#1：显式 null 值条目对部分 Map 实现 put(key, null) 会 NPE——
+        // 退化为 remove，并对还原本身的异常兜底）
+        restoreEntryQuietly(map, key, existed, oldVal);
         boolean changed = Math.abs(after - reading) >= ProbeScales.verifyThreshold(eps);
         boolean directed = Math.abs(after - (reading - eps)) <= ProbeScales.driftTolerance(eps);
         return changed && directed;
+    }
+
+    /** 探测条目还原：原存在→写回快照旧值（null 值条目退化为 remove）；原不存在→remove。异常静默。 */
+    private static void restoreEntryQuietly(Map<Object, Object> map, Object key, boolean existed, Object oldVal) {
+        try {
+            if (existed && oldVal != null) {
+                map.put(key, oldVal);
+            } else {
+                map.remove(key);
+            }
+        } catch (Exception ignored) {
+        }
     }
 }

@@ -26,6 +26,12 @@ public interface IAdventureProgress {
     boolean unlockMilestone(String id);
     int getUnlockedMilestoneCount();
     boolean areAllMilestonesUnlocked();
+    /**
+     * 已解锁里程碑 ID 原始集合（含当前注册表外的死 ID——/reload 缩水窗口期保留下来的
+     * 解锁记录，审查修 P2#1）。物品 NBT 第三层备份回写需要它：只按注册表写会把死 ID
+     * 覆写成 false，注册表恢复后进度永久丢失。
+     */
+    Set<String> getUnlockedMilestoneIds();
 
     // ===== 能力开关 =====
 

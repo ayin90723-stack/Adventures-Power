@@ -4,7 +4,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.client.event.RenderGuiOverlayEvent;
+import net.minecraftforge.client.event.RenderGuiEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber.Bus;
@@ -12,6 +12,10 @@ import net.minecraftforge.fml.common.Mod.EventBusSubscriber.Bus;
 /**
  * 死亡抗拒 HUD 叠加层。
  * 无敌期间渲染金色边框 + 中上方倒计时。
+ * <p>
+ * 审查修 P2#1：改订阅 {@link RenderGuiEvent.Post}（ForgeGui.render 末尾每帧恰好一次）——
+ * 原 RenderGuiOverlayEvent.Post 对 26 个原版 overlay 各发一次，渲染逻辑每帧执行 26 次，
+ * 0x50 半透明边框被叠加成不透明纯金。
  */
 @EventBusSubscriber(value = Dist.CLIENT, bus = Bus.FORGE)
 public class DeathDefyHudOverlay {
@@ -24,7 +28,7 @@ public class DeathDefyHudOverlay {
     private static final int TEXT_COLOR = 0xAAFFD700;
 
     @SubscribeEvent
-    public static void onRenderOverlay(RenderGuiOverlayEvent.Post event) {
+    public static void onRenderOverlay(RenderGuiEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return;
 

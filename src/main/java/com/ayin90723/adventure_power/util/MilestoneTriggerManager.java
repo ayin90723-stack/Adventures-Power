@@ -81,17 +81,19 @@ public class MilestoneTriggerManager {
         // isNight/isDay 在固定时间维度恒为 false（不参与昼夜判定），主世界夜晚标记的 PASSED
         // 带入固定维度会被"白天消费"分支误消费解锁——排除后标记/消费两分支都不执行
         if (player.level().dimensionType().hasFixedTime()) return;
-        List<Milestone> ms = MilestoneRegistry.getByTriggerType("survive_night");
-        if (ms.isEmpty()) return;
 
         boolean isNight = player.level().isNight();
         boolean marked = player.getPersistentData().getBoolean(PersistentDataKeys.SURVIVE_NIGHT_KEY);
-        // 白天消费标记必须无条件执行（在 allDone 提前返回之前，v1.4.0 二次审查修复）：
-        // 否则玩家经其他路径（成就双保险/指令/追赶）解锁后标记永不消费、永久残留，
-        // 未来 /reload 新增 survive_night 里程碑会被旧标记直接解锁（无需再熬一夜）
+        // 白天消费标记必须无条件执行（在 allDone 提前返回与注册表空检查之前，v1.4.0 二次审查
+        // 修复 + 审查修 P3#3：注册表空检查提前 return 会短路消费——玩家熬过夜获得标记后
+        // /reload 暂时移除 survive_night 里程碑，标记永不消费；里程碑重新加入后旧标记被
+        // 直接解锁，跳过"度过一夜"达成条件。消费移到空检查前）
         if (!isNight && marked) {
             player.getPersistentData().remove(PersistentDataKeys.SURVIVE_NIGHT_KEY);
         }
+
+        List<Milestone> ms = MilestoneRegistry.getByTriggerType("survive_night");
+        if (ms.isEmpty()) return;
 
         UUID uuid = player.getUUID();
         Set<String> triggered = SURVIVE_NIGHT_TRIGGERED.computeIfAbsent(uuid, k -> new HashSet<>());

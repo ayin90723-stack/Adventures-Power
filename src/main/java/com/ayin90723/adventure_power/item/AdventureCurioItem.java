@@ -45,8 +45,12 @@ public class AdventureCurioItem extends Item {
     public void appendHoverText(ItemStack stack, @Nullable Level level,
                                 List<Component> tooltip, TooltipFlag flag) {
         // side 守卫（v1.4.0 审查修复）：里程碑行内部引用客户端 Minecraft 类，
-        // 少数模组在服务端构建 tooltip 时防止解析客户端类（NoClassDefFoundError）
-        if (level != null && !level.isClientSide()) return;
+        // 少数模组在服务端构建 tooltip 时防止解析客户端类（NoClassDefFoundError）。
+        // 审查修 P2#2：level==null（原版 getTooltipLines 无玩家上下文时向本方法传 null）
+        // 同样按服务端处理——原守卫对 null 不成立，专用服务器会走到 Minecraft.getInstance()
+        // 抛 NoClassDefFoundError 崩服；客户端预览场景（level==null 且 player==null）本来
+        // 也不显示里程碑行，无功能损失
+        if (level == null || !level.isClientSide()) return;
         if (isEnd) {
             addEndTooltip(tooltip);
         } else {

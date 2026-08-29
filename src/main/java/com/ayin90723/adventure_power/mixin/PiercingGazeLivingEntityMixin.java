@@ -16,10 +16,14 @@ import java.util.Deque;
 /**
  * 破敌之眼 Mixin（第二层 + 兜底） - 穿透通过重写 {@code hurt()} 实现的自定义无敌。
  * <p>
- * priority = 2000（高于默认 1000）：本类注入 {@code hurt()} RETURN（穿透结算）必须
- * 先于 {@code RejectHealthManipMixin.onHurtExit}（同一注入点的 HURT_DEPTH 递减）执行——
- * 否则穿透路径 {@code invokeActuallyHurt → setHealth} 时 HURT_DEPTH 已归零，
- * 会被拒绝篡改按"外部篡改"拦截/反弹，伤害走完全不同的结算分支。
+ * priority = 2000（审查修正注释：Mixin 优先级语义是「低优先级先应用」，对 RETURN 注入
+ * 先应用者的代码在更外侧、<b>先执行</b>——本类 2000 后应用，实际执行顺序是
+ * {@code RejectHealthManipMixin.onHurtExit}（1000）先递减 HURT_DEPTH、本类
+ * {@link #onHurtReturn} 后执行。当前无功能影响：穿透目标恒为非玩家
+ * （PiercingGazeUtil.shouldPierce 对 Player 直接 false），穿透路径的
+ * {@code invokeActuallyHurt → setHealth} 落在 Boss 上不消费 HURT_DEPTH。
+ * 若未来穿透路径需要消费 HURT_DEPTH，正确手段是调低 RejectHealthManipMixin 的
+ * priority 或改用独立标记，而非调高本类 priority）。
  * <p>
  * 第一层 {@link PiercingGazeMixin} 拦截 {@code isInvulnerableTo()} 检查，
  * 处理原版及大多数基于该方法实现的模组无敌。但部分 Boss（如钢铁守护者）直接重写
@@ -93,6 +97,9 @@ public abstract class PiercingGazeLivingEntityMixin {
         // 泄漏哨兵：外部模组对 hurt() HEAD cancellable cancel 时 RETURN 不执行、栈帧残留，
         // 残留帧（inPiercing=true）会使风暴守卫永久跳过穿透。递归穿透深度正常远小于 64，
         // 栈深异常必是泄漏——清空恢复，穿透链在下次攻击时自愈。
+        // 已知取舍（审查记录）：病态深递归（>64 层 hurt 嵌套，如三方模组递归反伤链）时
+        // clear 会连同仍在执行中的外层栈帧一并清除、IN_PIERCING 提前复位——外层 unwind
+        // 走栈空分支的彻底清理（行为良性），风暴守卫在该极端场景提前失效一轮，可接受
         Deque<PiercingStackFrame> stack = PIERCING_STACK.get();
         if (stack.size() > 64) {
             stack.clear();

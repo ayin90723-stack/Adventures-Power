@@ -134,17 +134,24 @@ public class PlayerStateHandler {
 
             // 觉醒：额外保留经验（非觉醒掉经验，原版行为）
             if (progress.isFullyUnlocked()) {
-                CompoundTag expTag = new CompoundTag();
-                expTag.putInt(PersistentDataKeys.SOUL_BIND_EXP_LEVEL, player.experienceLevel);
-                expTag.putFloat(PersistentDataKeys.SOUL_BIND_EXP_PROGRESS, player.experienceProgress);
-                expTag.putInt(PersistentDataKeys.SOUL_BIND_EXP_TOTAL, player.totalExperience);
-                player.getPersistentData().put(SOUL_BIND_EXP_KEY, expTag);
+                // 审查修 P3#5：快照未消费（更早的死亡被后序监听器取消、玩家存活、经验已清零）
+                // 时不得用清零后的 0 现值覆盖旧快照——原经验永久丢失。跳过保存与清零，
+                // 旧快照留待下次真死时恢复
+                boolean hasPendingSnapshot =
+                    player.getPersistentData().contains(SOUL_BIND_EXP_KEY, Tag.TAG_COMPOUND);
+                if (!hasPendingSnapshot) {
+                    CompoundTag expTag = new CompoundTag();
+                    expTag.putInt(PersistentDataKeys.SOUL_BIND_EXP_LEVEL, player.experienceLevel);
+                    expTag.putFloat(PersistentDataKeys.SOUL_BIND_EXP_PROGRESS, player.experienceProgress);
+                    expTag.putInt(PersistentDataKeys.SOUL_BIND_EXP_TOTAL, player.totalExperience);
+                    player.getPersistentData().put(SOUL_BIND_EXP_KEY, expTag);
 
-                // 清零经验等级防止死亡掉落经验球（否则重生恢复 + 捡经验球 = 双倍）。
-                // 仅觉醒清零：非觉醒不保存经验，复活无经验恢复，掉经验球捡回=原版正常。
-                player.experienceLevel = 0;
-                player.experienceProgress = 0.0F;
-                player.totalExperience = 0;
+                    // 清零经验等级防止死亡掉落经验球（否则重生恢复 + 捡经验球 = 双倍）。
+                    // 仅觉醒清零：非觉醒不保存经验，复活无经验恢复，掉经验球捡回=原版正常。
+                    player.experienceLevel = 0;
+                    player.experienceProgress = 0.0F;
+                    player.totalExperience = 0;
+                }
             }
         });
     }
@@ -572,9 +579,11 @@ public class PlayerStateHandler {
                 player.getAbilities().mayfly = true;
                 // 不自动开启 flying，让玩家自己双击空格
                 player.onUpdateAbilities();
+                // 标记飞行由翱翔授予，用于关闭时精准回收（审查修 P3#3：只在实际授予分支置位
+                // ——原实现每 tick 无条件置 true，mayfly 来自其他模组（飞行戒指等）时也会被
+                // 打上翱翔标记，关闭翱翔时误没收他人一次性授予的飞行）
+                progress.setSoarGrantedFlight(true);
             }
-            // 标记飞行由翱翔授予，用于关闭时精准回收
-            progress.setSoarGrantedFlight(true);
             // 觉醒：飞行速度 +50%——仅觉醒覆盖（非觉醒保持原版 0.05，不覆盖其他模组对
             // flyingSpeed 的设定）；写入后同步客户端（setFlyingSpeed 不会自动发包，
             // 客户端 LocalPlayer 保持旧速度直到下次 abilities 同步）

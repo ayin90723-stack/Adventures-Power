@@ -64,6 +64,20 @@ public final class GateAnalyzer {
         Map.entry("m_6469_", MethodKind.HURT), Map.entry("hurt", MethodKind.HURT)
     );
 
+    /**
+     * 各监视方法的原版签名 desc（审查修 P3#4：同名异签的业务方法——如 {@code die(int)}、
+     * 自定义 {@code kill(...)}——不算 liveness 覆写，否则 hasDeathInterception 误判拦死者
+     * 跳过补完 die 造成零掉落。desc 不受混淆影响，SRG/dev 环境一致）。
+     */
+    private static final Map<MethodKind, String> EXPECTED_DESC = Map.of(
+        MethodKind.IS_ALIVE, "()Z",
+        MethodKind.IS_DEAD_OR_DYING, "()Z",
+        MethodKind.DIE, "(Lnet/minecraft/world/damagesource/DamageSource;)V",
+        MethodKind.KILL, "()V",
+        MethodKind.REMOVE, "(Lnet/minecraft/world/entity/Entity$RemovalReason;)V",
+        MethodKind.HURT, "(Lnet/minecraft/world/damagesource/DamageSource;F)Z"
+    );
+
     enum MethodKind { IS_ALIVE, IS_DEAD_OR_DYING, DIE, KILL, REMOVE, HURT }
 
     /**
@@ -128,8 +142,12 @@ public final class GateAnalyzer {
         }
     }
 
-    /** 覆写者：方法名 + desc + 语义。 */
-    record Overrider(String name, String desc, MethodKind kind) {
+    /**
+     * 覆写者：方法名 + desc + 语义 + 声明类（审查修 P1#2：基类声明的覆写必须按声明类读
+     * 字节码——findMethodNode 不沿父类查找，传最子类会静默 miss，killTools/候选全漏检，
+     * hasDeathInterception 误判拦死者 → 补完 die 被跳过 → 零掉落）。
+     */
+    record Overrider(String name, String desc, MethodKind kind, Class<?> declaring) {
     }
 
     /** per-class 分析结论 + 击杀方案缓存（resolved 由 GateOracle 首杀走梯后填充）。 */
@@ -251,7 +269,9 @@ public final class GateAnalyzer {
                 MethodKind kind = WATCHED.get(m.getName());
                 if (kind == null) continue;
                 String desc = methodDesc(m);
-                overrides.add(new Overrider(m.getName(), desc, kind));
+                // 审查修 P3#4：desc 校验——同名异签的业务方法不算 liveness 覆写
+                if (!EXPECTED_DESC.get(kind).equals(desc)) continue;
+                overrides.add(new Overrider(m.getName(), desc, kind, c));
                 if (kind == MethodKind.DIE) {
                     boolean callsSuper = dieCallsSuperIn(c, m.getName(), desc);
                     dieCallsSuper &= callsSuper;
@@ -363,15 +383,18 @@ public final class GateAnalyzer {
     private static final int DELEGATE_DEPTH_LIMIT = 2;
 
     /**
-     * 单覆写方法的 ASM 一跳分析：定位覆写类字节码 → 找 MethodNode → 扫指令。
+     * 单覆写方法的 ASM 一跳分析：按声明类定位字节码 → 找 MethodNode → 扫指令。
+     * （审查修 P1#2：按 ov.declaring() 读——基类声明的覆写在最子类字节码里不存在，
+     * 传最子类会静默 miss 漏检 killTools/候选。）
      */
     private static void analyzeOverrider(Class<?> targetClass, Overrider ov,
                                          List<StateCandidate> candidates, List<KillToolCandidate> killTools,
                                          int depth) {
         if (depth > DELEGATE_DEPTH_LIMIT) return;
-        MethodNode mn = findMethodNode(targetClass, ov.name(), ov.desc());
+        Class<?> declaring = ov.declaring() != null ? ov.declaring() : targetClass;
+        MethodNode mn = findMethodNode(declaring, ov.name(), ov.desc());
         if (mn == null) return;
-        scanInstructions(targetClass, mn, candidates, killTools, depth);
+        scanInstructions(declaring, mn, candidates, killTools, depth);
     }
 
     /** 读类字节码并定位方法（transform 前原始字节——下界语义见类注释）。 */
@@ -505,11 +528,10 @@ public final class GateAnalyzer {
                 } else if (op == org.objectweb.asm.Opcodes.INVOKEVIRTUAL && lastWasAload0
                     && !mi.owner.startsWith("net/minecraft")) {
                     // this 委托调用（ALOAD_0 + INVOKEVIRTUAL）：委托方法再走分析（≤2 层）。
-                    // 只跟进模组 owner 的无副作用嫌疑方法（get/is 前缀 getter 不进——消费已在当前方法可见）
-                    String lower = mi.name.toLowerCase();
-                    if (!lower.startsWith("get") && !lower.startsWith("is")) {
-                        analyzeDelegate(targetClass, mi, candidates, killTools, depth);
-                    }
+                    // 审查修 P3#5：get/is 前缀 getter 也跟进——INVOKEVIRTUAL 返回值消费不暴露
+                    // getter 内部的字段读（isDeathSequenceActive() 型封装漏检即此形态），
+                    // 深度限制 + 候选去重兜底噪声，GateOracle 侧探针验证不过零退化
+                    analyzeDelegate(targetClass, mi, candidates, killTools, depth);
                 }
                 pendingConsts.clear();
                 lastField = null;
@@ -519,10 +541,15 @@ public final class GateAnalyzer {
         }
     }
 
-    /** this 委托方法分析：owner 类解析 + MethodNode 定位（找不到静默跳过——二跳不可达即下界）。 */
+    /** this 委托方法分析：owner 类解析 + MethodNode 定位（找不到静默跳过——二跳不可达即下界）。
+     *  复查修 P2#1：深度检查在此执行（analyzeDelegate↔scanInstructions 相互递归，
+     *  原实现只在入口 analyzeOverrider 检查、链上无人拦——getter 跟进放开后互委托环
+     *  可无限递归 readClassNode 致 StackOverflowError，Error 不会被沿途 catch(Exception)
+     *  捕获，会打断击杀 tick）。 */
     private static void analyzeDelegate(Class<?> targetClass, MethodInsnNode mi,
                                         List<StateCandidate> candidates, List<KillToolCandidate> killTools,
                                         int depth) {
+        if (depth + 1 > DELEGATE_DEPTH_LIMIT) return;
         try {
             Class<?> owner = Class.forName(mi.owner.replace('/', '.'), false, targetClass.getClassLoader());
             MethodNode mn = findMethodNode(owner, mi.name, mi.desc);

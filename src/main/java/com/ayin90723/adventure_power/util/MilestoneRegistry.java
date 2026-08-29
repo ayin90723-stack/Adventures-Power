@@ -115,12 +115,21 @@ public class MilestoneRegistry {
      * 同样用于客户端接收同步数据后的初始化。
      */
     public static void loadFromJson(JsonObject root) {
+        loadFromJson(root, Set.of());
+    }
+
+    /**
+     * 带外部保留黑名单的加载（审查修 P3#1：空注册表回退内置默认的路径用——
+     * 递归 loadFromJson 会把 disabledAbilities 重置为内置根的空黑名单，外部
+     * keepDisabled 不并入会导致被禁能力在解析内置里程碑时"复活"进 abilities）。
+     */
+    private static void loadFromJson(JsonObject root, Set<String> externalDisabled) {
         List<Milestone> loaded = new ArrayList<>();
 
         // 数据包禁用能力黑名单：从所有里程碑 abilities 中移除。
         // 被禁用的能力不会出现在任何里程碑中，觉醒后也不会重新获得；
         // 指令后门（/ap unlock ability）可逐玩家解锁这类能力。
-        Set<String> disabled = new HashSet<>();
+        Set<String> disabled = new HashSet<>(externalDisabled);
         if (root.has("disabled_abilities") && root.get("disabled_abilities").isJsonArray()) {
             for (JsonElement e : root.getAsJsonArray("disabled_abilities")) {
                 if (!e.isJsonPrimitive()) continue;
@@ -142,9 +151,11 @@ public class MilestoneRegistry {
             LOGGER.error("[MilestoneRegistry] milestones 数组为空或缺失，回退到内置默认");
             // v1.4.0：回退前保留已累加的黑名单——loadBuiltinDefaults 会重置
             // disabledAbilities，若直接清空则被禁用的能力在内置里程碑中"复活"
-            // （/ap unlock ability 与觉醒门禁随之失效）
-            Set<String> keepDisabled = new HashSet<>(disabledAbilities);
-            loadBuiltinDefaults();
+            // （/ap unlock ability 与觉醒门禁随之失效）。审查修 P3#1：黑名单随
+            // externalDisabled 传入递归加载，内置里程碑解析时同步剔除被禁能力
+            Set<String> keepDisabled = new HashSet<>(externalDisabled);
+            keepDisabled.addAll(disabledAbilities);
+            loadBuiltinDefaults(keepDisabled);
             if (!keepDisabled.isEmpty()) {
                 Set<String> merged = new HashSet<>(disabledAbilities);
                 merged.addAll(keepDisabled);
@@ -165,6 +176,12 @@ public class MilestoneRegistry {
             JsonObject obj = arr.get(i).getAsJsonObject();
             try {
                 String id = obj.get("id").getAsString();
+                // 审查修 P2#2：空/空白 id 会在 milestoneNbtKey 的 charAt(0) 抛
+                // StringIndexOutOfBoundsException——位于服务端主线程 grant/sync 链上崩服
+                if (id == null || id.isBlank()) {
+                    LOGGER.warn("[MilestoneRegistry] milestone #{} 的 id 为空白字符串，跳过", i);
+                    continue;
+                }
 
                 if (seenIds.contains(id)) {
                     LOGGER.warn("[MilestoneRegistry] 重复的 milestone ID: {}，使用最后一个", id);
@@ -235,7 +252,9 @@ public class MilestoneRegistry {
             if (!inBuiltinFallback) {
                 inBuiltinFallback = true;
                 try {
-                    loadBuiltinDefaults();
+                    // 复查修 P2#1：回退同样并入外部黑名单（与"数组为空"回退点同口径）——
+                    // 否则被禁能力在内置里程碑中"复活"，/ap unlock ability 与觉醒门禁失效
+                    loadBuiltinDefaults(disabled);
                 } finally {
                     inBuiltinFallback = false;
                 }
@@ -582,6 +601,12 @@ public class MilestoneRegistry {
 
     /** 当数据包中无 milestones.json 时使用模组内置默认 */
     private static void loadBuiltinDefaults() {
+        loadBuiltinDefaults(Set.of());
+    }
+
+    /** 带外部保留黑名单的重载（审查修 P3#1：空注册表回退路径——黑名单并入递归加载，
+     * 内置里程碑解析时同步剔除被禁能力，防止其在 abilities 中"复活"）。 */
+    private static void loadBuiltinDefaults(Set<String> externalDisabled) {
         // 从 classpath 加载内置 milestones.json（与资源文件保持单一来源，避免重复维护）
         java.io.InputStream is = MilestoneRegistry.class.getResourceAsStream(
             "/data/adventure_power/adventure_power/milestones.json");
@@ -591,7 +616,7 @@ public class MilestoneRegistry {
         }
         try (java.io.Reader reader = new java.io.InputStreamReader(is, java.nio.charset.StandardCharsets.UTF_8)) {
             JsonObject root = GSON.fromJson(reader, JsonObject.class);
-            loadFromJson(root);
+            loadFromJson(root, externalDisabled);
         } catch (Exception e) {
             LOGGER.error("[MilestoneRegistry] 加载内置 milestones.json 失败", e);
         }

@@ -6,7 +6,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.client.event.RenderGuiOverlayEvent;
+import net.minecraftforge.client.event.RenderGuiEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber.Bus;
@@ -14,6 +14,9 @@ import net.minecraftforge.fml.common.Mod.EventBusSubscriber.Bus;
 /**
  * 主动技能 HUD 叠加层。
  * 左下角显示当前选中技能 + 冷却倒计时。切换后显示 3 秒淡出。
+ * <p>
+ * 审查修 P2#1：改订阅 {@link RenderGuiEvent.Post}（每帧一次）——原
+ * RenderGuiOverlayEvent.Post 对 26 个原版 overlay 各发一次。
  */
 @EventBusSubscriber(value = Dist.CLIENT, bus = Bus.FORGE)
 public class ActiveSkillHudOverlay {
@@ -39,7 +42,7 @@ public class ActiveSkillHudOverlay {
     }
 
     @SubscribeEvent
-    public static void onRenderOverlay(RenderGuiOverlayEvent.Post event) {
+    public static void onRenderOverlay(RenderGuiEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) {
             // 断线/回主菜单：清空 level 引用，否则其引用的区块/实体大对象图无法 GC

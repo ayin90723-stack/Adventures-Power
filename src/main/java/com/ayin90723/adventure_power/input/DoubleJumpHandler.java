@@ -132,4 +132,15 @@ public class DoubleJumpHandler {
         AIR_JUMPED.remove(event.getEntity().getUUID());
         REJECT_THROTTLE.remove(event.getEntity().getUUID());
     }
+
+    /**
+     * 玩家跨维度 -> 清理残留（审查修 P3#3：1.20.1 传送门 changeDimension 不触发 Clone
+     * ——空中二段跳后未落地穿门，服务端 AIR_JUMPED 带进新维度，落地前第一次跳被拒
+     * 且不在地面时发拉回包产生一次可见顿挫）。
+     * 由 {@code CapabilityLifecycleHandler.onDimensionChange} 调用（复用既有挂点）。
+     */
+    public static void clearAirJumped(UUID uuid) {
+        AIR_JUMPED.remove(uuid);
+        REJECT_THROTTLE.remove(uuid);
+    }
 }

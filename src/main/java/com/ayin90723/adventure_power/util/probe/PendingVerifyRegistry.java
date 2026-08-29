@@ -36,6 +36,9 @@ public final class PendingVerifyRegistry {
     private PendingVerifyRegistry() {
     }
 
+    /** 任务归属：同一实体可同时挂复验对账与 GateOracle 等待任务，级联清理按归属只删自己的（防误删对方的等待裁决任务）。 */
+    public enum TaskKind { REVERIFY, GATE }
+
     /**
      * 挂起任务：到达等待窗口时由 tick 驱动调用 {@link #onVerify}。
      * <p>
@@ -52,6 +55,11 @@ public final class PendingVerifyRegistry {
         /** 目标在等待窗口内死亡/移除（提前成功或自然终结）。 */
         default void onDead(LivingEntity target) {
         }
+
+        /** 目标在裁决前被 GC/卸载（非死亡路径，不发 LivingDeathEvent）——任务自带的状态
+         * 清理（如 GateOracle 的 OPENING 残留、死序列候选还原）在此收尾，防静默丢失。 */
+        default void onCancel() {
+        }
     }
 
     private static final class Entry {
@@ -59,11 +67,14 @@ public final class PendingVerifyRegistry {
         /** 距裁决还剩的 ServerTick END 计数（每 END 相位减 1，到 0 裁决）。 */
         int remaining;
         final PendingTask task;
+        /** 任务归属（cancelAll 按归属级联清理，不跨类型误删）。 */
+        final TaskKind kind;
 
-        Entry(WeakReference<LivingEntity> ref, int remaining, PendingTask task) {
+        Entry(WeakReference<LivingEntity> ref, int remaining, PendingTask task, TaskKind kind) {
             this.ref = ref;
             this.remaining = remaining;
             this.task = task;
+            this.kind = kind;
         }
     }
 
@@ -72,18 +83,24 @@ public final class PendingVerifyRegistry {
     /**
      * 登记挂起任务：delayTicks 个 ServerTick END 后裁决。
      * <p>
-     * delayTicks=1 即「下 tick 复验」：写入发生在 tick N 中段（实体 hurt 处理链），
-     * N 的 END 与 N+1 的实体 tick 之间对面完成一轮对账，N+1 的 END 裁决可见完整回刷。
+     * delayTicks=1 即「<b>当 tick END 裁决</b>」：写入发生在实体 tick 处理链内时，当 tick 的
+     * END 在对面下一轮 tick 之前到达——裁决时对面尚未跑下一轮对账。需要观测「对面下一轮
+     * tick 之后状态」的复验任务必须用 delay≥2（MultiStoreWriter 复验对账即 delay=2，
+     * 太阳神使 0.01 震荡回刷漏检实证）。
      */
     public static void register(LivingEntity target, int delayTicks, PendingTask task) {
-        if (target == null || task == null || delayTicks < 1) return;
-        PENDING.add(new Entry(new WeakReference<>(target), delayTicks, task));
+        register(target, delayTicks, TaskKind.REVERIFY, task);
     }
 
-    /** 丢弃某实体的全部挂起任务（复验失败级联清理用）。 */
-    public static void cancelAll(LivingEntity target) {
-        if (target == null) return;
-        PENDING.removeIf(e -> e.ref.get() == target);
+    public static void register(LivingEntity target, int delayTicks, TaskKind kind, PendingTask task) {
+        if (target == null || task == null || delayTicks < 1) return;
+        PENDING.add(new Entry(new WeakReference<>(target), delayTicks, task, kind));
+    }
+
+    /** 丢弃某实体指定归属的全部挂起任务（复验失败级联清理用——GateOracle 等待任务不在此列）。 */
+    public static void cancelAll(LivingEntity target, TaskKind kind) {
+        if (target == null || kind == null) return;
+        PENDING.removeIf(e -> e.ref.get() == target && e.kind == kind);
     }
 
     @SubscribeEvent
@@ -96,6 +113,13 @@ public final class PendingVerifyRegistry {
             LivingEntity target = e.ref.get();
             if (target == null) {
                 PENDING.remove(e);
+                // 审查修：弱引用死亡（GC/区块卸载等非死亡路径，不发 LivingDeathEvent）静默移除
+                // 会让任务自带的状态清理丢失（GateOracle OPENING 残留 → 同 UUID 重载后 tryOpen
+                // 恒 PENDING）——通知 onCancel 让任务收尾
+                try {
+                    e.task.onCancel();
+                } catch (Exception ignored) {
+                }
                 continue;
             }
             if (e.remaining > 1) {

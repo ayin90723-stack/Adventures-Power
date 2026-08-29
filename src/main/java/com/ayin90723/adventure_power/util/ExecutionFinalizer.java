@@ -62,6 +62,15 @@ public final class ExecutionFinalizer {
             DebugLog.deathFinalize(caller, "[处决善后] 拦截玩家目标（类内 guard），跳过 target={}", target);
             return;
         }
+        // 已移除早退（待确认项 1，用户拍板修复）：引擎某层写 0 命中且目标 killEntity 在
+        // 同调用栈内自移除时（本末起源形态实证），影杀 saturationKill 的 tryOpen 状态机
+        // 被 isRemoved 短路跳过、仍会走到本方法——对已移除实体全段执行会在其自移除链
+        // 已做过掉落/事件的前提下双掉落/双发 LivingDeathEvent。已移除目标无需任何善后，
+        // 直接返回零退化（与 DeathFinalizer.completeVanillaDeath 的三重守卫同口径）
+        if (target.isRemoved()) {
+            DebugLog.deathFinalize(caller, "[处决善后] 目标已移除（killEntity 同栈自移除？），跳过善后 target={}", target);
+            return;
+        }
 
         // ② 强制掉落全套装备 + ③ 反射调用 dropAllDeathLoot（触发战利品表 /
         //     LivingDropsEvent / LootModifier）+ ④ 手动 post LivingDeathEvent（墓碑/任务
@@ -154,8 +163,12 @@ public final class ExecutionFinalizer {
      * @param caller 调用方能力（日志归属）
      */
     public static void schedulePostKillSync(LivingEntity target, ServerLevel serverLevel, EngineCaller caller) {
+        // 复查修 P1#1：TaskKind.GATE——本任务与禁疗终局复验同属击杀链语义任务，
+        // 不能被 MultiStoreWriter 复验失败级联清理（cancelAll 按 TaskKind.REVERIFY
+        // 归属删除）误删；GATE 归属只被 cancelAll(t, GATE) 触达（当前无调用点）
         PendingVerifyRegistry.register(target,
-            ModConfig.GATE_ORACLE_WAIT_TICKS.get(), new PendingVerifyRegistry.PendingTask() {
+            ModConfig.GATE_ORACLE_WAIT_TICKS.get(), PendingVerifyRegistry.TaskKind.GATE,
+            new PendingVerifyRegistry.PendingTask() {
                 @Override
                 public boolean onVerify(LivingEntity t) {
                     if (t.isRemoved()) {

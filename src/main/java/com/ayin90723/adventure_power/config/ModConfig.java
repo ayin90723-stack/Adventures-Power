@@ -419,7 +419,7 @@ public class ModConfig {
         BUILDER.push("主动技能");
         ACTIVE_SKILL_JUDGMENT_BASE_DAMAGE = BUILDER.comment("旅者审判基础固定伤害")
             .defineInRange("active_skill_judgment_base_damage", 10.0, 0.0, 1000.0);
-        ACTIVE_SKILL_JUDGMENT_HP_RATIO = BUILDER.comment("旅者审判每里程碑生命值百分比（1里程碑=3%，5里程碑=15%）")
+        ACTIVE_SKILL_JUDGMENT_HP_RATIO = BUILDER.comment("旅者审判每里程碑生命值百分比（双基准：最大生命+当前生命各乘此值，如淬魂口径；1里程碑≈6%总伤，5里程碑≈30%）")
             .defineInRange("active_skill_judgment_hp_ratio", 0.03, 0.0, 0.5);
         ACTIVE_SKILL_JUDGMENT_RADIUS = BUILDER.comment("旅者审判AOE范围（格）")
             .defineInRange("active_skill_judgment_radius", 6.0, 1.0, 32.0);

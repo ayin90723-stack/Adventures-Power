@@ -93,6 +93,13 @@ public abstract class RejectHealthManipMixin {
         // reject_manip 防的是外部篡改，不拦模组自身的状态维护
         if (HealthUtil.INTERNAL_HEALTH_WRITE.get()) return;
 
+        // 审查修 P3#4：原版 maxHealth 属性驱动的 clamp 降值放行——onAttributeModified →
+        // onHealthChanged 写入 setHealth(clamp(current, 0, maxHealth))，生命上限下移
+        // （诅咒装备/药水类机制）时写入值精确等于新 maxHealth。拦截它会让血量停在新上限
+        // 之上直到下次受伤才自纠；写 maxHealth 值在当前血 ≤ 上限时属升血方向已被上方放行，
+        // 能进到这里的 newHealth==maxHealth 必然是"血高于上限的归位"，与 clamp 语义一致
+        if (newHealth == player.getMaxHealth()) return;
+
         // 外部直接 setHealth 降血 → 检查能力（ProgressCache 按 tick 缓存引用，避免每次 resolve）
         var progress = com.ayin90723.adventure_power.util.ProgressCache.get(player);
         if (progress != null && (progress.isAdventurer() || progress.isFullyUnlocked())

@@ -132,6 +132,12 @@ public class AdventureProgress implements IAdventureProgress {
         return fullyUnlocked || validUnlockedCount >= total;
     }
 
+    /** 已解锁 ID 原始集（含注册表外死 ID，审查修 P2#1）——供物品 NBT 第三层备份回写。 */
+    @Override
+    public java.util.Set<String> getUnlockedMilestoneIds() {
+        return Collections.unmodifiableSet(unlockedMilestones);
+    }
+
     // ===== 能力开关 =====
 
     @Override
@@ -392,7 +398,12 @@ public class AdventureProgress implements IAdventureProgress {
         this.unlockedMilestones.clear();
         CompoundTag milestonesTag = nbt.getCompound(TAG_MILESTONES);
         for (String key : milestonesTag.getAllKeys()) {
-            if (milestonesTag.getBoolean(key) && MilestoneRegistry.contains(key)) {
+            // 审查修 P2#1：不做注册表 contains 过滤——/reload 缩水窗口期（数据包删除里程碑
+            // 或整体 enabled:false）登录/死亡克隆时，被过滤的 ID 会从 Capability →
+            // persistentData → 物品 NBT 三层被逐层覆盖，已解锁进度永久写丢且 obtain_item 类
+            // 里程碑无法自愈。死 ID 的能力归属与计数隔离已由 rebuildAbilityCache 过滤
+            // （getUnlockedMilestoneCount/areAllMilestonesUnlocked 只算注册表内），序列化按原样回写
+            if (milestonesTag.getBoolean(key)) {
                 this.unlockedMilestones.add(key);
             }
         }

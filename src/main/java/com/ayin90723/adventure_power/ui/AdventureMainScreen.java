@@ -66,6 +66,8 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
     /** 能力/Buff tab 周期刷新的 tick 桶基准（gameTime/20，与 milestoneProgressRefreshTick 同款——
      *  帧计数冒充 tick 会导致行为帧率依赖：60FPS 下 3 倍刷新、低 FPS 下响应迟钝） */
     private long lastRefreshBucket = -1;
+    /** Buff tab ready=false 时的请求重发桶（审查修 P3#4：限频窗口内重开的面板重发请求） */
+    private long lastBuffRetryBucket = -1;
 
     // ===== 里程碑 tab 缓存（按 version 失效，避免每帧 AbilityRegistry.get + 遍历计数） =====
     private static int cachedMilestoneVersion = -1;
@@ -247,11 +249,18 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
      * 行区裁剪（1.20.1 无 GuiGraphics.enableScissors——1.20.2+ API，用 RenderSystem
      * scissor 等效实现）。三个 tab 的行渲染循环外包：末行多渲染一行用于半行显示，
      * 无裁剪时其下半部分会画过可见区边界、与底部提示文本重叠（v1.4.0 审查修复）。
+     * <p>
+     * 审查修 P2#2：glScissor 原点是 framebuffer 左下角，GUI 投影 y=0 在 framebuffer 顶部
+     * ——必须做 fbH − guiBottom 换算。原实现直接传 GUI 顶原点坐标，裁剪带整体上移
+     * TOP_Y−BOTTOM_PADDING=8px（顶部 8px 未裁剪带渗色、底部 8px 被误裁）。
      */
     private void enableRowScissors() {
-        double scale = this.minecraft.getWindow().getGuiScale();
+        var window = this.minecraft.getWindow();
+        double scale = window.getGuiScale();
+        int fbHeight = window.getHeight();
+        int guiBottom = TOP_Y + visibleHeight(); // 裁剪区的 GUI 底边
         RenderSystem.enableScissor(
-            0, (int) (TOP_Y * scale),
+            0, (int) (fbHeight - guiBottom * scale),
             (int) (this.width * scale), (int) (visibleHeight() * scale));
     }
 
@@ -293,6 +302,13 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
                 } else if (currentTab == Tab.ABILITY) {
                     initAbilityData();
                 }
+            }
+            // 审查修 P3#4：Buff tab ready=false 时每秒重发请求——1s 内 P 键开→关→开，
+            // 第二次 init() 的请求落在服务端 SYNC_REQUEST_COOLDOWN 限频窗口内被静默丢弃，
+            // 新 screen 实例的 Buff tab 会永久停在"加载中"（回包不会到达）
+            if (currentTab == Tab.BUFF && !ready && bucket != lastBuffRetryBucket) {
+                lastBuffRetryBucket = bucket;
+                NetworkHandler.sendBuffBlacklistRequest();
             }
         }
 
@@ -428,7 +444,9 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
             boxWidth = Math.max(boxWidth, 80); // 先抬下限再算 sideX，防右缘越过 leftX
             sideX = leftX - 10 - boxWidth;
         } else {
-            boxWidth = Math.min(naturalWidth, Math.max(60, rightSpace));
+            // 审查修 P3#1：与 buildInfoBoxContent 的窄分支口径一致（两侧较大者），
+            // 保证 wrap 宽度 ≥ 渲染框宽，文字不再溢出
+            boxWidth = Math.min(naturalWidth, Math.max(60, Math.max(rightSpace, leftSpace)));
             boxWidth = Math.max(boxWidth, 80); // 下限保证不塌成一条（须在算 sideX 前，否则右缘溢出屏幕）
             sideX = this.width - boxWidth - 8;
         }
@@ -486,10 +504,22 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         String awakenedKey = "ability.adventure_power." + abilityId + ".awakened";
         boolean hasAwakened = progress != null && progress.isFullyUnlocked() && I18n.exists(awakenedKey);
 
-        // ---- 宽度：按最大可用宽度测内容自然宽度 ----
+        // ---- 宽度：按"实际将放置那一侧"的空间测内容自然宽度 ----
+        // 审查修 P3#1：原按两侧最大空间 wrap，渲染却可能挑较窄一侧——文字按宽侧换行后的
+        // 自然宽度超过窄侧空间时溢出框体/屏幕右缘。与 renderInfoBox 的放置分支保持同一
+        // 口径（右→左→窄兜底），保证 naturalWidth ≤ 放置侧空间
         int rightSpace = this.width - (leftX + PANEL_WIDTH + 10) - 8;
         int leftSpace = leftX - 10 - 8;
-        int candidateMaxWidth = Math.min(INFO_BOX_MAX_WIDTH, Math.max(rightSpace, leftSpace));
+        int placementSpace;
+        if (rightSpace >= MIN_INFO_BOX_SIDE) {
+            placementSpace = rightSpace;
+        } else if (leftSpace >= MIN_INFO_BOX_SIDE) {
+            placementSpace = leftSpace;
+        } else {
+            // 极窄窗口（两侧均 < MIN）：与 renderInfoBox 窄分支同口径取两侧较大者
+            placementSpace = Math.max(60, Math.max(rightSpace, leftSpace));
+        }
+        int candidateMaxWidth = Math.min(INFO_BOX_MAX_WIDTH, placementSpace);
         // 下限保护（v1.4.0 审查修复）：极小分辨率（窗口宽 <~360px）下两侧 space 均为负，
         // textMaxWidth 负值会使 wrapText 退化为逐字符换行——钳到 60 保证至少可读
         candidateMaxWidth = Math.max(60, candidateMaxWidth);

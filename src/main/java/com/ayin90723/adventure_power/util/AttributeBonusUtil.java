@@ -27,6 +27,8 @@ import java.util.UUID;
  */
 public final class AttributeBonusUtil {
 
+    private static final org.slf4j.Logger LOGGER = com.mojang.logging.LogUtils.getLogger();
+
     /** 值变化容差（与各 handler 既有 0.001 判定一致，避免浮点抖动反复重挂） */
     private static final double EPSILON = 0.001;
 
@@ -71,7 +73,20 @@ public final class AttributeBonusUtil {
      * 还原只写 base 不碰 modifier，必须在挂 modifier 前调用。
      */
     public static void migrateLegacyBaseBonus(AttributeInstance inst, double activeBonus) {
-        if (activeBonus <= EPSILON) return;
+        if (activeBonus <= EPSILON) {
+            // 审查修 P3#4：activeBonus ≤ 0 时迁移被短路——旧版写入的 base 残留（升级前崩溃、
+            // 之后能力被关闭或公式归零）将永不被清理。无法推算旧公式值（不安全迁移），
+            // 至少告警便于人工排查。复查修 P3#1：走 LOGGER.warn 而非 DebugLog.probe——
+            // probe 通道要求 ENGINE_CALLER 上下文，本方法的全部调用方都在引擎外，恒静默
+            double base = inst.getBaseValue();
+            double def = inst.getAttribute().getDefaultValue();
+            if (Math.abs(base - def) > EPSILON) {
+                LOGGER.warn("[属性迁移] {} activeBonus={}（≤0，迁移跳过）但 base={} ≠ 默认={}，"
+                        + "可能存在旧版 base 残留，请人工排查",
+                    inst.getAttribute().getDescriptionId(), activeBonus, base, def);
+            }
+            return;
+        }
         double base = inst.getBaseValue();
         double def = inst.getAttribute().getDefaultValue();
         if (Math.abs(base - def) > EPSILON

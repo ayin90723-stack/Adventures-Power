@@ -229,6 +229,10 @@ public class HealthUtil {
                 }
                 if (DATA_HEALTH_ID != null) {
                     target.getEntityData().set(DATA_HEALTH_ID, health);
+                } else {
+                    // 审查修 P3#8：accessor 初始化失败（field.get 返回非 accessor）时静默返回
+                    // 会让调用方无从得知写入未发生——与 DATA_HEALTH_ID_FIELD==null 分支同款告警
+                    warnDegrade("DATA_HEALTH_ID accessor 初始化失败，写入未发生");
                 }
             } catch (IllegalAccessException | ClassCastException e) {
                 LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
@@ -426,10 +430,13 @@ public class HealthUtil {
     /** 通用层负缓存（v1.4.2）：本类确认无命中的 Health 写方法，跳过全扫；级联失效时统一清空。 */
     private static final java.util.Set<Class<?>> GENERIC_NO_HIT = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
-    /** 级联失效入口（BloodWriteEngine 调用）：任意正缓存漂移 → 通用层负缓存 + 对象图超预算封存全部作废。 */
+    /** 级联失效入口（BloodWriteEngine 调用）：任意正缓存漂移 → 通用层负缓存 + 对象图超预算封存
+     * + 自定义血量 key 缓存全部作废（审查修 P3#5：CUSTOM_HEALTH_KEYS_CACHE 首扫结论依赖实例
+     * 时点[扫描瞬间处于变形/护盾阶段会永久缓存空集]——对方形态变化时同步作废重扫）。 */
     public static void invalidateGenericNegativeCache() {
         GENERIC_NO_HIT.clear();
         GRAPH_OVERWHELMED.clear();
+        CUSTOM_HEALTH_KEYS_CACHE.clear();
     }
 
     /**
@@ -505,12 +512,14 @@ public class HealthUtil {
         }
     }
 
-    /** v1.4.3 多存储：写图通路字段（DataItem.value 的 Object 型字段装箱写，同缓存快路径处理）。 */
+    /** v1.4.3 多存储：写图通路字段（DataItem.value 的 Object 型字段装箱写，同缓存快路径处理；
+     * 审查修 P3#3：装箱 Float 字段同样走 set 装箱路径）。 */
     public static boolean writeGraphPath(LivingEntity root, GraphWritePath path, float value) {
         try {
             Object owner = resolvePath(root, path.steps(), 0);
             if (owner == null) return false;
-            if (path.field().getType() == Object.class) {
+            Class<?> ft = path.field().getType();
+            if (ft == Object.class || ft == Float.class) {
                 path.field().set(owner, value);
             } else {
                 path.field().setFloat(owner, value);
@@ -519,6 +528,15 @@ public class HealthUtil {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /** 审查修 P3#4：路径链是否含实体 key（Map key 为实体时缓存的 WritePath 会强引用实体，弱 key 失效）。 */
+    private static boolean pathHasEntityKey(java.util.List<Object> steps) {
+        for (Object s : steps) {
+            if (s instanceof java.lang.reflect.Field) continue; // Field 步骤无泄漏风险
+            if (s instanceof Entity || s instanceof LivingEntity) return true;
+        }
+        return false;
     }
 
     /** v1.4.3 多存储：构建 DataItem 槽直写通路（field=DataItem.value、steps=[entityData 字段, 槽 id]）。反射不可用返回 null。 */
@@ -688,7 +706,8 @@ public class HealthUtil {
                 // v1.4.2：兼容 Object 型字段（DataItem.value）+ 反向存储换算
                 // 子代理审查修：反向 WritePath 的门禁参照必须用 maxHealth−reading（承伤累计
                 // 字段值≈max−reading），用正向参照会恒失效→每击重探+级联风暴
-                float cur = cached.field.getType() == Object.class
+                Class<?> cft = cached.field.getType();
+                float cur = (cft == Object.class || cft == Float.class)
                     ? ((Number) cached.field.get(owner)).floatValue()
                     : cached.field.getFloat(owner);
                 float ref = cached.reverse
@@ -704,7 +723,7 @@ public class HealthUtil {
                 // 反向语义 max−reading 后，写值沿用 ref 变成 away+(away−targetValue) 双倍偏移，
                 // 泽林实测"一刀残两刀杀"）。反向语义正确公式：away_new = away + (reading − targetValue)。
                 float reading = target.getHealth();
-                if (cached.field.getType() == Object.class) {
+                if (cft == Object.class || cft == Float.class) {
                     float writeVal = cached.reverse ? cur + (reading - targetValue) : targetValue;
                     cached.field.set(owner, writeVal);
                 } else if (cached.reverse) {
@@ -1007,7 +1026,17 @@ public class HealthUtil {
                 if (java.lang.reflect.Modifier.isStatic(f.getModifiers())) continue;
                 try {
                     f.setAccessible(true);
-                    float orig = f.getFloat(obj);
+                    // 审查修 P3#3：装箱 Float 字段走 get/set 装箱路径（getFloat/setFloat 对
+                    // Float.class 声明字段抛 IllegalArgumentException 被静默吞掉，永远探不到）
+                    boolean boxed = f.getType() == Float.class;
+                    float orig;
+                    if (boxed) {
+                        Object o = f.get(obj);
+                        if (!(o instanceof Number n)) continue;
+                        orig = n.floatValue();
+                    } else {
+                        orig = f.getFloat(obj);
+                    }
                     // 值闸形态分类：正向候选（血量镜像）或反向候选（承伤累计），都不匹配跳过不探
                     boolean forward = Math.abs(orig - currentHealth) <= gateTol;
                     boolean reverse = !forward && reverseAllowed
@@ -1017,12 +1046,20 @@ public class HealthUtil {
                     // 插针：快照 → 写 ±ε 小扰动（血量恒下降方向）→ 无条件还原
                     float probeVal = isReverse ? orig + eps : orig - eps;
                     float before = target.getHealth();
-                    f.setFloat(obj, probeVal);
+                    if (boxed) {
+                        f.set(obj, probeVal);
+                    } else {
+                        f.setFloat(obj, probeVal);
+                    }
                     float after;
                     try {
                         after = target.getHealth();
                     } finally {
-                        f.setFloat(obj, orig); // 无条件还原（异常也不残留）
+                        if (boxed) {
+                            f.set(obj, orig);
+                        } else {
+                            f.setFloat(obj, orig);
+                        }
                     }
                     // 判据①：写入前后 getHealth 必须真实变化（防"恒定读数 + 碰巧≈血量"的无关字段误判）
                     if (Math.abs(after - before) < verifyTh) continue;
@@ -1033,8 +1070,17 @@ public class HealthUtil {
                         // 命中：写入目标值并缓存通路（字段 + 实体→宿主路径链，按实例弱 key）
                         //   反向字段的目标值换算：累计 = 原累计 +（读数 − 目标血量）
                         float writeVal = isReverse ? orig + (currentHealth - targetValue) : targetValue;
-                        f.setFloat(obj, writeVal);
-                        CAP_WRITE_CACHE.put(target, new WritePath(f, new java.util.ArrayList<>(path), isReverse));
+                        if (boxed) {
+                            f.set(obj, writeVal);
+                        } else {
+                            f.setFloat(obj, writeVal);
+                        }
+                        // 审查修 P3#4：path 中含实体 key（如 Boss 威胁表 Map<Player,Float>）时
+                        // 不缓存——WritePath 作为 WeakHashMap 的 value 强引用实体 key，弱 key
+                        // 永远可达（登出/卸载玩家实体泄漏）。不缓存仅损失快路径，功能正确
+                        if (!pathHasEntityKey(path)) {
+                            CAP_WRITE_CACHE.put(target, new WritePath(f, new java.util.ArrayList<>(path), isReverse));
+                        }
                         DebugLog.probe("[插针] 字段命中(形态={}): {}#{} 原值={} → {}",
                             isReverse ? "反向承伤" : "正向血量", cls.getSimpleName(), f.getName(), orig, writeVal);
                         return orig;
@@ -1162,13 +1208,19 @@ public class HealthUtil {
 
         // ③ 原始路径：遍历所有 DataItem，找到值约等于原始血量的条目，
         //    直接写入目标血量值。不依赖 EntityDataAccessor key。
-        //    匹配阈值 0.01 — 一个 tick 内血量不会被其他因素改动超过此值。
+        //    匹配容差按量纲派生（审查修 P3#6：原裸 0.01/1 在 ≥16M HP 处低于 float ulp
+        //    地板，退化为等值匹配——违反不变量⑦；复查修 P2#2：容差用 ulp 派生而非
+        //    gateTolerance[±20% 血]——后者会把与血量同量级的无关同步条目[回充护盾槽/
+        //    伤害计数/大数值 XP 存储]大面积误写为血量值，本修复只需解决"超大血量下
+        //    容差低于 ulp 精度地板"，ulp 派生在超大血量处同样放大、常规血量处收紧，
+        //    误写面与原语义同数量级）。
         SynchedEntityData data = target.getEntityData();
         try {
             @SuppressWarnings("unchecked")
             Map<Integer, Object> items = (Map<Integer, Object>) ENTITY_DATA_ITEMS_FIELD.get(data);
             if (items == null) return;
 
+            float tol = ProbeScales.driftTolerance(ProbeScales.epsilon(Math.max(healthBefore, 1.0F)));
             for (Object item : items.values()) {
                 try {
                     Object rawValue = DATA_ITEM_VALUE_FIELD.get(item);
@@ -1176,10 +1228,10 @@ public class HealthUtil {
 
                     boolean matched;
                     if (rawValue instanceof Float f) {
-                        matched = Math.abs(f - healthBefore) < 0.01F;
+                        matched = Math.abs(f - healthBefore) <= tol;
                         if (matched) DATA_ITEM_VALUE_FIELD.set(item, health);
                     } else if (rawValue instanceof Double d) {
-                        matched = Math.abs(d - (double) healthBefore) < 0.01;
+                        matched = Math.abs(d - (double) healthBefore) <= tol;
                         if (matched) DATA_ITEM_VALUE_FIELD.set(item, Double.valueOf((double) health));
                     } else if (rawValue instanceof Integer i) {
                         // Integer 型血量近似匹配（部分 mod 用 Integer 存百分比血量）
@@ -1312,13 +1364,14 @@ public class HealthUtil {
 
         Class<?> current = target.getClass();
         while (current != null && current != Object.class) {
-            // Player 类声明的 EntityDataAccessor 全部是非血量同步字段
+            // Player 及其子类声明的 EntityDataAccessor 全部是非血量同步字段
             // （饱食度 DATA_PLAYER_SATURATION / 吸收 DATA_PLAYER_ABSORPTION / 等级等，
-            //  与血量同量级同范围——值域容差无法区分，只能按类身份排除）。
+            //  与血量同量级同范围——值域容差无法区分，只能按类身份排除；审查修 P3#5：
+            //  玩家 mod 子类声明的 float accessor 同样按 isAssignableFrom 排除）。
             // 血量 key 定义在 LivingEntity（DATA_HEALTH_ID），由上方单独排除；
             // 若不排除，血量≈饱食度/吸收时会把这些 key 永久缓存为"自定义血量"，
             // 之后所有对玩家的直写都会把饱食度/吸收写成血量值（显示错乱）。
-            if (current == Player.class) {
+            if (Player.class.isAssignableFrom(current)) {
                 current = current.getSuperclass();
                 continue;
             }
@@ -1458,8 +1511,6 @@ public class HealthUtil {
         ServerLevel.class, "f_143243_", "entityTickList");
     private static final Field SL_DRAGON_PARTS = reflectField(
         ServerLevel.class, "f_143247_", "dragonParts");
-    private static final Field SL_PLAYERS_FIELD = reflectField(
-        ServerLevel.class, "f_8546_", "players");
 
     // --- SectionPos.asLong(BlockPos) : long ---
     private static final Method SP_AS_LONG = reflectMethod(
@@ -1613,6 +1664,9 @@ public class HealthUtil {
      */
     @SuppressWarnings("unchecked")
     public static void eradicateFromWorld(LivingEntity target) {
+        // Player guard（审查修 P3#8：防御纵深与 DeathFinalizer/ExecutionFinalizer 对齐——
+        // 当前调用链均有上游排除，防未来新调用点对玩家走容器抹除链）
+        if (target instanceof Player) return;
         if (!(target.level() instanceof ServerLevel sl)) return;
         if (SL_ENTITY_MANAGER == null) return;
 

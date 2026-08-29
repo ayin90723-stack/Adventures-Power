@@ -3,6 +3,7 @@ package com.ayin90723.adventure_power.handler;
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
+import com.ayin90723.adventure_power.input.DoubleJumpHandler;
 import com.ayin90723.adventure_power.item.ModItems;
 import com.ayin90723.adventure_power.util.AdventureItemNbtUtil;
 import com.ayin90723.adventure_power.util.PersistentDataKeys;
@@ -76,6 +77,10 @@ public class CapabilityLifecycleHandler {
         // 后 Capability 中的计时字段与当前维度时钟失配——主世界触发的死亡抗拒冷却进入
         // 时间更小的下界会被"延长"、下界进主世界则冷却失效；受击坚韧 lastHurtTime 错位
         // 会导致层数永不过期。按新旧维度时间差平移各 end 字段（同维度 delta=0 无操作）。
+        // 【字节码澄清（2026-08-29 审查）】原版 1.20.1 的 DerivedLevelData.getGameTime()
+        // 委托主世界 LevelData——全维度共享时钟，timeDelta 恒为 0，本段平移实际永不执行
+        // （防御性死代码，无副作用，保留）。作用对象是"给非主世界维度挂独立 LevelData"
+        // 的整合包模组场景：该类环境发生时本段自动生效，防计时失配复活。
         long timeDelta = newPlayer.level().getGameTime() - oldPlayer.level().getGameTime();
         if (timeDelta != 0) {
             newPlayer.getCapability(AdventureProgressCapability.CAPABILITY)
@@ -133,6 +138,12 @@ public class CapabilityLifecycleHandler {
         // 死亡/换维度后若持有冒险饰品但未激活，自动激活
         checkAndActivateAdventurer(newPlayer);
 
+        // 审查修 P1#3：消费死亡掉落拦截暂存的饰品栈（KeepOnDeathHandler.onLivingDrops 写入
+        // PlayerPersisted）——keepInventory=false 时 restoreFrom 不复制物品栏，还回旧实体
+        // 背包的物品会随旧实体丢弃；从 oldPlayer 读（不依赖 Forge PlayerPersisted 复制时序）
+        if (event.isWasDeath()) {
+            KeepOnDeathHandler.restoreKeptCurioStacks(oldPlayer, newPlayer);
+        }
 
         // 重生/穿越末地后客户端 Capability 不会自动同步，
         // 需要手动推送 AdventureSyncPacket 确保面板和 tooltip 状态正确
@@ -213,7 +224,9 @@ public class CapabilityLifecycleHandler {
     /** 时间基准平移：把 Capability 中所有 gameTime 时间戳字段按新旧维度时间差平移。
      *  仅平移 >0 的激活字段（0 = 未激活，平移无意义）。
      *  注意：休养生息/恩赐永驻等 handler 的静态 Map 缓存（脱战/续期检查）为短时缓存，
-     *  跨维度后自愈（最多一次检查提前/延迟），无需平移。 */
+     *  跨维度后自愈（最多一次检查提前/延迟），无需平移。
+     *  【字节码澄清（2026-08-29 审查）】原版 1.20.1 全维度共享 gameTime，timeDelta 恒 0
+     *  ——本方法当前不可达（防御性死代码，无副作用，保留以覆盖独立维度时钟的整合包环境）。 */
     private static void shiftTimers(IAdventureProgress p, long delta) {
         if (p.getDeathDefyInvulEnd() > 0) p.setDeathDefyInvulEnd(p.getDeathDefyInvulEnd() + delta);
         if (p.getDeathDefyCooldownEnd() > 0) p.setDeathDefyCooldownEnd(p.getDeathDefyCooldownEnd() + delta);
@@ -311,12 +324,20 @@ public class CapabilityLifecycleHandler {
         Player player = event.getEntity();
         if (player.level().isClientSide()) return;
 
+        // 审查修 P3#3（DoubleJump）：跨维度清理二段跳"本周期已跳"标记——传送门
+        // changeDimension 不触发 Clone（1.20.1 字节码核实），空中跳后穿门会把
+        // AIR_JUMPED 带进新维度，落地前首跳被拒 + 拉回包顿挫
+        DoubleJumpHandler.clearAirJumped(player.getUUID());
+
         // 时间基准平移：维度切换（传送门/末地出口）不触发 PlayerEvent.Clone（1.20.1 仅死亡
         // respawn 触发 Clone），但 ServerLevel.getGameTime() 每维度独立——CD/无敌/受击坚韧等
         // 计时字段与当前维度时钟失配（主世界触发进下界被延长、反向秒失效），需按新旧维度时间差平移。
         // PlayerChangedDimensionEvent 双向触发（已从 binpatched jar 字节码验证：changeDimension
         // normal 分支与 teleportTo（m_8999_，末地出口 credits 路径）各 fire 一次），
-        // 故进末地/出末地/传送门均在事件内平移，无需额外 tick 检测
+        // 故进末地/出末地/传送门均在事件内平移，无需额外 tick 检测。
+        // 【字节码澄清（2026-08-29 审查）】原版 1.20.1 全维度共享 gameTime（DerivedLevelData
+        // 委托主世界 LevelData），timeDelta 恒 0、本段实际永不执行（防御性死代码，无副作用，
+        // 保留）——同 onPlayerClone 处的澄清，防御对象是独立维度时钟的整合包模组场景。
         if (player.getServer() != null && event.getFrom() != null) {
             ServerLevel fromLevel = player.getServer().getLevel(event.getFrom());
             if (fromLevel != null) {

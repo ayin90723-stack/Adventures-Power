@@ -61,6 +61,9 @@ public final class DeathFinalizer {
      */
     public static void completeVanillaDeath(LivingEntity target, DamageSource source, EngineCaller caller) {
         try {
+            // Player guard（审查修 P3#1：防御纵深与 ExecutionFinalizer.finalizeKill 对齐——
+            // 当前调用方均排除玩家，防未来新调用点对玩家直调 die 绕开 hurt 管线死亡语义）
+            if (target instanceof Player) return;
             if (target.isRemoved()) return;
             if (((LivingEntityFieldsAccessor) target).adventure_power$isDead()) return;
             if (!target.isDeadOrDying()) return;

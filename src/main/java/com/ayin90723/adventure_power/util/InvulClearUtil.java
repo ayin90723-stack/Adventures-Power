@@ -42,6 +42,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * 字段名模式匹配可能误命中含 "vulnerable" 子串的非无敌字段（如
  * {@code isVulnerableToWater}），将其置 true。误匹配场景罕见且影响有限，
  * 精确修复需为每个模组建黑名单，暂以启发式接受。
+ * 原版层（{@code Entity.invulnerable} / {@code LivingEntity.invulnerableTime}）
+ * 已排除（审查修 P3#2）——只清模组层自定义无敌字段。
  *
  * @see com.ayin90723.adventure_power.mixin.PiercingGazeLivingEntityMixin
  * @see HealthUtil#CUSTOM_HEALTH_KEYS_CACHE
@@ -71,6 +73,15 @@ public class InvulClearUtil {
         List<Field> fields = new ArrayList<>();
         Class<?> current = clazz;
         while (current != null && current != Object.class) {
+            // 审查修 P3#2：排除原版层——Entity.invulnerable（boolean，NBT 无敌 Boss 机制）与
+            // LivingEntity.invulnerableTime（int，受击无敌帧）会被子串匹配误清：清掉后目标
+            // 对全世界的伤害源（岩浆/环境/其他玩家）都不再无敌，能力效果外溢。破敌的
+            // "本次攻击穿透"由 Layer 1 isInvulnerableTo 拦截实现，不需要动原版字段
+            if (current == net.minecraft.world.entity.Entity.class
+                || current == net.minecraft.world.entity.LivingEntity.class) {
+                current = current.getSuperclass();
+                continue;
+            }
             for (Field field : current.getDeclaredFields()) {
                 // 跳过 static 字段：static 无敌计时器是类级共享，清零会影响所有实例
                 //（static final 会抛 IllegalAccessException 被吞，白扫）

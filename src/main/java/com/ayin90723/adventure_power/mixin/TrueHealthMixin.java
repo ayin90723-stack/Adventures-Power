@@ -221,13 +221,22 @@ public abstract class TrueHealthMixin {
                     progress.setBackupHealth(rawHealth);
                     backup = rawHealth;
                 } else {
-                    // DataItem < 备份：非法降血直写 -> 修复
-                    if (debugLog()) {
-                        DebugLog.trueHealth("[MME-TrueHealth] 非法降血检测！" +
-                            " DataItem=" + rawHealth + " backup=" + backup +
-                            " diff=" + diff + " -> setAllHealthLikeRaw 修复为 " + backup);
+                    // DataItem < 备份：非法降血直写 -> 修复。
+                    // 审查修 P3#4：maxHealth 属性驱动的 clamp 降值（生命上限下移，诅咒装备类
+                    // 机制）不是篡改——rawHealth 精确等于当前 maxHealth 时接受为合法归位并
+                    // 同步备份；repairHealth 直写绕过 setHealth 的 clamp 会把血量写回高于新
+                    // 上限的旧值，且每次读数反复拉锯
+                    if (rawHealth == player.getMaxHealth()) {
+                        progress.setBackupHealth(rawHealth);
+                        backup = rawHealth;
+                    } else {
+                        if (debugLog()) {
+                            DebugLog.trueHealth("[MME-TrueHealth] 非法降血检测！" +
+                                " DataItem=" + rawHealth + " backup=" + backup +
+                                " diff=" + diff + " -> setAllHealthLikeRaw 修复为 " + backup);
+                        }
+                        repairHealth(player, backup);
                     }
-                    repairHealth(player, backup);
                 }
             }
 
@@ -359,10 +368,10 @@ public abstract class TrueHealthMixin {
      *   <li>维度切换：{@code removePlayerImmediately(CHANGED_DIMENSION)}——放行</li>
      *   <li>重生 respawn：{@code remove(DISCARDED)} 但正常死亡备份 ≤ 0 已在上方放行</li>
      * </ul>
-     * 若不加原因门禁，登出/换维度会被 cancel 导致幽灵实体（实体永留世界、
-     * knownUuids 未清除，重登失败）与双维度重复实体。
-     * {@code RejectHealthManipMixin} 同位置的 ATTR_OWNER 清理注入不受 cancel 影响
-     * （Mixin 多注入互不阻断），玩家存活时条目保留无泄漏。</p>
+ * 若不加原因门禁，登出/换维度会被 cancel 导致幽灵实体（实体永留世界、
+ * knownUuids 未清除，重登失败）与双维度重复实体。
+ * cancel 时 ATTR_OWNER 清理（RejectHealthManipMixin 同注入点）会被跳过（HEAD 注入
+ * 后应用者在前、cancel 跳过其后注入）——本方法在 cancel 分支内显式补清理。</p>
      */
     @Inject(method = "m_142687_", at = @At("HEAD"), cancellable = true)
     private void onSetRemoved(Entity.RemovalReason reason, CallbackInfo ci) {
@@ -378,6 +387,13 @@ public abstract class TrueHealthMixin {
             if (debugLog()) {
                 DebugLog.trueHealth("[MME-TrueHealth] 拦截实体移除！" +
                     " reason=" + reason + " backup=" + progress.getBackupHealth() + " -> cancel");
+            }
+            // 审查修 P3#3：cancel 触发的合成提前 return 会跳过 RejectHealthManipMixin 同注入
+            // 点的 ATTR_OWNER 清理（HEAD 注入后应用者插入在前、先执行，cancel 即跳过其后
+            // 所有注入）——本类 priority=10000 先运行，在此显式清理保证 cancel 路径同样无泄漏
+            if (self instanceof Player) {
+                com.ayin90723.adventure_power.util.RejectHealthManipUtil.ATTR_OWNER
+                    .values().removeIf(v -> v == self);
             }
             ci.cancel();
         }

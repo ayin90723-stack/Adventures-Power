@@ -33,6 +33,10 @@ public final class PersistentDataKeys {
     /** Buff 排除列表（CompoundTag，key=效果ID, value=true） */
     public static final String BUFF_BLACKLIST_KEY = "MME_BuffBlacklist";
 
+    /** 死亡掉落拦截暂存的冒险饰品栈（ListTag of ItemStack，存于 persistentData 的
+     *  PlayerPersisted 子 tag——Forge Clone 自动复制到新实体，重生时消费写回背包） */
+    public static final String KEEP_CURIO_STACK_KEY = "MME_KeptCurioStacks";
+
     // ==================== 里程碑 NBT — 物品 NBT（冒险饰品） ====================
 
     /** 旧版阶段标记（v1.0 遗留），用于迁移旧物品 NBT（int） */
@@ -48,6 +52,10 @@ public final class PersistentDataKeys {
      * @return NBT 键名，如 "MME_Milestone_Nether"
      */
     public static String milestoneNbtKey(String id) {
+        // 审查修 P2#2：数据包里程碑 id 为空字符串时 charAt(0) 抛 StringIndexOutOfBounds——
+        // 位于服务端主线程 grant/sync 链上会崩服（MilestoneRegistry 已在加载侧拦截空 id，
+        // 此处兜底防御）
+        if (id == null || id.isEmpty()) return "MME_Milestone_";
         return "MME_Milestone_" + Character.toUpperCase(id.charAt(0)) + id.substring(1);
     }
 

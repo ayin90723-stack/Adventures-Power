@@ -190,6 +190,12 @@ public class AdventurePowerCommand {
                 () -> Component.translatable("command.adventure_power.ability_unlocked", id), false);
             return 1;
         }
+        // 审查修 P2#1：首次指令解锁时同步清除玩家个人"手动关闭"标记——首次解锁走不到
+        // 上方 toggle 分支，disabledAbilities 残留会导致命令报成功但能力实际仍关闭，
+        // 且该能力已脱离里程碑归属、面板无 UI 入口，玩家无法自救
+        if (!progress.isAbilityEnabled(id)) {
+            progress.toggleAbility(id);
+        }
         SyncUtil.syncCapabilityToPersistent(player, progress);
         // 同步物品 NBT 第三层备份（MME_CommandGranted）——否则指令解锁记录只存在于
         // Capability + persistentData，物品兜底路径（维度切换/Clone 极端场景）会静默丢失

@@ -3,7 +3,7 @@ package com.ayin90723.adventure_power.ui;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.client.event.RenderGuiOverlayEvent;
+import net.minecraftforge.client.event.RenderGuiEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber.Bus;
@@ -14,6 +14,9 @@ import net.minecraftforge.fml.common.Mod.EventBusSubscriber.Bus;
  * 右下角紧贴边角，仅显示「方位 距离m」（如「右上 8m」），半透明不抢视野。
  * 读 {@link ClientHudDataCache#radarTargets}（客户端限频扫描缓存）。
  * 仅觉醒（fullyUnlocked）且全视之眼启用时渲染。
+ * <p>
+ * 审查修 P2#1：改订阅 {@link RenderGuiEvent.Post}（每帧一次）——原
+ * RenderGuiOverlayEvent.Post 对 26 个原版 overlay 各发一次，半透明行色被叠加成近纯白。
  */
 @EventBusSubscriber(value = Dist.CLIENT, bus = Bus.FORGE)
 public class AllSeeingRadarOverlay {
@@ -25,7 +28,7 @@ public class AllSeeingRadarOverlay {
     private static final int BOTTOM_MARGIN = 4;
 
     @SubscribeEvent
-    public static void onRenderOverlay(RenderGuiOverlayEvent.Post event) {
+    public static void onRenderOverlay(RenderGuiEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return;
         if (!ClientHudDataCache.allSeeingEnabled || !ClientHudDataCache.fullyUnlocked) return;

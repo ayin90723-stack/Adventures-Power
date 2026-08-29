@@ -61,8 +61,11 @@ public final class BuffExclusionManager {
         Set<String> set = new HashSet<>();
         for (String key : blacklist.getAllKeys()) {
             // 长度校验（v1.4.0 审查修复）：网络同步层 readUtf(64) 限长，此处源头对齐——
-            // 外部途径（手改存档）写入的超长 key 不进入运行时集合，防同步不对称
-            if (key.length() > 64) continue;
+            // 外部途径（手改存档）写入的超长 key 不进入运行时集合，防同步不对称。
+            // 审查修 P3#4：按 UTF-8 字节数过滤（writeUtf(s, 64) 的 64 是字节数）——
+            // 原按字符数过滤，64 个中文字符 = 192 字节能通过过滤却在编码时抛
+            // EncoderException，该玩家后续所有黑名单同步包写失败
+            if (key.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 64) continue;
             if (blacklist.getBoolean(key)) set.add(key);
         }
         return set;
