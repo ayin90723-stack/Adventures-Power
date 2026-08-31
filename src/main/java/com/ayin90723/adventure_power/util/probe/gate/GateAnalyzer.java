@@ -39,7 +39,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 数值与常量比较（IFxx）= GATE_PROGRESS、float 比零（isDeadOrDying 型）= 派生血。
  * 名字启发只做排序不做定论（全混淆目标结构候选兜底）。
  * <p>
- * <b>字节码下界（§9 P3）</b>：{@code getResourceAsStream} 拿到的是 transformation 之前的
+ * <b>字节码下界（§9 P3）</b>：{@code getResourceAsStream} 拿到的是 transformation 之前的（v1.4.8 快照开关开启时 readClassNode 优先运行时真身，下界语义升级为真身）
  * 字节——本模组及其他模组的 Mixin/coremod 注入不在分析视野。分析结果 = 模组原始意图的
  * <b>下界</b>：分析不到 ≠ 不存在（真门可能在被注入的委托方法里）——探针验证不过即退回
  * 影杀兜底，零退化；排查"分析出门但验证不翻"时应先怀疑注入层。
@@ -362,6 +362,155 @@ public final class GateAnalyzer {
         return true;
     }
 
+    // ==================== v1.4.8 攻击面情报：hurt 覆写查询 + 血量存储布局 ====================
+
+    /** 血量存储字段情报：getHealth 覆写读链消费的数值字段（声明类/名/位型/静态位/位打包）。 */
+    public record StorageField(Class<?> declaring, String name, String desc, boolean staticField, boolean bitPacked) {
+        @Override public String toString() {
+            return declaring.getSimpleName() + "#" + name + (bitPacked ? "(位打包)" : "") + (staticField ? "[static]" : "");
+        }
+    }
+
+    /** 存储情报（空列表 = 无 getHealth 覆写或读链无字段消费）。 */
+    public record HealthStorageIntel(List<StorageField> fields) {
+        public static final HealthStorageIntel EMPTY = new HealthStorageIntel(List.of());
+    }
+
+    private static final Map<Class<?>, HealthStorageIntel> STORAGE_INTEL = new ConcurrentHashMap<>();
+
+    /**
+     * 血量存储布局分析（v1.4.8）：getHealth 覆写沿 this 调用链（≤3 层，私有辅助方法族）
+     * 收集数值字段消费，识别位打包形态（字段 I/J 位型经 {@code Float.intBitsToFloat} 解码——
+     * 直接同体消费，或经 (J)F/(I)F 私有解包辅助方法间接消费）。
+     * <p>
+     * 情报用途：给引擎探测供靶（宿主=target 的实例字段 / 宿主=null 的静态字段可定向插针，
+     * 省全图扫描；容器条目型宿主仍由对象图盲扫覆盖）。失效纪律与 PLANS 一致（级联失效
+     * 全表作废重扫）。
+     */
+    public static HealthStorageIntel analyzeHealthStorage(Class<?> cls) {
+        return STORAGE_INTEL.computeIfAbsent(cls, GateAnalyzer::scanHealthStorage);
+    }
+
+    private static HealthStorageIntel scanHealthStorage(Class<?> cls) {
+        // 找 getHealth 覆写（类链 LivingEntity 前；m_21223_/getHealth 双名，desc 固定 ()F）
+        MethodNode getter = null;
+        Class<?> getterDeclaring = null;
+        for (Class<?> c = cls; c != null && c != Object.class && c != net.minecraft.world.entity.LivingEntity.class;
+             c = c.getSuperclass()) {
+            for (java.lang.reflect.Method m : c.getDeclaredMethods()) {
+                if (("m_21223_".equals(m.getName()) || "getHealth".equals(m.getName()))
+                    && "()F".equals(methodDesc(m))) {
+                    getter = findMethodNode(c, m.getName(), "()F");
+                    getterDeclaring = c;
+                    break;
+                }
+            }
+            if (getter != null) break;
+        }
+        if (getter == null) return HealthStorageIntel.EMPTY;
+        // 沿 this 调用链 BFS ≤3 层收集方法体（internalHealth/se_int_unpack 级私有辅助族）
+        List<MethodNode> bodies = new ArrayList<>();
+        List<String> seen = new ArrayList<>();
+        List<MethodNode> frontier = new ArrayList<>(List.of(getter));
+        // 复查修（P3）：hidden class 的 getName() 带 /0x... 后缀，而 readClassNode 读的是
+        // 剥离后缀的原始字节码（INVOKEVIRTUAL owner 写原始类名）——owner 比较同款剥离，
+        // 否则委托 helper（internalHealth/se_int_unpack 级）在 hidden class 上全漏检
+        String ownerJvm = getterDeclaring.getName().replace('.', '/');
+        int hiddenSuffix = ownerJvm.indexOf('/');
+        if (hiddenSuffix > 0) {
+            ownerJvm = ownerJvm.substring(0, hiddenSuffix);
+        }
+        for (int depth = 0; depth < 3 && !frontier.isEmpty(); depth++) {
+            List<MethodNode> next = new ArrayList<>();
+            for (MethodNode mn : frontier) {
+                if (seen.contains(mn.name + mn.desc)) continue;
+                seen.add(mn.name + mn.desc);
+                bodies.add(mn);
+                for (AbstractInsnNode insn : mn.instructions) {
+                    if (insn instanceof MethodInsnNode min
+                        && (min.getOpcode() == org.objectweb.asm.Opcodes.INVOKEVIRTUAL
+                            || min.getOpcode() == org.objectweb.asm.Opcodes.INVOKESPECIAL)
+                        && min.owner.equals(ownerJvm)) {
+                        MethodNode callee = findMethodNode(getterDeclaring, min.name, min.desc);
+                        if (callee != null) next.add(callee);
+                    }
+                }
+            }
+            frontier = next;
+        }
+        if (bodies.isEmpty()) return HealthStorageIntel.EMPTY;
+        // 解包辅助方法名集合：体内含 intBitsToFloat 的 (J)F/(I)F 私有方法（间接位打包信号）
+        Set<String> unpackHelpers = new java.util.HashSet<>();
+        for (MethodNode mn : bodies) {
+            if (!"(J)F".equals(mn.desc) && !"(I)F".equals(mn.desc)) continue;
+            for (AbstractInsnNode insn : mn.instructions) {
+                if (insn instanceof MethodInsnNode min
+                    && min.owner.equals("java/lang/Float") && "intBitsToFloat".equals(min.name)) {
+                    unpackHelpers.add(mn.name + mn.desc);
+                    break;
+                }
+            }
+        }
+        // 字段消费收集：最近字段读槽线性追踪（与 scanInstructions 同风格）
+        Map<String, StorageField> found = new java.util.LinkedHashMap<>();
+        for (MethodNode mn : bodies) {
+            FieldInsnNode lastField = null;
+            for (AbstractInsnNode insn : mn.instructions) {
+                if (insn instanceof FieldInsnNode f
+                    && (f.getOpcode() == org.objectweb.asm.Opcodes.GETFIELD
+                        || f.getOpcode() == org.objectweb.asm.Opcodes.GETSTATIC)
+                    && ("F".equals(f.desc) || "I".equals(f.desc) || "J".equals(f.desc))) {
+                    lastField = f;
+                    continue;
+                }
+                if (lastField == null) continue;
+                boolean bitsChannel = false;
+                if (insn instanceof MethodInsnNode min) {
+                    if (min.owner.equals("java/lang/Float") && "intBitsToFloat".equals(min.name)) {
+                        bitsChannel = true;
+                    } else if (unpackHelpers.contains(min.name + min.desc)) {
+                        bitsChannel = true;
+                    }
+                }
+                if (bitsChannel && !"F".equals(lastField.desc)) {
+                    recordStorageField(found, cls, lastField, true);
+                    lastField = null;
+                    continue;
+                }
+                if (insn instanceof org.objectweb.asm.tree.VarInsnNode
+                    || insn instanceof org.objectweb.asm.tree.JumpInsnNode
+                    || insn instanceof org.objectweb.asm.tree.MethodInsnNode) {
+                    // 非 intBitsToFloat 通道的普通消费：float 字段记值语义；I/J 消费不明则保守记值语义
+                    recordStorageField(found, cls, lastField, false);
+                    lastField = null;
+                }
+            }
+        }
+        if (found.isEmpty()) return HealthStorageIntel.EMPTY;
+        DebugLog.probe("[GateOracle] {} 存储情报：{}", cls.getSimpleName(), found.values());
+        return new HealthStorageIntel(List.copyOf(found.values()));
+    }
+
+    /** 字段指令 → StorageField（声明类沿目标类链解析；解析失败跳过）。 */
+    private static void recordStorageField(Map<String, StorageField> sink, Class<?> rootClass,
+                                           FieldInsnNode f, boolean bitPacked) {
+        String key = f.owner + "#" + f.name;
+        if (sink.containsKey(key)) {
+            // 已按位打包记录的字段不降级为值语义（两处消费时优先信位打包通道）
+            if (sink.get(key).bitPacked()) return;
+            if (bitPacked) sink.remove(key);
+            else return;
+        }
+        String ownerJvm = f.owner;
+        for (Class<?> c = rootClass; c != null && c != Object.class; c = c.getSuperclass()) {
+            if (c.getName().replace('.', '/').equals(ownerJvm)) {
+                sink.put(key, new StorageField(c, f.name, f.desc,
+                    f.getOpcode() == org.objectweb.asm.Opcodes.GETSTATIC, bitPacked));
+                return;
+            }
+        }
+    }
+
     /** 名字启发排序分（PERMIT 词根加分；结构分类不变，只影响尝试顺序）。 */
     private static int nameScore(StateCandidate c) {
         String n = c.name.toLowerCase();
@@ -407,8 +556,21 @@ public final class GateAnalyzer {
         return null;
     }
 
+    /** 包内复用入口（HealingChannelProbe 静态扫描共用，含 hidden class 剥离与 JVM 快照优先）。 */
+    static ClassNode readClassNodeForProbe(Class<?> cls) {
+        return readClassNode(cls);
+    }
+
     private static ClassNode readClassNode(Class<?> cls) {
         try {
+            // v1.4.8 JVM 只读快照优先：运行时真身字节码（Mixin+对方 agent 全部 transformation
+            // 后的最终形态），配置 jvm_snapshot_enabled 默认关；不可用返回 null 走下方类路径读
+            byte[] runtimeBytes = com.ayin90723.adventure_power.util.probe.jvm.JvmSnapshotService.getRuntimeBytes(cls);
+            if (runtimeBytes != null) {
+                ClassNode live = new ClassNode();
+                new ClassReader(runtimeBytes).accept(live, 0);
+                return live;
+            }
             // hidden class（运行时 defineHiddenClass 产物，类名带 /0x... 后缀——本末起源系同构）
             // 没有同名 class 资源，直接读路径非法——剥离后缀读原始类字节码（hidden 从原始字节
             // define 而来，方法体内容一致；十轮实测 BenMoOriginEntity/0x... 因此全盲：候选=[]

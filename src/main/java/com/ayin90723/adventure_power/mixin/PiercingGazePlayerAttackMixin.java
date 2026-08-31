@@ -1,9 +1,7 @@
 package com.ayin90723.adventure_power.mixin;
 
-import com.ayin90723.adventure_power.util.HealthUtil;
 import com.ayin90723.adventure_power.util.PiercingGazeUtil;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.damagesource.DamageSource;
 import org.spongepowered.asm.mixin.Mixin;
@@ -80,76 +78,8 @@ public class PiercingGazePlayerAttackMixin {
         expect = 1
     )
     private boolean redirectAttackHurt(Entity target, DamageSource source, float amount) {
-        Player self = (Player)(Object)this;
-        // 仅在服务端处理，客户端侧走原版管线
-        if (self.level().isClientSide()) {
-            return target.hurt(source, amount);
-        }
-
-        // 穿透逻辑仅对 LivingEntity 有意义；非 LivingEntity 直接走原版
-        if (!(target instanceof LivingEntity living)) {
-            return target.hurt(source, amount);
-        }
-
-        // 架空参照读数：自定义血条 Boss（亚波伦）原版槽被架空，扣血检测必须用真实血量，
-        // 否则普通命中也会被误判"未扣血"而恒走穿透三连（满额直写、数值错位）
-        float healthBefore = HealthUtil.getEffectiveHealth(living);
-        // 吸收基线（v1.4.5）：穿透"实际生效"判定含吸收--伤害被吸收心吃掉时血量不动但
-        // 吸收下降，算生效不算拦截（吸收是原版减伤行为而非无敌，穿透不越权绕过它）。
-        // 旧判定只看血量，会对吸收怪误判"未扣血"重跑穿透三连（与 Layer 2 的 actuallyHurt
-        // 双倍结算）+ 兜底每刀额外磨 1%
-        float absorptionBefore = living.getAbsorptionAmount();
-        // 本次 attack 作用域隔离：记录 post 计数基线，consume 只反映"本次 hurt 期间"的新增
-        //（环境噪声 hurt（怪物互殴等）在两次 attack 之间的 post 计入基线，不会被下次消费）
-        PiercingGazeUtil.beginVanillaHurtScope();
-        boolean hurtResult = target.hurt(source, amount);
-
-        // 实际生效（扣血或扣吸收）就放行（不管 hurtResult 真假）。用 getEffectiveHealth 直读真实血量，
-        // 防 Boss 用 ASM/Mixin 改写 getHealth() 返回假值（Fantasy Ending delta 式）。
-        // 覆盖：① 普攻原版怪 ② fdbosses 调 super 扣血但 return false ③ Boss 假成功/拦截 ④ 吸收怪
-        if (HealthUtil.getEffectiveHealth(living) + living.getAbsorptionAmount() < healthBefore + absorptionBefore) {
-            // 扣血了，放行。仅当原版管线未 post 事件时补发 LivingHurtEvent——
-            // 正常环境 hurt() 内 ForgeHooks.onLivingHurt（或 Layer 2.5 手动 post）已发过，
-            // 重复补发会让淬魂/嗜血/禁疗等监听器同 tick 双倍结算（影杀已有 SHADOW_KILL_TICKED 去重）。
-            // 消费式读取：标记只反映本次 hurt；ASM 跳过 ForgeHooks 的环境（fantasy_ending 等）标记为 false 仍需补发
-            if (!PiercingGazeUtil.consumeVanillaHurtEventPosted(living)) {
-                PiercingGazeUtil.postHurtEvent(living, source, amount);
-            }
-            return true;
-        }
-
-        // 否则（返回 false / return true 假成功未扣血）-> 穿透门禁统一入口：
-        // 攻击者持破敌之眼 + 非友伤 + 非玩家目标（PVP 禁用）
-        if (!PiercingGazeUtil.shouldPierce(source, living)) {
-            // 非破敌之眼/友伤/PVP：穿透不适用。此处的 consume 调用是防御性同步
-            // （非消费式读，计数单调递增——历史版本为布尔标记时的"置 false"语义，
-            // 计数方案下因单调性该调用对下次判定无实际影响，保留作分层一致性行为）
-            PiercingGazeUtil.consumeVanillaHurtEventPosted(living);
-            return hurtResult;
-        }
-
-        // 穿透结算三连（与 Layer 2 情况 A 完全一致）：
-        // 1. post LivingHurtEvent（取 max 防限伤，让淬魂/影杀 正常追加伤害）
-        // 2. actuallyHurt 直写（绕过 hurt 内护甲/无敌判定）
-        // 3. 血量直写兜底 + 清自定义无敌字段（防 Boss 注入 setHealth 恢复 / 锁死影杀 NBT）
-        // 风暴守卫：post 期间第三方监听器递归 target.hurt() 时，递归层 HEAD 压栈
-        // 捕获到本层 IN_PIERCING=true 即可跳过穿透阻断递归（与 Layer 2 情况 A 同款，
-        // 覆盖 Layer 0 手动 post 的补发路径）。
-        // finally 恢复旧值而非硬置 false：本层 post 若发生在外层 Layer 2 情况 A 的
-        // 监听器链内（监听器调 player.attack），硬置 false 会清掉外层风暴守卫
-        // 直到外层弹栈——恢复旧值保持守卫连续
-        boolean prevInPiercing = PiercingGazeUtil.IN_PIERCING.get();
-        PiercingGazeUtil.IN_PIERCING.set(true);
-        try {
-            float effective = PiercingGazeUtil.postHurtEvent(living, source, amount);
-            PiercingGazeUtil.invokeActuallyHurt(living, source, effective);
-            PiercingGazeUtil.afterPierceFallback(living, source, effective, healthBefore, absorptionBefore);
-            // 穿透反馈（穿透三连 = 真穿透；同目标同 tick 节流防三连刷屏）
-            PiercingGazeUtil.pierceFeedback(living);
-        } finally {
-            PiercingGazeUtil.IN_PIERCING.set(prevInPiercing);
-        }
-
-        return true; // 返回 true 让击退/火焰附加等附魔正常执行
+        // v1.4.8：主体公共化至 PiercingGazeUtil.interceptAttackHurt（与弹射物侧
+        // PiercingGazeArrowMixin 共用），本类只保留调用点锚定
+        return PiercingGazeUtil.interceptAttackHurt((Player)(Object)this, target, source, amount);
     }
 }

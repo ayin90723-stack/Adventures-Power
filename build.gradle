@@ -98,7 +98,9 @@ tasks.named('jar', Jar).configure {
                 'Implementation-Version'  : project.jar.archiveVersion,
                 'Implementation-Vendor'   : mod_authors,
                 'Implementation-Timestamp': new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"),
-                'MixinConfigs'            : 'mixins.adventure_power.json'
+                'MixinConfigs'            : 'mixins.adventure_power.json',
+                'Agent-Class'             : 'com.ayin90723.adventure_power.util.probe.jvm.JvmReadAgent',
+                'Can-Retransform-Classes' : 'true'
         ])
     }
     finalizedBy 'reobfJar'

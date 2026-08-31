@@ -8,6 +8,7 @@ import net.minecraft.world.entity.LivingEntity;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -135,6 +136,39 @@ public final class BloodWriteEngine {
                     targetHealth = Math.max(0.0F, targetHealth - shieldDelta);
                 }
             }
+            // v1.4.8 实机修复（失序之影·末日降临实测）：归零反弹型自适应——磨血语义调用方
+            // （淬魂/破敌/审判）写 0 后被对方的归零批准制反弹（reboundUnsaneZero/tick 对账
+            // 回滚），写 0 死循环白刀。自适应：写 0 的下一刀若读数 >0 即标记该类反弹型，
+            // 此后磨血写值钳到最小存活值（1.0）——血趋近但不归零，最后一击留给正规 hurt
+            // 管线完成批准跨零（对方自己的 die 演出+掉落完整）。普通怪写 0 即死无第二刀，
+            // 永不进反弹集，零回归。处决语义（影杀/禁疗 FORCE_KILL）不参与——写 0 是其
+            // 本意，反弹由各自 pending 裁决链处理。
+            if (isGrindingCaller(caller)) {
+                Class<?> cls0 = target.getClass();
+                long nowTick = target.level().getGameTime();
+                // 超窗清理：写 0 后百 tick 无下一刀（目标已死/战斗结束）→ 清 stale 标记
+                PENDING_ZERO_TICK.entrySet().removeIf(e -> nowTick - e.getValue() > 100L);
+                Long pending = PENDING_ZERO_TICK.remove(target);
+                if (targetHealth <= 0.0F) {
+                    // 写 0 刀：检测上刀写 0 后本实体是否仍存活（读数 >0 = 被弹回，无论弹回值大小）
+                    if (pending != null && HealthUtil.getEffectiveHealth(target) > 0.0F) {
+                        ZERO_REBOUND.add(cls0);
+                        DebugLog.probe("[走梯] {} 归零被反弹（批准制/对账回滚型），磨血改写最小存活值",
+                            cls0.getSimpleName());
+                    }
+                    if (ZERO_REBOUND.contains(cls0)) {
+                        // 钳值取 min 防升写（读数已 <1 时保持现值，不变量③ 探测方向恒向下）
+                        targetHealth = Math.min(1.0F, HealthUtil.getEffectiveHealth(target));
+                    } else {
+                        PENDING_ZERO_TICK.put(target, nowTick);
+                    }
+                } else if (pending != null) {
+                    // 上刀写 0 本刀读数存活（targetHealth>0 由调用方按读数算出）——弹回任意值
+                    // （含大值弹回风格：写 0 → 弹回 R>extra → 继续磨，同样属归零反弹）——标记
+                    ZERO_REBOUND.add(cls0);
+                    DebugLog.probe("[走梯] {} 归零被反弹（弹回存活值，磨血改写最小存活值）", cls0.getSimpleName());
+                }
+            }
             return executeInner(target, targetHealth);
         } finally {
             DebugLog.restoreEngineCaller(prevCaller);
@@ -144,6 +178,23 @@ public final class BloodWriteEngine {
 
     /** 重入守卫：execute 嵌套调用（禁疗 HEAD→L4 探针链）时跳过走梯直接 raw。 */
     private static final ThreadLocal<Boolean> REENTRANT = ThreadLocal.withInitial(() -> Boolean.FALSE);
+
+    /** v1.4.8 归零反弹型：写 0 后被弹回（批准制/对账回滚）的类，磨血写值钳最小存活值。
+     *  per-class 永久（反弹是类行为，一次观察可推广；对方停反弹后的退化方向=最后一击走
+     *  正规管线批准跨零，安全）。 */
+    private static final Set<Class<?>> ZERO_REBOUND = ConcurrentHashMap.newKeySet();
+    /** 磨血写 0 存在标记（复查修 P2：按<b>实体</b>弱键控——按类键控时同类实体 A 被正常
+     *  击杀残留的标记会让实体 B 误判反弹、永久误标该类导致打不死；弱 key 目标死亡自动
+     *  回收，超窗清理同步全清）。值为写 0 时刻 gameTime。 */
+    private static final Map<LivingEntity, Long> PENDING_ZERO_TICK =
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
+    /** 磨血语义调用方（写 0 需自适应反弹）；处决语义（影杀/禁疗 FORCE_KILL）不参与。 */
+    private static boolean isGrindingCaller(DebugLog.EngineCaller caller) {
+        return caller == DebugLog.EngineCaller.SOUL_QUENCH
+            || caller == DebugLog.EngineCaller.PIERCING_GAZE
+            || caller == DebugLog.EngineCaller.JUDGMENT;
+    }
 
     private static boolean executeInner(LivingEntity target, float targetHealth) {
         ClassProbeState st = STATES.computeIfAbsent(target.getClass(), k -> new ClassProbeState());
@@ -262,14 +313,32 @@ public final class BloodWriteEngine {
     /** L3 正缓存：实体类 → 命中的静态 Map 字段句柄 + key 形态（句柄缓存，field.get(null) 每次解析当前实例）。 */
     private static final Map<Class<?>, StaticMapPath> L3_CACHE = new ConcurrentHashMap<>();
 
-    /** 静态 Map 写入通路：static Map 字段 + key 形态（按实体解析具体 key）。 */
+    /**
+     * 静态 Map 写入通路：static Map 字段 + key 形态（按实体解析具体 key）。
+     * v1.4.8 E3 条目对象模式：值不是数值而是自定义对象（static WeakHashMap&lt;实体,
+     * HealthSlots&gt; 藏血型）时，{@code entryField} 指向条目对象内的真血字段，
+     * 写入走 {@code map.get(key).field}（值语义或位打包），不再向 map put 数值。
+     */
     private static final class StaticMapPath {
         final Field field;
         final KeyKind kind;
+        /** 条目对象下钻字段（null = 传统 put 数值模式）。 */
+        final Field entryField;
+        /** 条目字段位打包（int/long 位型存血）。 */
+        final boolean entryBitPacked;
+        /** E2.5 条目位打包刻度倍率（字段值 = 读数 × scale；put 模式无意义恒 1）。 */
+        final float entryScale;
 
         StaticMapPath(Field field, KeyKind kind) {
+            this(field, kind, null, false, 1.0F);
+        }
+
+        StaticMapPath(Field field, KeyKind kind, Field entryField, boolean entryBitPacked, float entryScale) {
             this.field = field;
             this.kind = kind;
+            this.entryField = entryField;
+            this.entryBitPacked = entryBitPacked;
+            this.entryScale = entryScale;
         }
     }
 
@@ -341,6 +410,22 @@ public final class BloodWriteEngine {
                             // key 不存在（冷缓存）→ 孤儿探测后 remove（无旧值可写回，文档 §9）
                             boolean existed = map.containsKey(key);
                             Object oldVal = existed ? map.get(key) : null;
+                            // v1.4.8 E3 类型预检 + 条目对象下钻：条目值是自定义对象（非数值）时
+                            // 严禁 put 数值探针——瞬时破坏 map 的类型约定（对方代码同栈外的窗口
+                            // 虽不存在，但 ClassCastException 会在对方下一次读条目时炸出本探测域），
+                            // 且探测本身因联动验证失败而无效。改为对条目对象做一层字段插针
+                            if (existed && oldVal != null && !(oldVal instanceof Number) && !(oldVal instanceof Boolean)) {
+                                DrillHit drilled = probeEntryDrill(target, oldVal, writeValue);
+                                if (drilled != null) {
+                                    L3_CACHE.put(cls, new StaticMapPath(f, kind,
+                                        drilled.field(), drilled.bitPacked(), drilled.scale()));
+                                    DebugLog.probe("[L3] 静态容器条目对象命中 {}#{} key={} 字段{}{} → {}",
+                                        c.getSimpleName(), f.getName(), kind, drilled.field().getName(),
+                                        drilled.bitPacked() ? "(位打包 x" + drilled.scale() + ")" : "", writeValue);
+                                    return true;
+                                }
+                                continue; // 本 key 形态的条目非血量载体 → 下一 kind
+                            }
                             if (probeStaticMap(target, map, key, existed, oldVal)) {
                                 // 命中：落攻击值 + 缓存句柄
                                 map.put(key, writeValue);
@@ -376,6 +461,46 @@ public final class BloodWriteEngine {
             Map<Object, Object> map = (Map<Object, Object>) rawMap;
             Object key = path.kind.keyOf(target);
             float before = target.getHealth();
+            // v1.4.8 E3：条目对象模式（entryField != null）写 map.get(key).entryField
+            // （值语义或位打包），不再向 map put 数值（类型约定保护）
+            if (path.entryField != null) {
+                Object entry = map.get(key);
+                if (entry == null) return false;
+                path.entryField.setAccessible(true);
+                Object prev = path.entryField.get(entry);
+                if (path.entryBitPacked) {
+                    bitsWrite(entry, path.entryField, Float.floatToRawIntBits(writeValue * path.entryScale) & 0xFFFFFFFFL);
+                } else {
+                    Class<?> ft = path.entryField.getType();
+                    if (ft == Float.class || ft == Object.class) {
+                        path.entryField.set(entry, writeValue);
+                    } else {
+                        path.entryField.setFloat(entry, writeValue);
+                    }
+                }
+                float after = target.getHealth();
+                float eps = ProbeScales.epsilon(Math.max(before, 1.0F));
+                float driftTol = ProbeScales.driftTolerance(eps);
+                if (after > before + driftTol) return false;
+                // 复查修（P1）：位打包条目的 prev 是位型整数（如 100.0F 的位型
+                // 0x42C80000≈1.12e9），按值语义算 expectedDrop 恒天文数字 → 验证恒失败 →
+                // 每刀级联失效风暴（L3_CACHE.remove + onPositiveCacheDrift + 全层重扫）。
+                // 位打包分支按解码值参与预期下降量推算
+                if (prev instanceof Number n) {
+                    float prevVal = path.entryBitPacked
+                        ? Float.intBitsToFloat((int) n.longValue())
+                        : n.floatValue();
+                    // E2.5：位打包条目的解码值在字段刻度上，期望降幅换回读数刻度再比对
+                    float expectedDrop = path.entryBitPacked
+                        ? prevVal / path.entryScale - writeValue
+                        : prevVal - writeValue;
+                    float actualDrop = before - after;
+                    if (expectedDrop >= ProbeScales.verifyThreshold(eps) && actualDrop < expectedDrop - driftTol) {
+                        return false;
+                    }
+                }
+                return true;
+            }
             Object prev = map.get(key);
             map.put(key, writeValue);
             float after = target.getHealth();
@@ -441,6 +566,128 @@ public final class BloodWriteEngine {
                 map.remove(key);
             }
         } catch (Exception ignored) {
+        }
+    }
+
+    // ==================== v1.4.8 E3：条目对象下钻 ====================
+
+    /** E2.5 倍率刻度候选（与 HealthUtil.BIT_SCALE_CANDIDATES 同款，本地副本）。 */
+    private static final float[] BIT_SCALES = {1.0F, 10.0F, 0.1F};
+
+    /** E3 条目对象下钻命中：字段 + 位打包标记 + E2.5 刻度倍率。 */
+    private record DrillHit(Field field, boolean bitPacked, float scale) {}
+
+    /**
+     * v1.4.8 E3 条目对象下钻：对静态 Map 条目值（自定义对象，static WeakHashMap&lt;实体,
+     * HealthSlots&gt; 藏血型的值侧）做<b>一层</b>字段插针。
+     * <p>
+     * 与 {@code HealthUtil.probeGraph} ① 循环同判据族（值闸形态分类 → 降向扰动 →
+     * getHealth 联动验证 → finally 同栈还原 → 命中写入目标值），两种形态：
+     * float/Float 正向值语义；int/long 位打包（解码值闸 + 位型扰动）。只扫条目对象本体
+     * 字段不递归（深层嵌套归 L2 对象图管），验证读用裸 {@code getHealth()}（与
+     * {@link #probeStaticMap} 同口径——getEffectiveHealth 的架空阈值会吞掉 eps 级扰动）。
+     * 命中后 L3 在走梯中直接返回（与 probeStaticMap 同姿态，无 verifyComposite 总读数
+     * 验证）——合成血（条目分量 + 另一分量）的"错误成功"由缓存快路径 applyAttack 的
+     * 写后方向/降幅校验与级联失效兜底，单分量场景（本形态主用例）无此顾虑。
+     *
+     * @return 命中字段 + 位打包标记；未命中返回 null（条目对象已按快照还原，无残留）
+     */
+    private static DrillHit probeEntryDrill(LivingEntity target, Object entryObj, float writeValue) {
+        float reading = target.getHealth();
+        float eps = ProbeScales.epsilon(reading);
+        float gateTol = ProbeScales.gateTolerance(reading);
+        float verifyTh = ProbeScales.verifyThreshold(eps);
+        float driftTol = ProbeScales.driftTolerance(eps);
+        for (Class<?> c = entryObj.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+            for (Field f : c.getDeclaredFields()) {
+                if (Modifier.isStatic(f.getModifiers())) continue;
+                Class<?> ft = f.getType();
+                boolean bitsTyped = ft == int.class || ft == long.class || ft == Integer.class || ft == Long.class;
+                if (!bitsTyped && ft != float.class && ft != Float.class) continue;
+                try {
+                    f.setAccessible(true);
+                    if (bitsTyped) {
+                        // E2.5：倍率刻度值闸（内部轨放大存储型，解码值 = 读数 × scale）；
+                        // 倍率集与 HealthUtil 同款（本地副本，与 bitsRead/bitsWrite 同纪律）
+                        long origBits = bitsRead(entryObj, f);
+                        float decoded = Float.intBitsToFloat((int) origBits);
+                        if (!Float.isFinite(decoded) || decoded <= 0.0F) continue;
+                        // E2.5（复查修 P3 同款）：候选不短路，探针失败 continue 下一候选
+                        for (float scale : BIT_SCALES) {
+                            float refScaled = reading * scale;
+                            if (refScaled <= 0.0F || Math.abs(decoded - refScaled) > gateTol * scale) continue;
+                            long probeBits = Float.floatToRawIntBits(decoded - eps * scale) & 0xFFFFFFFFL;
+                            float before = target.getHealth();
+                            bitsWrite(entryObj, f, probeBits);
+                            float after;
+                            try {
+                                after = target.getHealth();
+                            } finally {
+                                bitsWrite(entryObj, f, origBits);
+                            }
+                            if (Math.abs(after - before) < verifyTh) continue;
+                            if (Math.abs(after - (reading - eps)) > driftTol) continue;
+                            bitsWrite(entryObj, f, Float.floatToRawIntBits(writeValue * scale) & 0xFFFFFFFFL);
+                            return new DrillHit(f, true, scale);
+                        }
+                        continue;
+                    }
+                    // float 值语义形态
+                    boolean boxed = ft == Float.class;
+                    float orig = boxed ? ((Number) f.get(entryObj)).floatValue() : f.getFloat(entryObj);
+                    if (Math.abs(orig - reading) > gateTol) continue;
+                    float before = target.getHealth();
+                    if (boxed) {
+                        f.set(entryObj, orig - eps);
+                    } else {
+                        f.setFloat(entryObj, orig - eps);
+                    }
+                    float after;
+                    try {
+                        after = target.getHealth();
+                    } finally {
+                        if (boxed) {
+                            f.set(entryObj, orig);
+                        } else {
+                            f.setFloat(entryObj, orig);
+                        }
+                    }
+                    if (Math.abs(after - before) < verifyTh) continue;
+                    if (Math.abs(after - (reading - eps)) > driftTol) continue;
+                    if (boxed) {
+                        f.set(entryObj, writeValue);
+                    } else {
+                        f.setFloat(entryObj, writeValue);
+                    }
+                    return new DrillHit(f, false, 1.0F);
+                } catch (Exception ignored) {
+                    // 访问失败/类型异常 → 下一字段
+                }
+            }
+        }
+        return null;
+    }
+
+    /** 位打包字段读（低 32 位位型统一装 long；与 HealthUtil 同语义，L3 局部副本避免跨层依赖扩散）。 */
+    private static long bitsRead(Object obj, Field f) throws IllegalAccessException {
+        if (f.getType() == int.class) return f.getInt(obj);
+        if (f.getType() == long.class) return f.getLong(obj);
+        Object o = f.get(obj);
+        if (o instanceof Integer i) return i;
+        if (o instanceof Long l) return l;
+        throw new IllegalStateException("not a bits-typed field: " + f);
+    }
+
+    /** 位打包字段写（int 位宽取低 32 位；装箱类型走 get/set）。 */
+    private static void bitsWrite(Object obj, Field f, long bits) throws IllegalAccessException {
+        if (f.getType() == int.class) {
+            f.setInt(obj, (int) bits);
+        } else if (f.getType() == long.class) {
+            f.setLong(obj, bits);
+        } else if (f.getType() == Long.class) {
+            f.set(obj, Long.valueOf(bits));
+        } else {
+            f.set(obj, Integer.valueOf((int) bits));
         }
     }
 }

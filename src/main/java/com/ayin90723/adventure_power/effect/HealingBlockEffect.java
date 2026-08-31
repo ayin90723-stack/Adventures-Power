@@ -142,6 +142,8 @@ public class HealingBlockEffect extends MobEffect {
       float baseline = (existing != null && gameTime <= existing.endTime)
          ? Math.min(existing.health, current) : current;
       TRACKED_HEALTH.put(targetId, new TrackedEntry(baseline, endTime));
+      // v1.4.8 探查回血：首次对某类挂标记时做回血通道静态探查（纯 ASM 零扰动，per-class 一次诊断日志）
+      com.ayin90723.adventure_power.util.probe.gate.HealingChannelProbe.probeAndLog(target.getClass());
       // NBT 持久化（正常实体重启后可恢复；对重写 getPersistentData 的实体静默无效）
       target.getPersistentData().putLong(NBT_KEY, endTime);
       // 验证 NBT 是否真正持久化：重写 getPersistentData() 的实体（亚波伦）再次读取为空，
@@ -199,6 +201,24 @@ public class HealingBlockEffect extends MobEffect {
       } finally {
          HealthUtil.INTERNAL_HEALTH_WRITE.set(prevInternal);
       }
+   }
+
+   /**
+    * v1.4.8 探查回血·数据层升写判定：目标禁疗中且请求值高于钳制低点 → 数据层拦截取消写入。
+    * <p>
+    * 消费方 {@code RejectHealthManipDataMixin}（{@code SynchedEntityData.set} HEAD）——覆盖
+    * "绕过 setHealth 直接 set 数据条目回血"的通道（镜像回写型 Boss），在写入瞬间拒绝，
+    * 与 tick 级钳制构成"写入点 + tick 末"双层。降向写入（正常掉血/钳制压回）恒放行。
+    * 反射直写 {@code DataItem.value} 字段的字段级通道不经过 set()，仍由 tick 钳制兜底。
+    */
+   public static boolean isDataLayerRiseBlocked(LivingEntity target, float newHealth) {
+      if (target instanceof net.minecraft.world.entity.player.Player || target.level().isClientSide()) return false;
+      TrackedEntry e = TRACKED_HEALTH.get(target.getUUID());
+      if (e == null || target.level().getGameTime() > e.endTime) return false;
+      // 复查修（P2）：量纲对齐约定 14——容差 = max(0.01, ulp(低点)×4)（同 interceptTolerance 语义；
+      // 不可用 ProbeScales.epsilon[地板 1.0]——小血量目标会漏放 1.0hp 内的钳制压回写）
+      float tol = Math.max(0.01F, Math.ulp(e.health) * 4.0F);
+      return newHealth > e.health + tol;
    }
 
    /** 记录觉醒易伤到期时间（内存 + NBT 双源，与禁疗标记同理） */

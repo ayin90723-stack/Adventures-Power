@@ -68,6 +68,8 @@ public class ModConfig {
     public static final BooleanValue QUENCH_LAYER4_ENABLED;
     public static final IntValue QUENCH_GRAPH_BUDGET;
     // --- 淬魂之力·多存储合成血（v1.4.3，docs/gate-oracle-proposal.md §5/§11-4） ---
+    /** v1.4.8 JVM 只读字节码快照（淬魂分组，默认关）。 */
+    public static final BooleanValue JVM_SNAPSHOT_ENABLED;
     public static final BooleanValue QUENCH_MULTI_STORE_ENABLED;
     // --- GateOracle 存活语义反推（v1.4.3，docs/gate-oracle-proposal.md） ---
     public static final BooleanValue GATE_ORACLE_ENABLED;
@@ -295,8 +297,10 @@ public class ModConfig {
             .define("quench_layer3_enabled", true);
         QUENCH_LAYER4_ENABLED = BUILDER.comment("L4 广义写路径层开关（行为学扫描目标模组类与可达 holder 上的单数值参数方法并验证 getHealth 联动，覆盖加密存血/双字段校验/不变量维护型 Boss；探针有界扰动，详见设计文档）")
             .define("quench_layer4_enabled", true);
-        QUENCH_GRAPH_BUDGET = BUILDER.comment("L2 对象图扫描预算（访问对象数上限）：geckolib 动画类实体可达图可达数百万对象，超预算立即中止并封存该类（防数秒卡顿）；实测泽林变体 597 万对象单次全图 4.6 秒（靠 DataItem 槽插针覆盖，封存无碍）；灵梦变体 200001 对象卡线（v1.4.2 回归：20 万默认值差 1 个对象被中止→落 L4 触发其 setCombatProgress 反作弊 chaotic——30 万默认覆盖）。调大=覆盖更广但可能卡顿")
+        QUENCH_GRAPH_BUDGET = BUILDER.comment("L2 对象图扫描预算（访问对象数上限）：geckolib 动画类实体可达图可达数百万对象，超预算立即中止并封存该类（防数秒卡顿）；实测泽林变体 597 万对象单次全图 4.6 秒（靠 DataItem 槽插针覆盖，封存无碍）；灵梦变体 200001 对象卡线（v1.4.2 回归：20 万默认值差 1 个对象被中止→落 L4 触发其 setCombatProgress 反作弊 chaotic——30 万默认覆盖）。调大=覆盖更广但可能卡顿。v1.4.8 起 int/long 位打包字段扫描使全图扫描成本因子约 ×2（每对象每个 int/long 字段多一次解码+值闸过滤，普通怪走门禁直通道不受影响），默认 200 万的余量已按此评估")
             .defineInRange("quench_graph_budget", 2000000, 10000, Integer.MAX_VALUE);
+        JVM_SNAPSHOT_ENABLED = BUILDER.comment("JVM 只读字节码快照（v1.4.8 实测通过后默认开）：开启后 GateAnalyzer 的覆写/存储情报分析改用「运行时真身」字节码（经 Mixin 与（若存在）对方 javaagent 全部 transformation 处理后的最终类形态，类路径读不到的注入钩子由此可见）。实现=运行时自附加（Unsafe 解禁 ALLOW_ATTACH_SELF + attach 自身 PID，无需 -javaagent 启动参数）+ dump-only transformer（对一切类返回 null 零修改）+ retransform 快照，只对 mod 层类启用（MC 核心类 retransform 会触发第三方 agent transformer 重跑叠层，排除之）。失败自动降级类路径读（现状行为），日志前缀 [JVM快照]")
+            .define("jvm_snapshot_enabled", true);
         QUENCH_MULTI_STORE_ENABLED = BUILDER.comment("多存储合成血支持：getHealth 覆写为多存储之和的 Boss（真血+护盾/身体+护甲双分量形态），检测单分量写入后合成读数不到位 → 差值推断第二分量 → 分配双写（处决双清零/磨血次分量优先承伤）+ 下 tick 复验。关闭时回落 v1.4.2 行为（总读数验证仍生效，失败即作废缓存走既有梯）")
             .define("quench_multi_store_enabled", true);
         BUILDER.pop();

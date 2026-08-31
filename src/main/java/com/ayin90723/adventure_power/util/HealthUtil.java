@@ -135,9 +135,8 @@ public class HealthUtil {
      * @return 真实血量
      */
     public static float getEffectiveHealth(LivingEntity target) {
-        float direct = getHealthDirect(target);
-        float reported = target.getHealth();
-        return Math.abs(reported - direct) > 1.0F ? reported : direct;
+        // v1.4.8 收口至 TrustedRead（读数对账统一入口，行为等价：架空取方法读）
+        return TrustedRead.value(target);
     }
 
     /**
@@ -454,14 +453,41 @@ public class HealthUtil {
     /** 真血字段写入通路：字段 + 从实体根对象到字段宿主的步骤链。 */
     private static final class WritePath {
         final java.lang.reflect.Field field;
-        final java.util.List<Object> steps; // Field=对象字段；其余=Map key / Collection index（按当前节点类型解释）
+        final java.util.List<Object> steps; // Field=对象字段；其余=Map key / Collection index（按当前节点类型解释）；实体 key 以弱引用存放（见构造器）
         /** true=反向存储（承伤累计：血量下降=字段值上升），写值需换算 orig+(reading−targetValue)。 */
         final boolean reverse;
+        /** v1.4.8 位打包存储（int/long 字段存 floatToRawIntBits 位型，读写需 bits 换算；
+         *  只与正向形态组合（位打包反向承伤型无实弹案例，不做），reverse 恒 false。 */
+        final boolean bitPacked;
+        /** v1.4.8-E2.5 刻度倍率：字段值 = 读数 × scale（内部轨放大存储型，如 ×10）。
+         *  值语义形态恒 1.0；位打包形态按探测命中的倍率记录，写入/校验统一换算。 */
+        final float scale;
 
         WritePath(java.lang.reflect.Field field, java.util.List<Object> steps, boolean reverse) {
+            this(field, steps, reverse, false, 1.0F);
+        }
+
+        WritePath(java.lang.reflect.Field field, java.util.List<Object> steps, boolean reverse, boolean bitPacked) {
+            this(field, steps, reverse, bitPacked, 1.0F);
+        }
+
+        WritePath(java.lang.reflect.Field field, java.util.List<Object> steps, boolean reverse,
+                  boolean bitPacked, float scale) {
             this.field = field;
-            this.steps = steps;
             this.reverse = reverse;
+            this.bitPacked = bitPacked;
+            this.scale = scale;
+            // 复查修（P2，v1.4.8）：steps 中的实体 Map key 必须弱引用化——CAP_WRITE_CACHE 是
+            // WeakHashMap<实体, WritePath>，若 value（steps）强引用实体 key，key 恒可达，
+            // 弱引用永不过期 → 每次命中此类通路泄漏一整棵实体对象图（static WeakHashMap
+            // <实体, 值对象> 藏血型的 key 必然是 target 自身，正是该形态）。
+            // 弱引用化后 key 过期时 resolvePath 解包得 null → 通路失效 → 缓存作废重探（行为正确）
+            java.util.List<Object> safe = new java.util.ArrayList<>(steps.size());
+            for (Object step : steps) {
+                safe.add(step instanceof net.minecraft.world.entity.Entity
+                    ? new java.lang.ref.WeakReference<>(step) : step);
+            }
+            this.steps = safe;
         }
     }
 
@@ -475,10 +501,13 @@ public class HealthUtil {
     public record GraphWritePath(Field field, java.util.List<Object> steps, boolean reverse) {
     }
 
-    /** v1.4.3 多存储：抓当前实例单分量插针缓存通路快照（无缓存返回 null）。 */
+    /** v1.4.3 多存储：抓当前实例单分量插针缓存通路快照（无缓存返回 null）。
+     *  v1.4.8：位打包通路不外借——MultiStoreWriter 的合成读数语义按值运算，对位打包
+     *  字段做值换算会写错位型；位打包通路留在单分量缓存快路径内自洽读写。 */
     public static GraphWritePath getCachedGraphPath(LivingEntity target) {
         WritePath p = CAP_WRITE_CACHE.get(target);
-        return p == null ? null : new GraphWritePath(p.field, new java.util.ArrayList<>(p.steps), p.reverse);
+        if (p == null || p.bitPacked) return null;
+        return new GraphWritePath(p.field, new java.util.ArrayList<>(p.steps), p.reverse);
     }
 
     /** v1.4.3 多存储：丢弃当前实例单分量插针缓存（双分量通路接管 / 单分量缓存不可信时调用）。 */
@@ -530,11 +559,15 @@ public class HealthUtil {
         }
     }
 
-    /** 审查修 P3#4：路径链是否含实体 key（Map key 为实体时缓存的 WritePath 会强引用实体，弱 key 失效）。 */
-    private static boolean pathHasEntityKey(java.util.List<Object> steps) {
+    /** 审查修 P3#4：路径链是否含实体 key（Map key 为实体时缓存的 WritePath 会强引用实体，弱 key 失效）。
+     *  复查修（P2，v1.4.8）：曾放宽"key == target 可缓存"——错误，WeakHashMap 的 value
+     *  （steps）强引用 key 实体使其恒可达，弱引用永不过期，条目永不回收（每命中泄漏一整棵
+     *  实体图）。现 WritePath 构造器统一把实体 key 弱引用化，本方法恢复严格语义作防御性
+     *  断言（正常流程构造器已处理，不应再见到裸实体 key）。 */
+    private static boolean pathHasEntityKey(java.util.List<Object> steps, LivingEntity target) {
         for (Object s : steps) {
             if (s instanceof java.lang.reflect.Field) continue; // Field 步骤无泄漏风险
-            if (s instanceof Entity || s instanceof LivingEntity) return true;
+            if (s instanceof LivingEntity || s instanceof Entity) return true;
         }
         return false;
     }
@@ -663,6 +696,13 @@ public class HealthUtil {
     private static final int GRAPH_DEPTH_LIMIT = 10;
 
     /**
+     * E1 根域静态 Map 条目数上限（实机修复 v1.4.8）：血量表条目 = 活跃 Boss 实例数（个位~
+     * 百位级），超此上限的 static Map 必然是注册表/弹幕表/缓存巨表——递归它会吃掉主图
+     * 扫描预算（灵梦实测 200 万级巨表把全图撑到预算线封存）。
+     */
+    private static final int STATIC_MAP_ENTRY_LIMIT = 4096;
+
+    /**
      * 对象图扫描预算中止标记值（v1.4.2 实测修复）：probeGraph 返回 -2 表示
      * 访问对象数超过预算、扫描中止——与 -1（完整扫描未命中）语义区分，
      * 递归调用链需立即传播中止（继续扫无意义）。
@@ -707,13 +747,19 @@ public class HealthUtil {
                 // 子代理审查修：反向 WritePath 的门禁参照必须用 maxHealth−reading（承伤累计
                 // 字段值≈max−reading），用正向参照会恒失效→每击重探+级联风暴
                 Class<?> cft = cached.field.getType();
-                float cur = (cft == Object.class || cft == Float.class)
+                // v1.4.8：位打包通路——字段值按位型读取解码后与参照对账（值语义读 int/long
+                // 会把位型当数值比较，恒失效 → 每击重探风暴）；E2.5（复查补）：对账与写值必须
+                // 消费 cached.scale——解码值在字段刻度（读数×scale），1:1 对账在 scale≠1 时恒
+                // 失效 → 每刀缓存作废+级联漂移重探风暴
+                float cur = cached.bitPacked
+                    ? Float.intBitsToFloat((int) bitsGet(owner, cached.field))
+                    : (cft == Object.class || cft == Float.class)
                     ? ((Number) cached.field.get(owner)).floatValue()
                     : cached.field.getFloat(owner);
                 float ref = cached.reverse
                     ? target.getMaxHealth() - target.getHealth()
-                    : target.getHealth();
-                if (Math.abs(cur - ref) > ProbeScales.gateTolerance(ref)) {
+                    : target.getHealth() * cached.scale;
+                if (Math.abs(cur - ref) > ProbeScales.gateTolerance(Math.abs(ref))) {
                     CAP_WRITE_CACHE.remove(target);
                     BloodWriteEngine.onPositiveCacheDrift();
                     DebugLog.probe("[插针] 缓存路径失效（字段值 {} ≠ 真血读数 {}），回退全图重探测", cur, ref);
@@ -723,7 +769,11 @@ public class HealthUtil {
                 // 反向语义 max−reading 后，写值沿用 ref 变成 away+(away−targetValue) 双倍偏移，
                 // 泽林实测"一刀残两刀杀"）。反向语义正确公式：away_new = away + (reading − targetValue)。
                 float reading = target.getHealth();
-                if (cft == Object.class || cft == Float.class) {
+                if (cached.bitPacked) {
+                    // 位打包恒正向形态（probeBitsField 只产正向），写目标值位型
+                    // （E2.5 复查补：按 scale 换算到字段刻度，漏乘会写错方向/量纲）
+                    bitsSet(owner, cached.field, Float.floatToRawIntBits(targetValue * cached.scale) & 0xFFFFFFFFL);
+                } else if (cft == Object.class || cft == Float.class) {
                     float writeVal = cached.reverse ? cur + (reading - targetValue) : targetValue;
                     cached.field.set(owner, writeVal);
                 } else if (cached.reverse) {
@@ -756,6 +806,46 @@ public class HealthUtil {
     }
 
     /**
+     * v1.4.8 存储情报定向插针：GateAnalyzer ASM 分析（getHealth 覆写读链的
+     * {@code intBitsToFloat} 通道消费）产出的<b>位打包</b>字段定向探测——命中直接写目标值
+     * 位型并缓存 WritePath(bitPacked)，跳过全图扫描。只处理位打包字段（值语义 float 字段
+     * 的盲扫本就覆盖，情报无增益）；宿主仅限 target 实例 / null 静态两种（容器条目型宿主
+     * 情报无法表达，归全图 E1/E2）。探测判据与 probeBitsField 完全一致（联动验证闭环）。
+     */
+    private static boolean probeStorageIntel(LivingEntity target, float targetValue) {
+        try {
+            com.ayin90723.adventure_power.util.probe.gate.GateAnalyzer.HealthStorageIntel intel =
+                com.ayin90723.adventure_power.util.probe.gate.GateAnalyzer.analyzeHealthStorage(target.getClass());
+            if (intel.fields().isEmpty()) return false;
+            float currentHealth = target.getHealth();
+            float eps = ProbeScales.epsilon(currentHealth);
+            float gateTol = ProbeScales.gateTolerance(currentHealth);
+            float verifyTh = ProbeScales.verifyThreshold(eps);
+            float driftTol = ProbeScales.driftTolerance(eps);
+            for (com.ayin90723.adventure_power.util.probe.gate.GateAnalyzer.StorageField sf : intel.fields()) {
+                if (!sf.bitPacked()) continue;
+                java.lang.reflect.Field f;
+                try {
+                    f = sf.declaring().getDeclaredField(sf.name());
+                    f.setAccessible(true);
+                } catch (NoSuchFieldException e) {
+                    continue;
+                }
+                Object owner = sf.staticField() ? null : target;
+                float hit = probeBitsField(target, owner, f, targetValue, new java.util.ArrayList<>(),
+                    currentHealth, eps, gateTol, verifyTh, driftTol);
+                if (hit >= 0.0F) {
+                    DebugLog.probe("[插针] 存储情报定向命中(位打包): {}#{}", sf.declaring().getSimpleName(), sf.name());
+                    return true;
+                }
+            }
+        } catch (Throwable t) {
+            DebugLog.probe("[插针] 存储情报探测异常: {}", t.toString());
+        }
+        return false;
+    }
+
+    /**
      * 插针全量探测：门禁（DataItem 联动检查）→ 通用对象图插针。
      * 与 {@link #probeCapabilityHealth} 的区别：不做缓存读取，仅用于缓存缺失/失效后的
      * 首次探测——命中后自行写入并重建缓存。
@@ -785,6 +875,15 @@ public class HealthUtil {
         // v1.4.3 多存储缓存快路径（先于槽插针：双分量通路已解明的实例零探测直写）
         if (MultiStoreWriter.strikeCached(target, targetValue)) {
             return LayerOutcome.PROBE_HIT;
+        }
+        // v1.4.8 存储情报定向插针：GateAnalyzer 对 getHealth 覆写读链的 ASM 分析产出
+        // 位打包字段情报（intBitsToFloat 通道消费），先于全图盲扫定向探测——宿主为
+        // target 实例字段 / null 静态字段的位打包直存型在此终结；容器条目型（宿主在
+        // static Map value，情报表达不了宿主）仍由后续全图 E1/E2 覆盖
+        if (probeStorageIntel(target, targetValue)) {
+            if (verifyCompositeAfterSingleWrite(target, targetValue, readingBefore)) {
+                return LayerOutcome.PROBE_HIT;
+            }
         }
         // DataItem 自定义槽插针（v1.4.2，泽林变体实证）：真血在 SynchedEntityData 自定义
         // Float 槽（如泽林 EXALTED_NORMAL−EXALTED_AWAY 双槽差、承伤累计反向语义）时，
@@ -922,7 +1021,10 @@ public class HealthUtil {
         try {
             java.util.Set<Object> visited =
                 java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
-            float hit = probeGraph(target, target, 0, targetValue, visited, new java.util.ArrayList<>(), relaxed, refOverride);
+            // v1.4.8 E1：静态字段 per-run 去重表（同一 static 存储在多宿主对象上只扰动一次）
+            java.util.Set<java.lang.reflect.Field> staticSeen =
+                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+            float hit = probeGraph(target, target, 0, targetValue, visited, new java.util.ArrayList<>(), relaxed, refOverride, staticSeen);
             if (hit >= 0.0F) {
                 DebugLog.probe("[插针] 命中 {}: {} → {}", target, targetValue);
                 return true;
@@ -942,6 +1044,104 @@ public class HealthUtil {
     }
 
     /**
+     * v1.4.8 位打包存储的候选字段类型：int/long（含装箱）。
+     * <p>
+     * 位打包形态 = 字段存 {@link Float#floatToRawIntBits} 位型（常见于 static WeakHashMap
+     * 值对象或独立数值字段），对"按 float 类型过滤 + 按值语义写入"的探测体系双重免疫
+     * （类型不符扫不到；值语义写 int/long 会写出位型乱码）。读写统一按"低 32 位位型"
+     * 语义：解码 {@code Float.intBitsToFloat((int) bits)}，编码 {@code floatToRawIntBits}
+     * 后按字段位宽落盘——对无符号扩展（{@code & 0xFFFFFFFFL}）与符号扩展两种存储惯例
+     * 均正确（读方只取低 32 位）。
+     */
+    private static boolean isBitsTyped(java.lang.reflect.Field f) {
+        Class<?> t = f.getType();
+        return t == int.class || t == long.class || t == Integer.class || t == Long.class;
+    }
+
+    /** 读位打包字段当前位型（低 32 位语义统一装 long；类型不符抛异常由调用方捕获）。 */
+    private static long bitsGet(Object obj, java.lang.reflect.Field f) throws IllegalAccessException {
+        if (f.getType() == int.class) return f.getInt(obj);
+        if (f.getType() == long.class) return f.getLong(obj);
+        Object o = f.get(obj);
+        if (o instanceof Integer i) return i;
+        if (o instanceof Long l) return l;
+        throw new IllegalStateException("not a bits-typed field: " + f);
+    }
+
+    /** 写位打包字段位型（int 位宽取低 32 位；装箱类型走 get/set）。 */
+    private static void bitsSet(Object obj, java.lang.reflect.Field f, long bits) throws IllegalAccessException {
+        if (f.getType() == int.class) {
+            f.setInt(obj, (int) bits);
+        } else if (f.getType() == long.class) {
+            f.setLong(obj, bits);
+        } else if (f.getType() == Long.class) {
+            f.set(obj, Long.valueOf(bits));
+        } else {
+            f.set(obj, Integer.valueOf((int) bits));
+        }
+    }
+
+    /**
+     * v1.4.8 位打包形态探测（probeGraph 第四形态；E2.5 增倍率刻度）：解码值闸（正向，
+     * 解码值 ≈ 当前读数 × scale，scale ∈ 常见刻度倍率集）→ 位型探针扰动（读数下降方向，
+     * 扰动量按 scale 换算）→ getHealth 联动验证 → finally 按快照位型还原 → 命中按
+     * targetValue × scale 写入位型并缓存 WritePath(bitPacked, scale)。
+     * <p>
+     * E2.5 动机：内部轨放大存储型 Boss（getHealth 覆写返回 字段/scale——如 ×10 刻度），
+     * 1:1 值闸恒不匹配（解码值恒为读数的 scale 倍）→ 探测失明。倍率集 {1, 10, 0.1}
+     * 覆盖常见内部放大/外部缩小刻度；联动验证（读数变化量与指向）按 scale 换算后判据
+     * 与 1:1 完全同族，误报面不变。
+     * <p>
+     * 探测纪律同栈还原——位型还原写回快照原值，无残留。
+     *
+     * @return 命中时返回解码原值（供调用方作为命中返回值），未命中返回 -1
+     */
+    private static final float[] BIT_SCALE_CANDIDATES = {1.0F, 10.0F, 0.1F};
+
+    private static float probeBitsField(LivingEntity target, Object obj, java.lang.reflect.Field f,
+                                        float targetValue, java.util.List<Object> path,
+                                        float currentHealth, float eps, float gateTol,
+                                        float verifyTh, float driftTol) {
+        try {
+            f.setAccessible(true);
+            long origBits = bitsGet(obj, f);
+            float decoded = Float.intBitsToFloat((int) origBits);
+            if (!Float.isFinite(decoded) || decoded <= 0.0F) return -1.0F;
+            // E2.5 倍率值闸+探针（复查修 P3：候选不短路——低血量段 gateTol 绝对下限主导时
+            // scale=1 会先误配真倍率字段，探针失败 continue 下一候选可恢复，失败方向本就安全）
+            for (float scale : BIT_SCALE_CANDIDATES) {
+                float refScaled = currentHealth * scale;
+                if (refScaled <= 0.0F || Math.abs(decoded - refScaled) > gateTol * scale) continue;
+                // 探针扰动按字段刻度换算：读数降 eps ⇔ 字段（位型数值）降 eps×scale
+                float probeStep = eps * scale;
+                long probeBits = Float.floatToRawIntBits(decoded - probeStep) & 0xFFFFFFFFL;
+                float before = target.getHealth();
+                bitsSet(obj, f, probeBits);
+                float after;
+                try {
+                    after = target.getHealth();
+                } finally {
+                    bitsSet(obj, f, origBits);
+                }
+                if (Math.abs(after - before) < verifyTh) continue;
+                // 指向判据在读数刻度上与 1:1 同款：after ≈ reading − eps
+                if (Math.abs(after - (currentHealth - eps)) > driftTol) continue;
+                bitsSet(obj, f, Float.floatToRawIntBits(targetValue * scale) & 0xFFFFFFFFL);
+                if (!pathHasEntityKey(path, target)) {
+                    CAP_WRITE_CACHE.put(target, new WritePath(f, new java.util.ArrayList<>(path), false, true, scale));
+                }
+                // 复查修 P2：日志宿主用字段声明类（静态字段探测时 obj 为 null，obj.getClass() NPE
+                // 会吞掉已落盘的命中——写入与缓存在本行之前已执行）
+                DebugLog.probe("[插针] 字段命中(形态=位打包, 刻度=x{}): {}#{} 解码值={} → 读数目标 {}",
+                    scale, f.getDeclaringClass().getSimpleName(), f.getName(), decoded, targetValue);
+                return decoded;
+            }
+        } catch (Exception ignored) {
+        }
+        return -1.0F;
+    }
+
+    /**
      * 沿路径链从实体根对象解析宿主：steps 中 Field=对象字段，其余元素按当前节点
      * 类型解释为 Map key（节点是 Map）或 Collection index（节点是 Collection）。
      * 路径失效返回 null。
@@ -950,6 +1150,12 @@ public class HealthUtil {
         if (cur == null) return null;
         for (; i < steps.size(); i++) {
             Object step = steps.get(i);
+            // 复查修（P2，v1.4.8）：WritePath.steps 中弱引用化的实体 key 在此解包；
+            // 引用已过期（实体不可达）→ 通路失效返回 null → 缓存作废重探
+            if (step instanceof java.lang.ref.WeakReference<?> wr) {
+                step = wr.get();
+                if (step == null) return null;
+            }
             if (step instanceof java.lang.reflect.Field f) {
                 try {
                     cur = f.get(cur);
@@ -998,7 +1204,7 @@ public class HealthUtil {
      */
     private static float probeGraph(LivingEntity target, Object obj, int depth, float targetValue,
                                     java.util.Set<Object> visited, java.util.List<Object> path, boolean relaxed,
-                                    Float refOverride) {
+                                    Float refOverride, java.util.Set<java.lang.reflect.Field> staticSeen) {
         if (obj == null || depth > GRAPH_DEPTH_LIMIT) return -1.0F;
         if (obj instanceof Class<?> || obj instanceof Thread || obj instanceof ClassLoader) return -1.0F;
         // 通用性能边界：世界/注册表等全局巨对象（不含实体血量，跳过防对象图爆炸）
@@ -1019,11 +1225,22 @@ public class HealthUtil {
         float verifyTh = ProbeScales.verifyThreshold(eps);
         float driftTol = ProbeScales.driftTolerance(eps);
         Class<?> cls = obj.getClass();
-        // ① float 字段插针
+        // ① 数值字段插针（float 正/反向形态 + 位打包形态；v1.4.8 E1：静态数值字段开放进视野）
         for (Class<?> c = cls; c != null && c != Object.class; c = c.getSuperclass()) {
             for (java.lang.reflect.Field f : c.getDeclaredFields()) {
-                if (f.getType() != float.class && f.getType() != Float.class) continue;
-                if (java.lang.reflect.Modifier.isStatic(f.getModifiers())) continue;
+                boolean bitsTyped = isBitsTyped(f);
+                if (!bitsTyped && f.getType() != float.class && f.getType() != Float.class) continue;
+                // E1：静态数值字段进视野（static float 直存 / static 位打包——常见于
+                // static WeakHashMap 值对象通路）；per-run 去重防多宿主重复扰动同一段
+                // 静态存储（visited 按 obj 记录对 static 字段无效），值闸仍是主防线
+                if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) && !staticSeen.add(f)) continue;
+                if (bitsTyped) {
+                    // v1.4.8 E2：位打包形态（int/long 位型存血）——独立探测路径
+                    float bitsHit = probeBitsField(target, obj, f, targetValue, path,
+                        currentHealth, eps, gateTol, verifyTh, driftTol);
+                    if (bitsHit >= 0.0F) return bitsHit;
+                    continue;
+                }
                 try {
                     f.setAccessible(true);
                     // 审查修 P3#3：装箱 Float 字段走 get/set 装箱路径（getFloat/setFloat 对
@@ -1078,7 +1295,8 @@ public class HealthUtil {
                         // 审查修 P3#4：path 中含实体 key（如 Boss 威胁表 Map<Player,Float>）时
                         // 不缓存——WritePath 作为 WeakHashMap 的 value 强引用实体 key，弱 key
                         // 永远可达（登出/卸载玩家实体泄漏）。不缓存仅损失快路径，功能正确
-                        if (!pathHasEntityKey(path)) {
+                        // （v1.4.8 放宽：key == target 自身时允许，见 pathHasEntityKey 注释）
+                        if (!pathHasEntityKey(path, target)) {
                             CAP_WRITE_CACHE.put(target, new WritePath(f, new java.util.ArrayList<>(path), isReverse));
                         }
                         DebugLog.probe("[插针] 字段命中(形态={}): {}#{} 原值={} → {}",
@@ -1090,9 +1308,19 @@ public class HealthUtil {
             }
         }
         // ② 递归全部引用字段（含 Map/Collection/数组/自定义对象）
+        // v1.4.8 E1：静态 Map 仅根域（depth==0，即目标类链自身声明的 static 容器）开放递归
+        // ——static WeakHashMap<实体, 值对象> 藏血型的通路入口；子层不开放（防沿静态引用
+        // 拉出全局注册表级巨图，根域误入的巨容器仍有 visited 预算 + GRAPH_OVERWHELMED 兜底）。
+        // static Collection/自定义对象引用不开放：血量表的自然形态是 Map（key 定位实体），
+        // 其余形态的静态引用爆炸风险远大于命中收益。
+        // 实机修复（v1.4.8）：根域 static Map 另加条目数上限——血量表条目=活跃 Boss 实例数
+        // （个位~百位级），超上限的必然是注册表/弹幕表/缓存巨表（灵梦实测：类链静态巨表把
+        // 对象图从 20 万级撑到 200 万+ 卡预算线，全图扫描被封存退化）
         for (Class<?> c = cls; c != null && c != Object.class; c = c.getSuperclass()) {
             for (java.lang.reflect.Field f : c.getDeclaredFields()) {
-                if (java.lang.reflect.Modifier.isStatic(f.getModifiers())) continue;
+                boolean fStatic = java.lang.reflect.Modifier.isStatic(f.getModifiers());
+                if (fStatic && (depth > 0 || !Map.class.isAssignableFrom(f.getType()))) continue;
+                if (fStatic && !staticSeen.add(f)) continue;
                 Class<?> ft = f.getType();
                 if (ft.isPrimitive() || ft == String.class || ft.isEnum() || ft.isArray()) continue;
                 try {
@@ -1100,10 +1328,12 @@ public class HealthUtil {
                     Object child = f.get(obj);
                     if (child == null) continue;
                     if (child instanceof java.util.Map<?, ?> m) {
+                        // 实机修复（v1.4.8）：根域 static Map 条目数闸——巨表非血量表，跳过
+                        if (fStatic && m.size() > STATIC_MAP_ENTRY_LIMIT) continue;
                         for (java.util.Map.Entry<?, ?> e : m.entrySet()) {
                             path.add(f);
                             path.add(e.getKey());
-                            float r = probeGraph(target, e.getValue(), depth + 1, targetValue, visited, path, relaxed, refOverride);
+                            float r = probeGraph(target, e.getValue(), depth + 1, targetValue, visited, path, relaxed, refOverride, staticSeen);
                             path.remove(path.size() - 1);
                             path.remove(path.size() - 1);
                             if (r >= 0.0F || r == GRAPH_ABORTED) return r;
@@ -1113,7 +1343,7 @@ public class HealthUtil {
                         for (Object v : col) {
                             path.add(f);
                             path.add(idx);
-                            float r = probeGraph(target, v, depth + 1, targetValue, visited, path, relaxed, refOverride);
+                            float r = probeGraph(target, v, depth + 1, targetValue, visited, path, relaxed, refOverride, staticSeen);
                             path.remove(path.size() - 1);
                             path.remove(path.size() - 1);
                             if (r >= 0.0F || r == GRAPH_ABORTED) return r;
@@ -1121,7 +1351,7 @@ public class HealthUtil {
                         }
                     } else if (!child.getClass().isPrimitive()) {
                         path.add(f);
-                        float r = probeGraph(target, child, depth + 1, targetValue, visited, path, relaxed, refOverride);
+                        float r = probeGraph(target, child, depth + 1, targetValue, visited, path, relaxed, refOverride, staticSeen);
                         path.remove(path.size() - 1);
                         if (r >= 0.0F || r == GRAPH_ABORTED) return r;
                     }
