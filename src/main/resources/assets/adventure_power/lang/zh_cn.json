@@ -130,6 +130,8 @@
   "command.adventure_power.already_adventurer": "该玩家已是冒险者",
   "command.adventure_power.activated": "已补发冒险的开始并激活冒险者身份",
   "command.adventure_power.activate_failed": "激活失败：%s 未能获得冒险的开始（背包异常）",
+  "command.adventure_power.die_defenses_suspended": "真实血量/拒绝篡改/死亡抗拒已临时关闭以执行 /ap die。若死亡流程被中断且未能重生，这三项能力将保持关闭——可在 P 面板手动恢复。",
+  "command.adventure_power.die_intercepted": "死亡被其他模组的事件拦截，逃生未完成：能力（与血量，若需要）已恢复。请摘除拦截死亡的饰品后重试。",
   "screen.adventure_power.value_label": "当前数值：",
   "screen.adventure_power.base_value_label": "基础数值：",
   "screen.adventure_power.value_fixed": "当前数值：固定效果（无成长）",
@@ -225,3 +227,4 @@
   "hud.adventure_power.dir.up_straight": "正上",
   "hud.adventure_power.dir.down_straight": "正下"
 }
+

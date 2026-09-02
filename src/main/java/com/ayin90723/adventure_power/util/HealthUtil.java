@@ -195,6 +195,173 @@ public class HealthUtil {
         return DATA_HEALTH_ID;
     }
 
+    // ==================== v1.4.9：DataItem 定位 + 同步兜底直标 + repairHealth 聚合（第二部分） ====================
+
+    /** DataItem 定位结果：accessor 静态字段实例 + itemsById 条目（v1.4.9 自 GateOracle 下沉）。 */
+    public record ResolvedDataItem(EntityDataAccessor<?> accessor, Object item) {
+    }
+
+    /**
+     * 按 accessor 静态字段名定位目标实体的 DataItem 条目（v1.4.9 自 GateOracle 私有逻辑下沉为公共方法）。
+     * <p>
+     * 沿 target 类链按名找 static EntityDataAccessor 字段（hidden class 场景必须：hidden 副本的
+     * 静态 accessor 是独立初始化的新 id，原始类的 accessor 与 hidden 实例的 itemsById 对不上），
+     * 再经 itemsById 拿条目本体。找不到 / 反射失败返回 null。
+     *
+     * @param target             目标实体
+     * @param accessorFieldName accessor 静态字段名（StateCandidate.name）
+     */
+    public static ResolvedDataItem resolveDataItem(LivingEntity target, String accessorFieldName) {
+        try {
+            // 审查修 P3-2（子代理审查）：itemsById 与类链循环无关，循环外取一次（原每超类层重复反射）
+            Map<Integer, Object> items = getDataItems(target);
+            if (items == null) return null;
+            for (Class<?> c = target.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+                try {
+                    Field f = c.getDeclaredField(accessorFieldName);
+                    if (!Modifier.isStatic(f.getModifiers())) continue;
+                    if (!EntityDataAccessor.class.isAssignableFrom(f.getType())) continue;
+                    f.setAccessible(true);
+                    if (!(f.get(null) instanceof EntityDataAccessor<?> accessor)) continue;
+                    Object item = items.get(accessor.getId());
+                    if (item != null) return new ResolvedDataItem(accessor, item);
+                } catch (NoSuchFieldException ignored) {
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    /** 定位原版血量槽（DATA_HEALTH_ID）的 DataItem；accessor 不可用返回 null。 */
+    private static Object resolveHealthDataItem(LivingEntity target) {
+        EntityDataAccessor<Float> id = getDataHealthId();
+        if (id == null) return null;
+        Map<Integer, Object> items = getDataItems(target);
+        if (items == null) return null;
+        return items.get(id.getId());
+    }
+
+    /** 读原版血量 DataItem 的 dirty 标记（条目是否在待同步队列；条目缺失/反射不可用返回 false）。 */
+    private static boolean isHealthDataItemDirty(LivingEntity target) {
+        Object item = resolveHealthDataItem(target);
+        if (item == null || DATA_ITEM_DIRTY_FIELD == null) return false;
+        try {
+            return DATA_ITEM_DIRTY_FIELD.get(item) instanceof Boolean b && b;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** "同步降级字段直标"日志去重表（per-entity 一次；弱 key 防泄漏）。 */
+    private static final java.util.Map<LivingEntity, Boolean> DIRTY_MARK_SEEN =
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
+    /** 同步兜底失败告警的有限抑制窗标记（P3-4：60 秒窗内只报一次——瞬态失败不永久静默）。 */
+    private static volatile long dirtyMarkFailAt = 0L;
+
+    /**
+     * 内部修复同步兜底：dirty 三件套直标，不经过 {@code SynchedEntityData.set} 方法
+     * （v1.4.9 第二部分 2.2）。
+     * <p>
+     * <b>三件构成</b>（复查修 P1-1：全部字段直写，零方法反射——DataItem.setDirty/
+     * isDirty 方法生产环境为 SRG 名，dev 名查找必然失败）：
+     * <ol>
+     *   <li><b>值落地</b>（复查修 P2-1）：先字段直写 {@code DataItem.value = value}——
+     *       玩家路径的写入通道 setHealthDirect 走 {@code data.set}（对手 HEAD cancel 时
+     *       修复值本身未落地，只标 dirty 会把攻击者的旧值推给客户端）；字段写天然绕过
+     *       set 方法的一切拦截（自家 RejectHealthManipDataMixin 亦不拦字段写）。非玩家
+     *       路径值早已落地，重写同值幂等无害。</li>
+     *   <li><b>item 级 dirty</b>：{@code DataItem.dirty = true}（f_135392_ 字段直标）。</li>
+     *   <li><b>整体短路标记</b>：{@code entityData.isDirty = true}（f_135348_ 字段直标
+     *       ——本体无公共 setter，javap 核实）。</li>
+     * </ol>
+     * 三者齐备后原版同步轨道（{@code SynchedEntityData.tick} → {@code ServerEntity} →
+     * {@code ClientboundSetEntityDataPacket}）自动把新值推给客户端。不调
+     * {@code onSyncedDataUpdated}（服务端无需本地回调）。
+     *
+     * @param value 修复目标血量值（三件套第一步的字段直写用——见 P2-1 修复说明）
+     * @return true 表示直标完成且 DataItem.dirty 读回验证通过
+     */
+    public static boolean markHealthDataItemDirty(LivingEntity entity, float value) {
+        Object item = resolveHealthDataItem(entity);
+        if (item == null) return false;
+        // 审查修 P2-3：DATA_ITEM_VALUE_FIELD 反射半失败（其余字段可用）时值落地步骤被跳过，
+        // 只标 dirty 会让客户端收到攻击者旧值——"三件套缺一不可"，直接返回失败归入告警
+        if (DATA_ITEM_VALUE_FIELD == null) {
+            warnDirtyMarkFail("DATA_ITEM_VALUE_FIELD 反射不可用，值落地步骤跳过");
+            return false;
+        }
+        try {
+            // ① 值落地：DataItem.value 字段直写（绕过 set 拦截——P2-1）
+            DATA_ITEM_VALUE_FIELD.set(item, value);
+            // ② item 级 dirty：字段直标（f_135392_——P1-1：方法 setDirty 生产 SRG 名不可达）
+            if (DATA_ITEM_DIRTY_FIELD != null) {
+                DATA_ITEM_DIRTY_FIELD.setBoolean(item, true);
+            }
+            // ③ 整体短路标记：字段直标（f_135348_，唯一新增反射字段）
+            if (SYNCHED_DATA_IS_DIRTY_FIELD != null) {
+                SYNCHED_DATA_IS_DIRTY_FIELD.set(entity.getEntityData(), true);
+            }
+            // 读回验证（item 级；整体标记无读通道外的验证手段，写字段成功即视为生效）
+            return DATA_ITEM_DIRTY_FIELD != null && DATA_ITEM_DIRTY_FIELD.get(item) instanceof Boolean b && b;
+        } catch (Exception e) {
+            warnDirtyMarkFail(e.toString());
+            return false;
+        }
+    }
+
+    /** dirty 直标失败告警（P3-4 有限抑制窗：60 秒内重复失败只报一次，保留恢复后再报能力）。 */
+    private static void warnDirtyMarkFail(String reason) {
+        long now = System.currentTimeMillis();
+        if (dirtyMarkFailAt == 0L || now - dirtyMarkFailAt >= 60_000L) {
+            dirtyMarkFailAt = now;
+            LOGGER.error("[HealthUtil] dirty 三件套直标失败（60 秒窗内一次性告警）: {}", reason);
+        }
+    }
+
+    /**
+     * 血量修复聚合入口（v1.4.9 自 TrueHealthMixin 提取下沉为公共方法——容器重建链
+     * 第一部分与真血防御共用）。
+     * <p>
+     * 三步：① {@link #setAllHealthLikeRaw} 恢复所有血量条目（写入侧本就直写 DataItem.value）；
+     * ② {@link #clearNegativeFloatDeltas} 清除外部注入的负值 delta；③ 同步链两级——
+     * 先补发 {@code INTERNAL} 标记的 {@code data.set}（NaN 修复场景依赖 INTERNAL 放行双
+     * 拦截层；直写未命中 DataItem 通道时 set 不短路、正常补写+置 dirty），再读
+     * DataItem.isDirty() 检测同步链是否触发：dirty==false（被对手 HEAD cancel 或被原版
+     * equals 短路）→ {@link #markHealthDataItemDirty} 直标兜底。
+     * <p>
+     * 降级判据必须是 dirty 标记而非读值：值早已直写落地，读值无论 set 是否被 cancel
+     * 都返回新值——读值判据永远"成功"，区分不出 set 执行与否；dirty 是 set 内部副作用
+     * （被 HEAD cancel 则全不发生），才是同步链是否走通的直接证据（二轮评审修订）。
+     */
+    public static void repairHealth(LivingEntity player, float health) {
+        setAllHealthLikeRaw(player, health);
+        clearNegativeFloatDeltas(player);
+        EntityDataAccessor<Float> dataHealthId = getDataHealthId();
+        if (dataHealthId == null) {
+            // 反射不可用（accessor 为 null）：跳过同步，与原 TrueHealthMixin 行为一致
+            return;
+        }
+        boolean prev = INTERNAL_HEALTH_WRITE.get();
+        INTERNAL_HEALTH_WRITE.set(true);
+        try {
+            player.getEntityData().set(dataHealthId, health);
+            if (!isHealthDataItemDirty(player)) {
+                if (markHealthDataItemDirty(player, health)) {
+                    if (DIRTY_MARK_SEEN.put(player, Boolean.TRUE) == null) {
+                        DebugLog.trueHealth("[MME-TrueHealth] 同步降级字段直标：data.set 后条目未入待同步队列"
+                            + "（被 cancel 或 equals 短路），值+dirty 直标完成（每实体仅记一次）");
+                    }
+                } else {
+                    warnDirtyMarkFail("repairHealth 同步兜底失败：dirty 直标未生效，客户端血量可能停留旧值");
+                }
+            }
+        } finally {
+            INTERNAL_HEALTH_WRITE.set(prev);
+        }
+    }
+
     /**
      * 直接写入血量字段（绕过 setHealth() 所有覆写，包括硬上限/适应性减伤/免疫帧）。
      * <p>
@@ -269,7 +436,51 @@ public class HealthUtil {
     /** 实体上的 {@code SynchedEntityData} 字段（声明在 Entity 类，SRG f_19804_——getDeclaredField 必须从声明类起查），DataItem 槽插针的路径起点。 */
     private static Field ENTITY_DATA_FIELD;
 
+    /**
+     * {@code SynchedEntityData.isDirty} 字段 (SRG: {@code f_135348_})，
+     * v1.4.9 同步兜底直标用——本体无公共 setter（javap 核实仅有 {@code isDirty()} 读），
+     * 字段反射直标是唯一通道。
+     */
+    private static Field SYNCHED_DATA_IS_DIRTY_FIELD;
+
+    /**
+     * {@code SynchedEntityData$DataItem.dirty} 字段 (SRG: {@code f_135392_})，
+     * v1.4.9 dirty 直标用。复查修 P1-1：DataItem.setDirty/isDirty 方法在生产环境是
+     * SRG 名（m_135401_/m_135406_，tsrg 核实），方法反射按 dev 名查找必然失败——
+     * 改字段双名反射（与 DATA_ITEM_VALUE_FIELD 同款惯例），零方法反射。
+     */
+    private static Field DATA_ITEM_DIRTY_FIELD;
+
     static {
+        try {
+            Class<?> dataItemClass = Class.forName("net.minecraft.network.syncher.SynchedEntityData$DataItem");
+            try {
+                DATA_ITEM_DIRTY_FIELD = dataItemClass.getDeclaredField("f_135392_");
+            } catch (NoSuchFieldException e) {
+                DATA_ITEM_DIRTY_FIELD = dataItemClass.getDeclaredField("dirty");
+            }
+        } catch (ClassNotFoundException | NoSuchFieldException e) {
+            LOGGER.error("[HealthUtil] 无法反射获取 DataItem.dirty 字段，同步兜底直标将不可用", e);
+        }
+        if (DATA_ITEM_DIRTY_FIELD != null) {
+            DATA_ITEM_DIRTY_FIELD.setAccessible(true);
+        }
+    }
+
+    static {
+        try {
+            SYNCHED_DATA_IS_DIRTY_FIELD = SynchedEntityData.class.getDeclaredField("f_135348_");
+        } catch (NoSuchFieldException e) {
+            try {
+                SYNCHED_DATA_IS_DIRTY_FIELD = SynchedEntityData.class.getDeclaredField("isDirty");
+            } catch (NoSuchFieldException ex) {
+                LOGGER.error("[HealthUtil] 无法反射获取 SynchedEntityData.isDirty 字段，同步兜底直标将不可用", ex);
+            }
+        }
+        if (SYNCHED_DATA_IS_DIRTY_FIELD != null) {
+            SYNCHED_DATA_IS_DIRTY_FIELD.setAccessible(true);
+        }
+
         try {
             ENTITY_DATA_ITEMS_FIELD = SynchedEntityData.class.getDeclaredField("f_135345_");
         } catch (NoSuchFieldException e) {

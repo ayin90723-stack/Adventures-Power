@@ -207,6 +207,7 @@ public final class BloodWriteEngine {
             HealthUtil.invalidateGenericNegativeCache();
             L4MethodProbe.invalidateNegativeCache();
             MultiStoreWriter.invalidateNegativeCache();
+            NumericInverter.invalidate();
             com.ayin90723.adventure_power.util.probe.gate.GateOracle.invalidate();
         }
         if (st.seenEpoch != epoch) {
@@ -287,6 +288,17 @@ public final class BloodWriteEngine {
                 logWalk(target, st, "封存前放宽补探（反向形态）");
                 return true;
             }
+        }
+
+        // ⑥' v1.4.9 L5 通用数值反演（第四部分——七轮评审定序：放宽补探之后、exhausted
+        // 封存之前。值闸正途先行认领位型/倍率字段并缓存正规 WritePath[接入级联失效/
+        // MultiStoreWriter 升级的一等通道]，黑盒反演只兜底；放宽补探 per-class 一次性
+        // 零循环成本，先后只影响首个失败 tick）。爆炸半径/剪枝纪律见 NumericInverter 类注释
+        if (ModConfig.QUENCH_NUMERIC_INVERSION_ENABLED.get() && NumericInverter.invert(target, targetHealth)) {
+            st.graphNoHit = false;
+            st.l3NoMap = false;
+            logWalk(target, st, "L5 通用数值反演");
+            return true;
         }
 
         // ⑦ 全层放弃：raw 显示层兜底（保持 v1.4.1 行为）+ 静默封存

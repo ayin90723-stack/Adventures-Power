@@ -16,6 +16,7 @@ import org.objectweb.asm.tree.VarInsnNode;
 
 import java.io.InputStream;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -970,5 +971,236 @@ public final class GateAnalyzer {
     /** 测试/调试：清空全部 per-class 分析缓存。 */
     static void clearAll() {
         PLANS.clear();
+    }
+
+    // ==================== v1.4.9 第三部分：死亡判据钥匙（静态 codec 识别） ====================
+
+    /**
+     * 死亡判据钥匙识别结果：位打包判据字段的 encoder/decoder 配对。
+     *
+     * @param field      判据字段（this 的实例字段——{@code isDeadOrDying/isAlive} 覆写体内的
+     *                   {@code ALOAD_0; GETFIELD} 供给）
+     * @param encoder    静态编码方法 {@code (Z)T}（boolean → 打包值）
+     * @param decoder    静态解码方法 {@code (T)Z}（打包值 → boolean）
+     * @param deathValue 使判据翻死的 boolean 值：isDeadOrDying 覆写 → true、isAlive 覆写 → false
+     */
+    public static final class DeathKeyRecord {
+        public final java.lang.reflect.Field field;
+        public final java.lang.reflect.Method encoder;
+        public final java.lang.reflect.Method decoder;
+        public final boolean deathValue;
+
+        DeathKeyRecord(java.lang.reflect.Field field, java.lang.reflect.Method encoder,
+                       java.lang.reflect.Method decoder, boolean deathValue) {
+            this.field = field;
+            this.encoder = encoder;
+            this.decoder = decoder;
+            this.deathValue = deathValue;
+        }
+
+        @Override public String toString() {
+            return "DeathKey[" + field.getDeclaringClass().getSimpleName() + "#" + field.getName()
+                + " deathValue=" + deathValue + "]";
+        }
+    }
+
+    /** 无钥匙哨兵（computeIfAbsent 不缓存 null——失败结论也要 per-class 终身缓存防每刀重扫）。 */
+    private static final DeathKeyRecord NO_GATE =
+        new DeathKeyRecord(null, null, null, false);
+
+    private static final Map<Class<?>, DeathKeyRecord> DEATH_KEYS = new ConcurrentHashMap<>();
+
+    /**
+     * 死亡判据钥匙静态识别（per-class 缓存，无命中缓存 NO_GATE 哨兵）。
+     * <p>
+     * 对目标类沿父类链（LivingEntity 前）找 {@code isDeadOrDying}/{@code isAlive} 覆写的
+     * 实际声明属主，读方法体扫描 codec 模式：
+     * <pre>ALOAD_0; GETFIELD this.f → INVOKESTATIC C.decoder(LT;)Z</pre>
+     * 字段供给检查：INVOKESTATIC 前 8 条指令内存在 GETFIELD 且其 receiver 为 ALOAD_0
+     * （this 的字段，防误配局部变量）；encoder 配对：decoder 所属类 C 中找静态
+     * {@code (Z)T}（参数 boolean、返回类型与字段类型一致）——codec 类惯例成对出现。
+     * <p>
+     * readClassNode 走 JVM 快照真身优先（外部先例从 classloader 读拿不到对方 javaagent
+     * redefine 后形态，我方快照可得——本项相对先例的增强）。
+     * <p>
+     * <b>已知限制（只覆盖静态 codec）</b>：实例方法形态（{@code this.field.isDead()}——
+     * INVOKEVIRTUAL 落在字段对象上）与 getter 供给形态（{@code C.decoder(this.getPacked())}
+     * ——参数来自方法调用而非 GETFIELD）扫不到，走 NO_GATE 直通原行为学梯。
+     * <p>
+     * 审查修 P1-1：scanDeathGate 未命中路径返回 null（非异常路径不经过 NO_GATE 分支），
+     * put 前必须归一为 NO_GATE 哨兵——ConcurrentHashMap 不允许 null 值，裸 put null 会抛
+     * NPE 上抛至 GateOracle.tryOpen 整体短路（整梯被跳过=零退化承诺被打破）与
+     * NumericInverter.collectExcluded 每刀 NPE+缓存永不写入（每刀全量重扫）。
+     */
+    public static DeathKeyRecord analyzeDeathGate(Class<?> cls) {
+        DeathKeyRecord cached = DEATH_KEYS.get(cls);
+        if (cached != null) return cached == NO_GATE ? null : cached;
+        DeathKeyRecord scanned = scanDeathGate(cls);
+        DEATH_KEYS.put(cls, scanned == null ? NO_GATE : scanned);
+        return scanned == NO_GATE ? null : scanned;
+    }
+
+    private static DeathKeyRecord scanDeathGate(Class<?> cls) {
+        try {
+            DeathKeyRecord r = scanDeathGateFor(cls, "m_21224_", "isDeadOrDying", true);
+            if (r != null) return r;
+            return scanDeathGateFor(cls, "m_6084_", "isAlive", false);
+        } catch (Exception e) {
+            DebugLog.probe("[GateOracle] 死亡钥匙扫描异常 {}: {}", cls.getSimpleName(), e.toString());
+            return NO_GATE;
+        }
+    }
+
+    /** 单 liveness 方法的属主定位 + 方法体扫描（属主解析沿用阶段一 Overrider 的声明类记录式遍历）。 */
+    private static DeathKeyRecord scanDeathGateFor(Class<?> cls, String srg, String dev, boolean deathValue) {
+        for (Class<?> c = cls; c != null && c != Object.class && c != net.minecraft.world.entity.LivingEntity.class;
+             c = c.getSuperclass()) {
+            for (java.lang.reflect.Method m : c.getDeclaredMethods()) {
+                if ((m.getName().equals(srg) || m.getName().equals(dev)) && "()Z".equals(methodDesc(m))) {
+                    MethodNode mn = findMethodNode(c, m.getName(), "()Z");
+                    if (mn == null) continue;
+                    DeathKeyRecord r = matchCodecPattern(c, mn, deathValue);
+                    if (r != null) return r;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * codec 模式匹配：最近供给槽线性追踪（与 scanInstructions 同风格）——
+     * {@code ALOAD_0; GETFIELD}（相邻=GETFIELD 的 receiver 是 this）记为供给，
+     * 8 条指令窗口内的 {@code INVOKESTATIC (LT;)Z}（单参引用型、boolean 返回、非
+     * java/net.minecraft owner）为 decoder 候选，encoder 配对解析成功即命中。
+     * <p>
+     * 复查修 P2-2：Label/LineNumber/Frame 伪指令（getOpcode()==-1）跳过——既不重置
+     * 供给槽也不计入窗口索引（字段访问跨行/行号节点夹在 ALOAD_0 与 GETFIELD 之间的
+     * 常见编译形态不漏配；窗口只数真实指令）。复查修 P3-1：任何方法调用（不只
+     * INVOKESTATIC）都消费栈，统一清供给槽。
+     * <p>
+     * P2-5 已知权衡：仅方法调用清供给槽——ISTORE/FSTORE/ALOAD n≠0/PUTFIELD/算术等
+     * 其他栈消费指令不清（GETFIELD 供给值被取走后槽仍存活，8 指令窗口内可误配过期
+     * 供给）。三层防线（decoder 名+desc 精确定位 → 字段类型==codec 参数类型一致 →
+     * unlockDeathGateWith 读回验证硬门槛）使误配概率低；且 decoder 参数经局部变量
+     * 装载（ISTORE 后 ALOAD 1）的编译形态恰依赖"供给槽在 ISTORE 后仍存活"才可命中——
+     * 一收紧就漏配该形态，保持现状是两端权衡后的选择。
+     */
+    private static DeathKeyRecord matchCodecPattern(Class<?> declaring, MethodNode mn, boolean deathValue) {
+        boolean prevWasAload0 = false;
+        FieldInsnNode suppliedField = null;
+        int suppliedFieldIdx = -1;
+        int i = 0;
+        for (AbstractInsnNode insn : mn.instructions) {
+            if (insn.getOpcode() == -1) {
+                continue;  // 伪指令（Label/LineNumber/Frame）：不重置供给槽、不计数
+            }
+            if (insn instanceof VarInsnNode v && v.getOpcode() == org.objectweb.asm.Opcodes.ALOAD && v.var == 0) {
+                prevWasAload0 = true;
+            } else if (insn instanceof FieldInsnNode f
+                && f.getOpcode() == org.objectweb.asm.Opcodes.GETFIELD && prevWasAload0) {
+                suppliedField = f;
+                suppliedFieldIdx = i;
+                prevWasAload0 = false;
+            } else if (insn instanceof MethodInsnNode mi) {
+                if (mi.getOpcode() == org.objectweb.asm.Opcodes.INVOKESTATIC
+                    && suppliedField != null && i - suppliedFieldIdx <= 8
+                    && mi.desc.endsWith(")Z") && singleRefParamDesc(mi.desc)
+                    && !mi.owner.startsWith("java/") && !mi.owner.startsWith("net/minecraft")) {
+                    DeathKeyRecord r = resolveCodec(declaring, mi, suppliedField, deathValue);
+                    if (r != null) return r;
+                }
+                // 一切方法调用都消费栈——供给槽失效
+                suppliedField = null;
+                prevWasAload0 = false;
+            } else {
+                prevWasAload0 = false;
+            }
+            i++;
+        }
+        return null;
+    }
+
+    /** decoder desc 的单参数为引用类型（L...; 形态）判定。 */
+    private static boolean singleRefParamDesc(String desc) {
+        int paren = desc.indexOf(')');
+        if (paren < 0 || !desc.startsWith("(L", 0)) return false;
+        int semi = desc.indexOf(';', 1);
+        return semi == paren - 1;
+    }
+
+    /** decoder/encoder/字段三件反射解析与类型配对（任一失败返回 null——读回验证是运行时硬门槛）。 */
+    private static DeathKeyRecord resolveCodec(Class<?> rootClass, MethodInsnNode decoderCall,
+                                               FieldInsnNode fieldInsn, boolean deathValue) {
+        try {
+            Class<?> codecClass = Class.forName(decoderCall.owner.replace('/', '.'), false,
+                rootClass.getClassLoader());
+            // decoder：静态 (LT;)Z（名字+desc 精确定位）
+            Method decoder = null;
+            for (java.lang.reflect.Method m : codecClass.getDeclaredMethods()) {
+                if (Modifier.isStatic(m.getModifiers()) && m.getName().equals(decoderCall.name)
+                    && methodDesc(m).equals(decoderCall.desc)) {
+                    decoder = m;
+                    break;
+                }
+            }
+            if (decoder == null) return null;
+            Class<?> paramType = decoder.getParameterTypes()[0];
+            // encoder：decoder 所属类中的静态 (Z)T——boolean 参数、返回类型与 decoder 参数一致。
+            // 审查修 P3-6：同类存在多个同签名静态方法时反射遍历顺序无保证——词根启发
+            //（pack/encode/to/write）优先命中惯例命名；全部落选仍取遍历序首个（读回验证
+            // 是最终兜底——encode 错方向会在写后立即被 decoder 读回拦截回滚）
+            Method encoder = null;
+            Method encoderFallback = null;
+            for (java.lang.reflect.Method m : codecClass.getDeclaredMethods()) {
+                Class<?>[] ps = m.getParameterTypes();
+                if (Modifier.isStatic(m.getModifiers()) && ps.length == 1
+                    && ps[0] == boolean.class && m.getReturnType() == paramType) {
+                    if (encoderFallback == null) encoderFallback = m;
+                    String n = m.getName().toLowerCase();
+                    if (n.contains("pack") || n.contains("encode") || n.startsWith("to")
+                        || n.contains("write")) {
+                        encoder = m;
+                        break;
+                    }
+                }
+            }
+            if (encoder == null) encoder = encoderFallback;
+            if (encoder == null) return null;
+            // 字段解析：fieldInsn.owner/name 沿目标类链按名匹配（hidden class 场景——
+            // 复查修 P3-2：字节码 owner 是剥离 /0x 后缀的原始类名，链比较同款剥离，
+            // 与 readClassNode 口径一致，否则 hidden 目标（本末起源系）钥匙字段必解析失败）；
+            // 字段类型必须与 codec 参数类型一致（配对约束）
+            java.lang.reflect.Field field = null;
+            String ownerJvm = fieldInsn.owner;
+            int hiddenSuffix = ownerJvm.indexOf('/');
+            if (hiddenSuffix > 0) {
+                ownerJvm = ownerJvm.substring(0, hiddenSuffix);
+            }
+            for (Class<?> c = rootClass; c != null && c != Object.class; c = c.getSuperclass()) {
+                String cJvm = c.getName().replace('.', '/');
+                int cHidden = cJvm.indexOf('/');
+                if (cHidden > 0) {
+                    cJvm = cJvm.substring(0, cHidden);
+                }
+                if (!cJvm.equals(ownerJvm)) continue;
+                try {
+                    java.lang.reflect.Field f = c.getDeclaredField(fieldInsn.name);
+                    if (f.getType() == paramType && !Modifier.isStatic(f.getModifiers())) {
+                        field = f;
+                    }
+                } catch (NoSuchFieldException ignored) {
+                }
+            }
+            if (field == null) return null;
+            field.setAccessible(true);
+            encoder.setAccessible(true);
+            decoder.setAccessible(true);
+            DebugLog.probe("[GateOracle] {} 死亡钥匙命中：{}#{} codec={} (deathValue={})",
+                rootClass.getSimpleName(), field.getDeclaringClass().getSimpleName(), field.getName(),
+                codecClass.getSimpleName(), deathValue);
+            return new DeathKeyRecord(field, encoder, decoder, deathValue);
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

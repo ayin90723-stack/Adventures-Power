@@ -13,9 +13,11 @@
         "PiercingGazeLivingEntityMixin",
         "PiercingGazePlayerAttackMixin",
         "PiercingGazeArrowMixin",
-        "PiercingGazeTridentMixin",        "HealingBlockMixin",
+        "PiercingGazeTridentMixin",
+        "HealingBlockMixin",
         "TrueHealthMixin",
         "TrueHealthServerPlayerMixin",
+        "PlayerListRespawnGateMixin",
         "EntityLivenessMixin",
         "EntityFieldsAccessor",
         "LivingEntityFieldsAccessor",
@@ -33,7 +35,17 @@
         "LootPoolMixin",
         "LootPoolAccessor",
         "LootContextBuilderMixin",
-        "LootItemConditionalFunctionMixin"
+        "LootItemConditionalFunctionMixin",
+        "EntityLevelCallbackAccessor",
+        "ServerLevelContainerAccessor",
+        "PesmFieldAccessor",
+        "EntitySectionStorageAccessor",
+        "ServerChunkCacheAccessor",
+        "ChunkMapAccessor",
+        "TrackedEntityAccessor"
+    ],
+    "client": [
+        "ClientRespawnMixin"
     ],
     "injectors": {
         "defaultRequire": 1

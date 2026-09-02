@@ -62,9 +62,17 @@ public class DeathDefyHandler {
             // 只走 setHealthDirect 直写：若再调 player.setHealth(restoreHealth)，
             // 原版 setHealth 内部 clamp(value, 0, maxHealth) 会把"下限 20"钳回污染值
             //（maxHealth < 20 时直写值被覆盖，防护语义失效）。
-            // TrueHealth backup 由下次 getHealth 的惰性同步自动更新（DataItem > backup 视为合法回血）。
             float restoreHealth = Math.max(20.0F, player.getMaxHealth());
             HealthUtil.setHealthDirect(player, restoreHealth);
+            // v1.4.9（2.5 二连 die 缺口修复）：救场瞬间同步 backup——原依赖"下一次
+            // getHealth 惰性同步"（doTick 每 tick 读血，窗口微秒级），但攻击者可同栈打
+            // "合法大伤害 hurt（backup 随 HURT_DEPTH 同步归零）→ 死亡抗拒救场 → 紧随
+            // 直调 die()"二连击：直调 die 的 backup>0 门禁恰好读到旧值 0 → 死亡事件再次
+            // 触发且冷却已进 → 真死。此处同步后，救场瞬间真血即恢复，"死亡抗拒触发 →
+            // 真血同步恢复 → 锁定 → 无敌期"闭环（无敌期锁定已由 DeathDefyMixin 双层保证，
+            // 缺的只有救场瞬间这一环）。TrueHealthHandler 事件层兜底无此问题（其 cancel
+            // 前提本就是 backup > 0，写入值即 backup 值）
+            progress.setBackupHealth(restoreHealth);
 
             // 写入无敌和冷却结束时间
             long invulEnd = currentTime + ModConfig.DEATH_DEFY_INVUL_DURATION.get();

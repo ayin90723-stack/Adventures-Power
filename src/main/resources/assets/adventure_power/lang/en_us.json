@@ -130,6 +130,8 @@
   "command.adventure_power.already_adventurer": "Already an adventurer",
   "command.adventure_power.activated": "Adventurer activated (with a fresh Adventure's Begin)",
   "command.adventure_power.activate_failed": "Activation failed: %s could not obtain the Adventure's Begin (inventory error)",
+  "command.adventure_power.die_defenses_suspended": "True Health / Reject Manipulation / Death Defy were temporarily disabled for /ap die. If the death was interrupted and respawn never happened, these abilities stay off — you can re-enable them in the P panel.",
+  "command.adventure_power.die_intercepted": "Your death was intercepted by another mod's event. Escape incomplete: abilities (and health, if needed) have been restored. Remove the death-blocking curio and try again.",
   "screen.adventure_power.value_label": "Current value: ",
   "screen.adventure_power.base_value_label": "Base value: ",
   "screen.adventure_power.value_fixed": "Current value: fixed (no growth)",
@@ -225,3 +227,4 @@
   "hud.adventure_power.dir.up_straight": "Directly Above",
   "hud.adventure_power.dir.down_straight": "Directly Below"
 }
+

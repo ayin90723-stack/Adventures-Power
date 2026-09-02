@@ -131,4 +131,12 @@ public final class DebugLog {
             LOGGER.info(format, args);
         }
     }
+
+    // ==================== 容器守护（v1.4.9） ====================
+
+    public static void container(String format, Object... args) {
+        if (gate(ModConfig.DEBUG_LOG_CONTAINER.get())) {
+            LOGGER.info(format, args);
+        }
+    }
 }

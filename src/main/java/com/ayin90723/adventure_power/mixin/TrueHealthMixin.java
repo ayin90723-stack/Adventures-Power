@@ -7,7 +7,6 @@ import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.ClassPointerGuard;
 import com.ayin90723.adventure_power.util.DebugLog;
 import com.ayin90723.adventure_power.util.HealthUtil;
-import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -92,33 +91,16 @@ public abstract class TrueHealthMixin {
         ThreadLocal.withInitial(() -> false);
 
     /**
-     * 血量修复：先通过 {@link HealthUtil#setAllHealthLikeRaw} 恢复所有血量条目，
-     * 再通过 {@link HealthUtil#clearNegativeFloatDeltas} 清除外部 Boss 注入的负值 delta。
+     * 血量修复：v1.4.9 主体迁出至 {@link HealthUtil#repairHealth}（mixin 私有方法不可被
+     * 普通代码调用——容器重建链第一部分与真血防御共用同一聚合入口）。
      * <p>
-     * 两次调用分别对应两个独立语义--"写入正确值"和"清除恶意偏移"。
-     * 攻击侧（淬魂/影杀等）仅需 {@code setAllHealthLikeRaw}，无需清除负值 delta。
-     * <p>
-     * v1.4.0 补：修复后强制客户端同步——{@code setAllHealthLikeRaw} 反射直写
-     * {@code DataItem.value} 不触发 dirty，若外部先经 {@code data.set(0)} 把 0 同步给
-     * 客户端，修复值将永远推不到客户端（血条停留在 0，服务端 alive 但客户端显示
-     * "血条 0、无死亡画面"的卡死感）。补一发 {@code INTERNAL_HEALTH_WRITE} 标记的
-     * {@code data.set} 让同步包携带修复值（NaN 修复场景依赖 INTERNAL 放行双拦截层；
-     * 升血场景 {@code RejectHealthManipDataMixin} 自然放行）。反射失败（accessor 为 null）
-     * 时跳过同步，退回原逻辑。
+     * 行为升级（随第二部分 2.3）：同步链两级——data.set 后读 DataItem.isDirty() 检测
+     * 同步链是否触发，未触发（被对手 cancel / 原版 equals 短路）时 dirty 三件套直标
+     * （DataItem.setDirty(true) + entityData.isDirty 字段直标），原版 packDirty 轨道
+     * 照常推送修复值。写入侧（setAllHealthLikeRaw + clearNegativeFloatDeltas）行为不变。
      */
     private static void repairHealth(LivingEntity player, float health) {
-        HealthUtil.setAllHealthLikeRaw(player, health);
-        HealthUtil.clearNegativeFloatDeltas(player);
-        EntityDataAccessor<Float> dataHealthId = HealthUtil.getDataHealthId();
-        if (dataHealthId != null) {
-            boolean prev = HealthUtil.INTERNAL_HEALTH_WRITE.get();
-            HealthUtil.INTERNAL_HEALTH_WRITE.set(true);
-            try {
-                player.getEntityData().set(dataHealthId, health);
-            } finally {
-                HealthUtil.INTERNAL_HEALTH_WRITE.set(prev);
-            }
-        }
+        HealthUtil.repairHealth(player, health);
     }
 
     // ===== 读取层：getHealth() HEAD =====
@@ -381,6 +363,29 @@ public abstract class TrueHealthMixin {
             return;
         }
         LivingEntity self = (LivingEntity) (Object) this;
+        // v1.4.9-fix（vp 连招实测回填）：DISCARDED 拦截收窄为「活体抹除拦截」——官方
+        // 移除流程（PlayerList.respawn → ServerLevel.removePlayerImmediately(DISCARDED)，
+        // 字节码实锤为单行 player.remove(DISCARDED)）的特征是「先除名册后 remove」
+        //（respawn 首指令即 players.remove(player)）：名册已不含本实体 = 官方替换流程
+        // 进行中，放行。此前该路径被误拦导致 respawn 断裂：旧实体容器清理被跳过
+        //（本 Mixin cancel）+ 容器重建链刚把它恢复满 → 新实体 addNewPlayer 撞 UUID
+        //（"Force-added player with duplicate UUID"）→ placeNewPlayer 半失败 → 玩家
+        // 卡死（空世界无法交互）。旧假设「重生时 backup 必然 ≤0」只对正常死亡成立——
+        // 假死态（外部持续写 0 但非合法路径）backup 恒 >0 且血量可能已被修复回正，
+        // 血量/deathTime 判据区分不了「已受理重生」与「活体」，名册时序是官方流程
+        // 唯一的实体侧可观察标志。名册完好时的 DISCARDED 维持拦截——discard 型击杀的
+        // 签名就是活体抹除；「先删名册再 discard」的组合拳会经此放行，但容器审计链
+        // 1 秒内发现容器全丢并重建（gateOk 不排除 DISCARDED——正是为该兜底保留）
+        if (reason == Entity.RemovalReason.DISCARDED
+            && self instanceof net.minecraft.server.level.ServerPlayer sp) {
+            // P3-3 注：Entity.getServer() = level().getServer()，remove 路径上 level 恒非空
+            //（线程模型保证），且返回 null 已判——无 NPE 风险；判据位于门禁前不影响语义
+            //（放行理由与 true_health 门禁正交），低频路径 O(n) 名册查询可忽略
+            var server = sp.getServer();
+            if (server != null && !server.getPlayerList().getPlayers().contains(sp)) {
+                return;
+            }
+        }
         IAdventureProgress progress = gatedProgress(self);
         if (progress == null) return;
         if (progress.getBackupHealth() > 0.0F) {
@@ -572,6 +577,17 @@ public abstract class TrueHealthMixin {
         } else if (fields.adventure_power$getDeathTime() > 0 && !player.isDeadOrDying()) {
             // 死亡动画残留：外部把 deathTime 推进但死亡状态已被否决，归位
             fields.adventure_power$setDeathTime(0);
+        }
+
+        // ④' 垂死姿势归位（v1.4.9-fix 第四轮实测补）：外部假死演出（vp setDead 链）显式
+        //    setPose(DYING) 后无人归位——活着的玩家挂垂死姿势同步到客户端（模型躺倒）。
+        //    正常死亡不受影响（本自检仅在 backup>0 假死语境执行）；pose 是 DataItem，
+        //    归位经 dirty 同步自动推送客户端
+        if (player.getPose() == net.minecraft.world.entity.Pose.DYING) {
+            player.setPose(net.minecraft.world.entity.Pose.STANDING);
+            if (debugLog()) {
+                DebugLog.trueHealth("[MME-TrueHealth] 存活性自检：垂死姿势残留 -> 归位 STANDING");
+            }
         }
 
         // ⑤ 类指针守卫：实体类被替换（killPlayer 类指针替换）——换回原类恢复

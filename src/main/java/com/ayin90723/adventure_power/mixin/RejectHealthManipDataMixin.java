@@ -28,7 +28,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * <p>
  * 门禁与方法级拦截一致：
  * <ul>
- *   <li>伤害链内（{@link HealthUtil#HURT_DEPTH} &gt; 0）放行——合法 hurt 结算（玩家与禁疗目标共用）</li>
+ *   <li>伤害链内（{@link HealthUtil#HURT_DEPTH} &gt; 0）放行——合法 hurt 结算（玩家与禁疗目标共用）。
+ *       <b>已知边界（审查修 P2-2 披露）</b>：HURT_DEPTH 是 ThreadLocal、帧内可见——外部若把
+ *       {@code data.set(0)} 注入自身 hurt 帧内（对 actuallyHurt HEAD 跨帧直写），本层恒放行；
+ *       该形态由读层（TrueHealthMixin getHealth HEAD 备份比对修复）无条件兜底，属分层语义
+ *       设计而非缺陷。</li>
  *   <li>模组内部写入（{@link HealthUtil#INTERNAL_HEALTH_WRITE}）放行——真血修复/
  *       内部裁剪/禁疗钳制压回，否则与 TrueHealthMixin 自愈形成死锁</li>
  *   <li><b>非玩家目标（v1.4.8 探查回血）</b>：禁疗中的回血升写（值高于钳制低点）cancel——

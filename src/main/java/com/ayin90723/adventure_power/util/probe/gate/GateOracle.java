@@ -165,6 +165,22 @@ public final class GateOracle {
                 if (r != null) return r;
                 plan.resolved = null;
             }
+            // v1.4.9 钥匙层（第三部分，七轮评审定序：resolved 判定后、KILL_TOOL 前——
+            // 钥匙可验证可回滚[codec 读回验证 + 超时回滚零残留]，KILL_TOOL 为不可撤销的
+            // 签名猜测调用，低激进性先行；钥匙超时回滚后经 runLadderTail 落入完整原梯[含 KILL_TOOL]）
+            if (ModConfig.GATE_ORACLE_DEATH_KEY_ENABLED.get()) {
+                if (unlockDeathGate()) {
+                    return OpenResult.PENDING;
+                }
+            }
+            return runLadderTail();
+        }
+
+        /**
+         * 剩余梯（v1.4.9 提取为可重入——钥匙超时回滚后重入）：KILL_TOOL → deathSequence
+         * 触发 → EXEC_COMBO → 同栈 die 兜底。各段原语义不变，仅从 run() 平移。
+         */
+        private OpenResult runLadderTail() {
             // 梯级0：KILL_TOOL（§6 顺序纪律限定——无探针需求，验证=死亡事件本身）
             if (ModConfig.GATE_ORACLE_KILL_TOOL_ENABLED.get()) {
                 for (GateAnalyzer.KillToolCandidate kt : plan.killTools) {
@@ -209,6 +225,139 @@ public final class GateOracle {
         private static boolean isDeathSequenceGate(GateAnalyzer.StateCandidate sc) {
             String n = sc.name.toLowerCase();
             return n.contains("deathsequence") || n.contains("death_sequence");
+        }
+
+        // ==================== v1.4.9 第三部分：死亡判据钥匙 ====================
+
+        /**
+         * 钥匙层主入口：静态反推死亡判据的编解码函数并直接写钥匙（NO_GATE 直通原梯）。
+         * <p>
+         * 钥匙只翻判据<b>不执行击杀</b>（四轮评审 pending 窗口语义）：翻死后挂窗口等
+         * Boss 自身逻辑接管——判据型 Boss 的 tick/aiStep 轮询 isDeadOrDying 启动自己的
+         * 死亡序列（比代写死态更"原生"）；confirmDead 硬证据（isRemoved/deathTime）验证
+         * 不变，窗口末无证据<b>回滚钥匙</b>退原梯——顺带消灭"钥匙成功后续全败、字段残留
+         * 死亡态"的残留问题。
+         * <p>
+         * 不与 EXEC_COMBO 顺流（四轮评审）：die 覆写若带 {@code if (isDeadOrDying()) return}
+         * 防重入守卫，翻死后同栈 die 会早退（比不翻更糟）；超时回滚后原梯的 die 调用此刻
+         * 判据已还原，行为与现状一致。
+         *
+         * @return true = UNLOCKED_PENDING（已挂窗口）；false = SKIPPED/FAILED（零退化走原梯）
+         */
+        private boolean unlockDeathGate() {
+            GateAnalyzer.DeathKeyRecord key = GateAnalyzer.analyzeDeathGate(target.getClass());
+            return key != null && unlockDeathGateWith(key);
+        }
+
+        /** 钥匙执行（resolved 回放共用）：写钥匙 + 读回验证 + pending 窗口。 */
+        private boolean unlockDeathGateWith(GateAnalyzer.DeathKeyRecord key) {
+            Object snapshot = null;
+            try {
+                snapshot = key.field.get(target);
+                Object encoded = key.encoder.invoke(null, key.deathValue);
+                key.field.set(target, encoded);
+                // 读回验证是硬门槛：decoder 读回不等于 deathValue 即回滚——防 encoder/decoder
+                // 配对误判写坏字段。写后任何异常同样回滚（复查修 P2-3：decoder.invoke 对
+                // 误配 encoder 产出抛异常时字段已翻死且无人还原——残留死亡态会让 run()
+                // 原梯的 die 守卫早退，比不翻更糟）
+                if (!(key.decoder.invoke(null, key.field.get(target)) instanceof Boolean b) || b != key.deathValue) {
+                    key.field.set(target, snapshot);
+                    DebugLog.probe("[GateOracle] 死亡钥匙读回验证失败（codec 配对误判？），已回滚，退原梯: {}", key);
+                    return false;
+                }
+                DebugLog.probe("[GateOracle] 死亡钥匙翻死判据 {} → 挂窗口等 Boss 自身死亡序列接管", key);
+                scheduleDeathKeyPending(key, snapshot);
+                return true;
+            } catch (Exception e) {
+                // 异常路径回滚（快照在手）：写已发生即还原，未发生还原也无害（写回原值）
+                if (snapshot != null) {
+                    try {
+                        key.field.set(target, snapshot);
+                    } catch (Exception ignored) {
+                    }
+                }
+                DebugLog.probe("[GateOracle] 死亡钥匙执行异常（已回滚，零退化退原梯）: {}", e.toString());
+                return false;
+            }
+        }
+
+        /**
+         * 钥匙 pending 窗口（挂接照抄 deathSequence 既有挂法——增量评审）：TaskKind.GATE
+         * 归属（防 MultiStoreWriter 复验级联 cancelAll 误删）+ OPENING 五路清理齐备
+         * （onVerify/onDead/onCancel 直清 + onFail 经 finishWithInlineDie 间接清 +
+         * onLivingDeath 兜底）。
+         */
+        private void scheduleDeathKeyPending(GateAnalyzer.DeathKeyRecord key, Object snapshot) {
+            PendingVerifyRegistry.register(target, ModConfig.GATE_ORACLE_WAIT_TICKS.get(),
+                PendingVerifyRegistry.TaskKind.GATE, new PendingVerifyRegistry.PendingTask() {
+                    @Override
+                    public boolean onVerify(LivingEntity t) {
+                        if (confirmDead()) {
+                            OPENING.remove(t.getUUID());
+                            plan.resolved = new ResolvedPlan("DEATH_KEY", key);
+                            DebugLog.probe("[GateOracle] 死亡钥匙成功：判据翻死后 Boss 自身死亡序列完成（{} → 正规链自清）", key);
+                            return true;
+                        }
+                        return false; // → onFail
+                    }
+
+                    @Override
+                    public void onDead(LivingEntity t) {
+                        // 审查修 P1-2：onDead 必须同样走硬证据——PendingVerifyRegistry 裁决
+                        // 到点先查 isRemoved()||!isAlive()，成立即 onDead 短路（onVerify/
+                        // onFail 不执行）；钥匙型 Boss 判据翻死后 isAlive 必然 false
+                        //（1.20.1 isAlive 委托 isDeadOrDying 或 Boss 覆写同源）→ 单凭
+                        // !isAlive() 会"假成功"+resolved 永久缓存 → 目标未死但等待已终、
+                        // 再战走 resolved 假循环=不可击杀（设计"confirmDead 硬证据验证
+                        // 不变"被破坏）。硬证据不满足时视同 onFail（回滚钥匙+落完整原梯）。
+                        // onDead 的死亡事实（isRemoved/deathTime>0）在窗口内出现——成功收尾
+                        if (t.isRemoved() || deathTimeOf(t) > 0) {
+                            OPENING.remove(t.getUUID());
+                            plan.resolved = new ResolvedPlan("DEATH_KEY", key);
+                        } else {
+                            DebugLog.probe("[GateOracle] 死亡钥匙 onDead 无硬证据（判据名义翻死但死亡流程未启动），回滚判据落原梯: {}", key);
+                            try {
+                                key.field.set(t, snapshot);
+                            } catch (Exception ignored) {
+                            }
+                            plan.resolved = null;
+                            OpenResult rr = runLadderTail();
+                            // 审查修 P2-3：runLadderTail 同步成功（KILL_TOOL/EXEC_COMBO
+                            // SYNC_DEAD）时清 OPENING——despawn 型成功不发 LivingDeathEvent，
+                            // onLivingDeath 兜底覆盖不到，残留会导致复活/再战 tryOpen 恒
+                            // PENDING（影杀善后死锁）
+                            if (rr != OpenResult.PENDING) {
+                                OPENING.remove(t.getUUID());
+                            }
+                        }
+                    }
+
+                    @Override
+                    public void onCancel() {
+                        // 弱引用死亡收尾（防御性：目标 GC/卸载——判据字段随对象不可达，回滚无意义）
+                        OPENING.remove(target.getUUID());
+                    }
+
+                    @Override
+                    public void onFail(LivingEntity t) {
+                        DebugLog.probe("[GateOracle] 死亡钥匙超时（窗口内无死亡硬证据），回滚判据落完整原梯: {}", key);
+                        try {
+                            key.field.set(t, snapshot);
+                        } catch (Exception ignored) {
+                        }
+                        plan.resolved = null;
+                        // 复查修 P2-1：落完整原梯（含 KILL_TOOL）而非只走梯尾——七轮评审
+                        // 定序承诺"钥匙超时回滚后自然落入完整原梯"；此刻判据已还原，
+                        // KILL_TOOL/deathSequence/EXEC_COMBO 各级行为与现状一致。
+                        // runLadderTail 同步成功时清 OPENING（KILL_TOOL SYNC_DEAD 成功
+                        // 路径不发 LivingDeathEvent，onLivingDeath 兜底覆盖不到——残留
+                        // 会导致复活/再战 tryOpen 恒 PENDING）
+                        OpenResult rr = runLadderTail();
+                        if (rr != OpenResult.PENDING) {
+                            OPENING.remove(t.getUUID());
+                        }
+                    }
+                });
         }
 
         /**
@@ -439,6 +588,11 @@ public final class GateOracle {
                         yield null;
                     }
                     yield confirmDead() ? OpenResult.SYNC_DEAD : null;
+                }
+                // v1.4.9 第三部分：死亡钥匙回放（首杀裁决产物直用，验证照常）
+                case "DEATH_KEY" -> {
+                    GateAnalyzer.DeathKeyRecord key = (GateAnalyzer.DeathKeyRecord) rp.handle();
+                    yield unlockDeathGateWith(key) ? OpenResult.PENDING : null;
                 }
                 default -> null;
             };
@@ -810,28 +964,10 @@ public final class GateOracle {
         }
 
         private DataItemMedium resolveDataItem(GateAnalyzer.StateCandidate sc) {
-            try {
-                // 沿 target 类链按名找静态 accessor（hidden class 场景必须：hidden 副本的静态
-                // accessor 是独立初始化的新 id，原始类的 accessor 与 hidden 实例的 itemsById
-                // 对不上；普通场景 target 链即声明链，等价）
-                for (Class<?> c = target.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
-                    try {
-                        Field f = c.getDeclaredField(sc.name);
-                        if (!Modifier.isStatic(f.getModifiers())) continue;
-                        if (!EntityDataAccessor.class.isAssignableFrom(f.getType())) continue;
-                        f.setAccessible(true);
-                        if (!(f.get(null) instanceof EntityDataAccessor<?> accessor)) continue;
-                        Map<Integer, Object> items = HealthUtil.getDataItems(target);
-                        if (items == null) return null;
-                        Object item = items.get(accessor.getId());
-                        if (item != null) return new DataItemMedium(accessor, item);
-                    } catch (NoSuchFieldException ignored) {
-                    }
-                }
-                return null;
-            } catch (Exception e) {
-                return null;
-            }
+            // v1.4.9 复查修 P3-1：定位逻辑已下沉 HealthUtil.resolveDataItem（公共方法），
+            // 此处委托防两份实现漂移（hidden-class 适配等修复只落公共版）
+            HealthUtil.ResolvedDataItem r = HealthUtil.resolveDataItem(target, sc.name);
+            return r == null ? null : new DataItemMedium(r.accessor(), r.item());
         }
 
         /**

@@ -15,6 +15,31 @@
         },
         "com/ayin90723/adventure_power/mixin/EntityFieldsAccessor": {
             "removalReason": "Lnet/minecraft/world/entity/Entity;f_146795_"
+        },
+        "com/ayin90723/adventure_power/mixin/EntityLevelCallbackAccessor": {
+            "levelCallback": "Lnet/minecraft/world/entity/Entity;f_146801_"
+        },
+        "com/ayin90723/adventure_power/mixin/ServerLevelContainerAccessor": {
+            "entityTickList": "Lnet/minecraft/server/level/ServerLevel;f_143243_",
+            "entityManager": "Lnet/minecraft/server/level/ServerLevel;f_143244_"
+        },
+        "com/ayin90723/adventure_power/mixin/PesmFieldAccessor": {
+            "knownUuids": "Lnet/minecraft/world/level/entity/PersistentEntitySectionManager;f_157491_",
+            "callbacks": "Lnet/minecraft/world/level/entity/PersistentEntitySectionManager;f_157492_",
+            "sectionStorage": "Lnet/minecraft/world/level/entity/PersistentEntitySectionManager;f_157495_",
+            "visibleEntityStorage": "Lnet/minecraft/world/level/entity/PersistentEntitySectionManager;f_157494_"
+        },
+        "com/ayin90723/adventure_power/mixin/EntitySectionStorageAccessor": {
+            "sections": "Lnet/minecraft/world/level/entity/EntitySectionStorage;f_156852_"
+        },
+        "com/ayin90723/adventure_power/mixin/ServerChunkCacheAccessor": {
+            "chunkMap": "Lnet/minecraft/server/level/ServerChunkCache;f_8325_"
+        },
+        "com/ayin90723/adventure_power/mixin/ChunkMapAccessor": {
+            "entityMap": "Lnet/minecraft/server/level/ChunkMap;f_140150_"
+        },
+        "com/ayin90723/adventure_power/mixin/TrackedEntityAccessor": {
+            "seenBy": "Lnet/minecraft/server/level/ChunkMap$TrackedEntity;f_140475_"
         }
     }
 }
