@@ -6,6 +6,7 @@ import com.ayin90723.adventure_power.config.ModConfig;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
@@ -64,9 +65,15 @@ public class SwiftHandler {
         double strength = ModConfig.AWAKEN_SWIFT_PUSH_STRENGTH.get();
         double px = player.getX(), py = player.getY(), pz = player.getZ();
         AABB box = new AABB(px - radius, py - radius, pz - radius, px + radius, py + radius, pz + radius);
-        // 直接查 Monster 子类，避免把中立/被动生物也拉进 AABB 查询再过滤
-        List<Monster> mobs = serverLevel.getEntitiesOfClass(Monster.class, box);
-        for (Monster m : mobs) {
+        // v1.4.9.1 目标集可配置：默认仅 Monster 子类（避免把中立/被动生物也拉进 AABB 查询再
+        // 过滤），awaken_swift_push_monsters_only=false 时一切非玩家生物都会被推开（Player
+        // 排除不随配置放开——推玩家属 PVP 位移干扰，不在本开关语义内）
+        boolean monstersOnly = ModConfig.AWAKEN_SWIFT_PUSH_MONSTERS_ONLY.get();
+        List<LivingEntity> mobs = serverLevel.getEntitiesOfClass(LivingEntity.class, box,
+            e -> e != player && e.isAlive()
+                && !(e instanceof Player)
+                && (!monstersOnly || e instanceof Monster));
+        for (LivingEntity m : mobs) {
             if (m.isRemoved()) continue;
             double dx = m.getX() - px;
             double dz = m.getZ() - pz;

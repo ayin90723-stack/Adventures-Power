@@ -70,6 +70,9 @@ public class ModConfig {
     // --- 禁疗之触 ---
     public static final IntValue HEALING_BLOCK_BASE;
     public static final IntValue HEALING_BLOCK_PER_MILESTONE;
+    /** PVP 禁疗开关（v1.4.9.1，默认 false；true 后对玩家挂禁疗标记+觉醒易伤——heal/药水被拦，
+     *  FORCE_KILL 归零/终局复验恒短路[底层守卫]，钳制走玩家专用路径跳过引擎） */
+    public static final BooleanValue HEALING_BLOCK_PVP_ENABLED;
 
     // --- 虚空踏步 ---
     public static final DoubleValue VOID_STEP_POWER;
@@ -92,12 +95,17 @@ public class ModConfig {
     public static final DoubleValue SOUL_QUENCH_HP_RATIO_10;
     public static final DoubleValue SOUL_QUENCH_HEALING_BLOCK_MULTIPLIER;
     public static final IntValue SOUL_QUENCH_PARTICLE_COUNT;
+    /** PVP 淬魂开关（v1.4.9.1，默认 false；true 后对玩家走分层分支——自定义伤害 hurt 管线照常，
+     *  引擎语义三件[清盾/清无敌帧/兜底直写]恒短路，防与玩家侧真血防御自冲突） */
+    public static final BooleanValue SOUL_QUENCH_PVP_ENABLED;
 
     // --- 破敌之眼 ---
     /** 穿透兜底补刀上限（目标最大生命值比例，v1.4.4：防饰品加伤放大后 clamp 0 变处决写 0；最大生命基准防等比收敛） */
     public static final DoubleValue PIERCING_GAZE_FALLBACK_CAP_PERCENT;
     public static final BooleanValue PIERCING_GAZE_FEEDBACK_ENABLED;
     public static final IntValue PIERCING_GAZE_FEEDBACK_PARTICLE_COUNT;
+    /** PVP 穿透开关（v1.4.9.1，默认 false=对玩家目标不穿透；true 时觉醒禁无敌帧同步放开——两处共用一门禁） */
+    public static final BooleanValue PIERCING_GAZE_PVP_ENABLED;
 
     // --- 影杀 ---
     public static final IntValue SHADOW_KILL_FLAT_DAMAGE;
@@ -123,6 +131,8 @@ public class ModConfig {
     public static final IntValue LIFESTEAL_PER_MILESTONE;
     public static final DoubleValue LIFESTEAL_CAP_RATIO;
     public static final DoubleValue LIFESTEAL_KILL_HEAL;
+    /** PVP 嗜血开关（v1.4.9.1，默认 false=对玩家不吸血/PVP 击杀不回馈；true 时两处同步放开） */
+    public static final BooleanValue LIFESTEAL_PVP_ENABLED;
 
     // --- 大地之力 ---
     public static final DoubleValue DIGGING_POWER_BASE;
@@ -193,12 +203,16 @@ public class ModConfig {
     public static final DoubleValue AWAKEN_SHADOW_KILL_AOE_RADIUS;
     public static final DoubleValue AWAKEN_SHADOW_KILL_AOE_RATIO;
     public static final IntValue AWAKEN_SHADOW_KILL_AOE_MAX_TARGETS;
+    /** 觉醒影杀 AOE 目标集开关（v1.4.9.1，默认 true=仅 Monster 子类；false=一切非玩家生物） */
+    public static final BooleanValue AWAKEN_SHADOW_KILL_AOE_MONSTERS_ONLY;
     public static final DoubleValue AWAKEN_LIFESTEAL_SHIELD_CAP;
     public static final DoubleValue AWAKEN_LIFESTEAL_KILL_HEAL;
     public static final IntValue AWAKEN_PURIFIED_SOUL_RADIUS;
     public static final IntValue AWAKEN_PURIFIED_SOUL_AURA_INTERVAL;
     public static final IntValue AWAKEN_PURIFIED_SOUL_WEAKNESS_AMPLIFIER;
     public static final IntValue AWAKEN_PURIFIED_SOUL_WEAKNESS_DURATION;
+    /** 觉醒净魂光环目标集开关（v1.4.9.1，默认 true=仅 Monster 子类；false=一切非玩家生物） */
+    public static final BooleanValue AWAKEN_PURIFIED_SOUL_AURA_MONSTERS_ONLY;
     public static final DoubleValue AWAKEN_JUDGMENT_RANGE_MULT;
     public static final DoubleValue AWAKEN_SANCTUARY_SPEED;
     public static final DoubleValue AWAKEN_UNDYING_ARMOR_BONUS;
@@ -219,8 +233,12 @@ public class ModConfig {
     public static final IntValue AWAKEN_ALL_SEEING_RADIUS;
     public static final IntValue AWAKEN_ALL_SEEING_RADAR_MAX;
     public static final IntValue AWAKEN_ALL_SEEING_RADAR_SCAN_INTERVAL;
+    /** 觉醒雷达目标集开关（v1.4.9.1，默认 true=仅 Monster 子类；false=一切非玩家生物） */
+    public static final BooleanValue AWAKEN_ALL_SEEING_RADAR_MONSTERS_ONLY;
     public static final DoubleValue AWAKEN_SWIFT_PUSH_RADIUS;
     public static final DoubleValue AWAKEN_SWIFT_PUSH_STRENGTH;
+    /** 觉醒加速推开目标集开关（v1.4.9.1，默认 true=仅 Monster 子类；false=一切非玩家生物） */
+    public static final BooleanValue AWAKEN_SWIFT_PUSH_MONSTERS_ONLY;
 
     static {
         BUILDER.push("冒险能力配置");
@@ -266,6 +284,8 @@ public class ModConfig {
             .defineInRange("healing_block_base", 3, 1, 60);
         HEALING_BLOCK_PER_MILESTONE = BUILDER.comment("每额外里程碑增加的禁疗时间（秒）")
             .defineInRange("healing_block_per_milestone", 1, 0, 30);
+        HEALING_BLOCK_PVP_ENABLED = BUILDER.comment("PVP 禁疗开关（默认 false=对玩家目标不生效；true 后对玩家挂禁疗标记与觉醒易伤——治疗药水/heal 回血被拦，属常规 PVP 效果；强制归零与终局复验对玩家恒短路不随本开关放开）")
+            .define("healing_block_pvp_enabled", false);
         BUILDER.pop();
 
         BUILDER.push("虚空踏步");
@@ -306,6 +326,8 @@ public class ModConfig {
             .defineInRange("soul_quench_healing_block_multiplier", 1.5, 1.0, 10.0);
         SOUL_QUENCH_PARTICLE_COUNT = BUILDER.comment("命中时灵魂蓝火粒子数量（0=关闭粒子反馈）")
             .defineInRange("soul_quench_particle_count", 6, 0, 100);
+        SOUL_QUENCH_PVP_ENABLED = BUILDER.comment("PVP 淬魂开关（默认 false=对玩家目标不生效；true 后对玩家走分层分支——自定义伤害走 hurt 管线照常结算[受击方真血/伤害抗性/死亡抗拒公平处理]，引擎兜底直写/清盾/清无敌帧恒短路不随本开关放开）")
+            .define("soul_quench_pvp_enabled", false);
         BUILDER.pop();
 
         BUILDER.push("破敌之眼");
@@ -315,6 +337,8 @@ public class ModConfig {
             .define("piercing_gaze_feedback_enabled", true);
         PIERCING_GAZE_FEEDBACK_PARTICLE_COUNT = BUILDER.comment("穿透反馈粒子数量")
             .defineInRange("piercing_gaze_feedback_particle_count", 10, 0, 100);
+        PIERCING_GAZE_PVP_ENABLED = BUILDER.comment("PVP 穿透开关（默认 false=对玩家目标不穿透，觉醒禁无敌帧同步禁用；true 后对玩家生效——穿透会绕过 PVP 保护类模组的 hurt 取消，与觉醒禁无敌帧共用此开关）")
+            .define("piercing_gaze_pvp_enabled", false);
         BUILDER.pop();
 
         BUILDER.push("影杀");
@@ -361,6 +385,8 @@ public class ModConfig {
             .defineInRange("lifesteal_cap_ratio", 0.2, 0.0, 1.0);
         LIFESTEAL_KILL_HEAL = BUILDER.comment("击杀回馈固定回血量（HP，0=关闭；觉醒后叠加 AWAKEN_LIFESTEAL_KILL_HEAL）")
             .defineInRange("lifesteal_kill_heal", 3.0, 0.0, 20.0);
+        LIFESTEAL_PVP_ENABLED = BUILDER.comment("PVP 嗜血开关（默认 false=对玩家目标不吸血、PVP 击杀不回馈；true 后两处同步放开，纯自身回复不影响防御）")
+            .define("lifesteal_pvp_enabled", false);
         BUILDER.pop();
 
         BUILDER.push("大地之力");
@@ -492,6 +518,8 @@ public class ModConfig {
             .defineInRange("awaken_shadow_kill_aoe_ratio", 0.15, 0.0, 1.0);
         AWAKEN_SHADOW_KILL_AOE_MAX_TARGETS = BUILDER.comment("觉醒影杀 - AOE 最大目标数")
             .defineInRange("awaken_shadow_kill_aoe_max_targets", 16, 1, 200);
+        AWAKEN_SHADOW_KILL_AOE_MONSTERS_ONLY = BUILDER.comment("觉醒影杀 - AOE 链式斩杀仅限 Monster 子类（默认 true；false 后动物/中立等一切非玩家生物也进 AOE）")
+            .define("awaken_shadow_kill_aoe_monsters_only", true);
         AWAKEN_LIFESTEAL_SHIELD_CAP = BUILDER.comment("觉醒嗜血 - 吸收护盾上限（生命比例）")
             .defineInRange("awaken_lifesteal_shield_cap", 0.2, 0.0, 1.0);
         AWAKEN_LIFESTEAL_KILL_HEAL = BUILDER.comment("觉醒嗜血 - 击杀回馈额外回血量（HP，叠加在 lifesteal_kill_heal 上）")
@@ -504,6 +532,8 @@ public class ModConfig {
             .defineInRange("awaken_purified_soul_weakness_amplifier", 1, 0, 4);
         AWAKEN_PURIFIED_SOUL_WEAKNESS_DURATION = BUILDER.comment("觉醒净魂 - 虚弱持续时间（tick，默认100=5秒）")
             .defineInRange("awaken_purified_soul_weakness_duration", 100, 20, 600);
+        AWAKEN_PURIFIED_SOUL_AURA_MONSTERS_ONLY = BUILDER.comment("觉醒净魂 - 虚弱光环仅限 Monster 子类（默认 true；false 后动物/中立等一切非玩家生物也吃光环）")
+            .define("awaken_purified_soul_aura_monsters_only", true);
         AWAKEN_JUDGMENT_RANGE_MULT = BUILDER.comment("觉醒旅者审判 - 范围倍率")
             .defineInRange("awaken_judgment_range_mult", 1.5, 1.0, 10.0);
         AWAKEN_SANCTUARY_SPEED = BUILDER.comment("觉醒旅者庇护 - 可移动速度倍率")
@@ -541,12 +571,16 @@ public class ModConfig {
             .defineInRange("awaken_all_seeing_radius", 24, 1, 128);
         AWAKEN_ALL_SEEING_RADAR_MAX = BUILDER.comment("觉醒全视之眼 - 威胁雷达最多显示目标数（防堵屏）")
             .defineInRange("awaken_all_seeing_radar_max", 6, 1, 16);
+        AWAKEN_ALL_SEEING_RADAR_MONSTERS_ONLY = BUILDER.comment("觉醒全视之眼 - 威胁雷达仅显示 Monster 子类（默认 true；false 后动物/中立等一切非玩家生物也上雷达）")
+            .define("awaken_all_seeing_radar_monsters_only", true);
         AWAKEN_ALL_SEEING_RADAR_SCAN_INTERVAL = BUILDER.comment("觉醒全视之眼 - 雷达扫描间隔（tick，默认10=0.5秒）")
             .defineInRange("awaken_all_seeing_radar_scan_interval", 10, 1, 100);
         AWAKEN_SWIFT_PUSH_RADIUS = BUILDER.comment("觉醒加速 - 疾跑推开半径（格）")
             .defineInRange("awaken_swift_push_radius", 3.0, 0.0, 16.0);
         AWAKEN_SWIFT_PUSH_STRENGTH = BUILDER.comment("觉醒加速 - 疾跑推力强度")
             .defineInRange("awaken_swift_push_strength", 0.6, 0.0, 4.0);
+        AWAKEN_SWIFT_PUSH_MONSTERS_ONLY = BUILDER.comment("觉醒加速 - 推开仅限 Monster 子类（默认 true；false 后动物/中立等一切非玩家生物也会被推开）")
+            .define("awaken_swift_push_monsters_only", true);
         BUILDER.pop(); // 觉醒强化
 
         BUILDER.pop(); // 能力数值

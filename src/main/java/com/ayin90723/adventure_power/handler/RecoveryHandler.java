@@ -151,7 +151,7 @@ public class RecoveryHandler {
         if (event.isCanceled()) return;
         LivingEntity target = event.getEntity();
         if (target.level().isClientSide()) return;
-        if (target instanceof Player) return; // PVP 击杀无效
+        if (target instanceof Player && !ModConfig.LIFESTEAL_PVP_ENABLED.get()) return; // PVP 击杀无效（v1.4.9.1 可配置）
 
         // 弹射物击杀（弓/弩/三叉戟）的 getEntity() 是弹射物本身，走 resolveAttacker 回溯
         Entity rawAttacker = PiercingGazeUtil.resolveAttacker(event.getSource());
@@ -195,7 +195,7 @@ public class RecoveryHandler {
         // 弹射物击杀（弓/弩/三叉戟）的 getEntity() 是弹射物本身，走 resolveAttacker 回溯
         //（v1.3.7 与击杀回馈 onLivingDeath 统一，弓/弩/三叉戟伤害也能吸血）
         if (!(PiercingGazeUtil.resolveAttacker(event.getSource()) instanceof Player attacker)) return;
-        if (target instanceof Player) return; // PVP 无效
+        if (target instanceof Player && !ModConfig.LIFESTEAL_PVP_ENABLED.get()) return; // PVP 无效（v1.4.9.1 可配置）
 
         // 跳过内部穿透伤害，防递归
         if (DamageUtil.isInternalSource(event.getSource())) return;

@@ -183,6 +183,20 @@ public class HealingBlockEffect extends MobEffect {
     * 不满足 {@code health > tracked}，自然放行，无递归。
     */
    public static void clampBack(LivingEntity self, float tracked) {
+      // v1.4.9.1 玩家专用钳制路径（PVP 禁疗开放后对玩家生效）：跳过五层引擎——引擎为
+      // Boss 血量存储设计，玩家是标准 DataItem 通道，直写即可且避免对象图触碰玩家。
+      // INTERNAL 标记为 v1.4.0 预留方案：reject_manip 放行、真血同步层按 INTERNAL 分支
+      // 接受降血（钳制与防御层不对抗）——PVP 语义=禁疗玩家被 heal/药水回血后压回低点
+      if (self instanceof net.minecraft.world.entity.player.Player) {
+         boolean prevInternal = HealthUtil.INTERNAL_HEALTH_WRITE.get();
+         HealthUtil.INTERNAL_HEALTH_WRITE.set(true);
+         try {
+            self.setHealth(tracked);
+         } finally {
+            HealthUtil.INTERNAL_HEALTH_WRITE.set(prevInternal);
+         }
+         return;
+      }
       // v1.4.3 二十轮：清盾前置已下沉引擎 execute 磨血分支统一处理（调用点零纪律）。
       // 禁疗的额外语义：回血只发生在盾侧时，引擎清盾后读数已 ≤ 低点，execute 磨血
       // 通道的值闸/验证自然不写血（目标值=读数−0 无降向空间）——无需调用点预判

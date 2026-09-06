@@ -4,7 +4,9 @@ import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.config.ModConfig;
 import net.minecraft.client.Minecraft;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.monster.Monster;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.event.TickEvent;
@@ -94,13 +96,18 @@ public class ClientHudDataCache {
         double px = mc.player.getX(), py = mc.player.getY(), pz = mc.player.getZ();
         AABB box = new AABB(px - radius, py - radius, pz - radius,
                             px + radius, py + radius, pz + radius);
-        List<Monster> monsters = mc.level.getEntitiesOfClass(Monster.class, box);
+        // v1.4.9.1 目标集可配置：默认仅 Monster 子类，awaken_all_seeing_radar_monsters_only=false
+        // 时一切非玩家生物上雷达（Player 排除不随配置放开——雷达语义是威胁提示）
+        boolean monstersOnly = ModConfig.AWAKEN_ALL_SEEING_RADAR_MONSTERS_ONLY.get();
+        List<LivingEntity> monsters = mc.level.getEntitiesOfClass(LivingEntity.class, box,
+            e -> e != mc.player && e.isAlive() && !(e instanceof Player)
+                && (!monstersOnly || e instanceof Monster));
 
         // 先按 3D 距离排序并截断到 max，再算方向/名称——避免对全部实体做翻译查找。
         // 排序键与显示距离一致（3D），保证「最近目标」就是列表第一个。
         float yaw = mc.player.getYRot();
-        List<Monster> sorted = new ArrayList<>();
-        for (Monster m : monsters) {
+        List<LivingEntity> sorted = new ArrayList<>();
+        for (LivingEntity m : monsters) {
             if (m.isRemoved() || !m.isAlive()) continue;
             double dx = m.getX() - px;
             double dy = m.getY() - py;
@@ -117,7 +124,7 @@ public class ClientHudDataCache {
         radarTargets.clear();
         int limit = Math.min(max, sorted.size());
         for (int i = 0; i < limit; i++) {
-            Monster m = sorted.get(i);
+            LivingEntity m = sorted.get(i);
             double dx = m.getX() - px;
             double dy = m.getY() - py;
             double dz = m.getZ() - pz;

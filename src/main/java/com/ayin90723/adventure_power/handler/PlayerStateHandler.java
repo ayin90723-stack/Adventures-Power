@@ -549,16 +549,18 @@ public class PlayerStateHandler {
                 int weaknessAmp = ModConfig.AWAKEN_PURIFIED_SOUL_WEAKNESS_AMPLIFIER.get();
                 int weaknessDur = ModConfig.AWAKEN_PURIFIED_SOUL_WEAKNESS_DURATION.get();
                 AABB aabb = player.getBoundingBox().inflate(radius);
-                // 直接按 Monster 类型收集（v1.4.0 审查优化）：原先拉取半径内全部
-                // LivingEntity 再 instanceof 过滤，与 SwiftHandler 的同款扫描对齐
-                //（Player 不实现 Monster 接口，无需再排除自身）
-                List<net.minecraft.world.entity.monster.Monster> targets = player.level()
-                    .getEntitiesOfClass(net.minecraft.world.entity.monster.Monster.class, aabb,
-                        net.minecraft.world.entity.monster.Monster::isAlive);
+                // v1.4.9.1 目标集可配置：默认仅 Monster 子类（v1.4.0 审查优化保留——默认路径
+                // 直接按类型收集），awaken_purified_soul_aura_monsters_only=false 时一切非玩家
+                // 生物也吃光环（Player 排除不随配置放开——对玩家施 debuff 属 PVP 干扰）
+                boolean monstersOnly = ModConfig.AWAKEN_PURIFIED_SOUL_AURA_MONSTERS_ONLY.get();
+                List<LivingEntity> targets = player.level()
+                    .getEntitiesOfClass(LivingEntity.class, aabb,
+                        e -> e.isAlive() && !(e instanceof Player)
+                            && (!monstersOnly || e instanceof net.minecraft.world.entity.monster.Monster));
                 // 刷新余量：时长的 60%，且至少覆盖到下一次施加（避免配置短时长时断档）
                 int refreshThreshold = Math.min(weaknessDur * 3 / 5,
                     ModConfig.AWAKEN_PURIFIED_SOUL_AURA_INTERVAL.get());
-                for (net.minecraft.world.entity.monster.Monster target : targets) {
+                for (LivingEntity target : targets) {
                     MobEffectInstance existing = target.getEffect(MobEffects.WEAKNESS);
                     if (existing == null || existing.getAmplifier() < weaknessAmp
                         || existing.getDuration() < refreshThreshold) {

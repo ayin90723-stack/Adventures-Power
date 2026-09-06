@@ -346,10 +346,13 @@ public class ShadowKillHelper {
         int maxTargets = ModConfig.AWAKEN_SHADOW_KILL_AOE_MAX_TARGETS.get();
 
         AABB aabb = killed.getBoundingBox().inflate(radius);
+        // v1.4.9.1 目标集可配置：默认仅 Monster 子类，awaken_shadow_kill_aoe_monsters_only=false
+        // 时一切非玩家生物进 AOE（Player 排除不随配置放开——处决链语义）
+        boolean monstersOnly = ModConfig.AWAKEN_SHADOW_KILL_AOE_MONSTERS_ONLY.get();
         java.util.List<LivingEntity> nearby = killed.level().getEntitiesOfClass(LivingEntity.class, aabb,
             e -> e != attacker && e != killed && e.isAlive()
                 && !(e instanceof Player)
-                && e instanceof net.minecraft.world.entity.monster.Monster);
+                && (!monstersOnly || e instanceof net.minecraft.world.entity.monster.Monster));
 
         int count = 0;
         CompoundTag playerData = attacker.getPersistentData();

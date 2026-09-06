@@ -264,9 +264,10 @@ public final class PiercingGazeUtil {
      * @return true 表示这是一次应当穿透的破敌之眼攻击
      */
     public static boolean shouldPierce(DamageSource source, LivingEntity target) {
-        // PVP 禁用：穿透三连会绕过玩家 hurt 被取消时的保护（PVP 保护类模组），
-        // 且觉醒禁无敌帧让对手无敌帧失效——对玩家目标一律不穿透
-        if (target instanceof Player) {
+        // PVP 禁用（v1.4.9.1 可配置，默认 false）：穿透三连会绕过玩家 hurt 被取消时的保护
+        //（PVP 保护类模组），且觉醒禁无敌帧让对手无敌帧失效——对玩家目标一律不穿透；
+        // 开启后觉醒禁无敌帧（CombatAbilityHandler.handlePiercingGazeAwakened）同步放开
+        if (target instanceof Player && !ModConfig.PIERCING_GAZE_PVP_ENABLED.get()) {
             return false;
         }
         Entity attacker = resolveAttacker(source);

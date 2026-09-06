@@ -165,8 +165,9 @@ public class CombatAbilityHandler {
 
     /** 破敌之眼觉醒：破无敌一击后，目标 N tick 内无法获得无敌帧（piercing_gaze+fullyUnlocked 已在 onLivingHurt 门禁） */
     private static void handlePiercingGazeAwakened(LivingHurtEvent event, LivingEntity target, Player attacker, IAdventureProgress progress) {
-        // PVP 禁用：禁无敌帧标记对玩家不生效（与穿透链一致，破敌之眼对玩家目标整体禁用）
-        if (target instanceof Player) return;
+        // PVP 禁用（v1.4.9.1 可配置，默认 false）：禁无敌帧标记对玩家不生效（与穿透链共用
+        // piercing_gaze_pvp_enabled，破敌之眼对玩家目标整体开关）
+        if (target instanceof Player && !ModConfig.PIERCING_GAZE_PVP_ENABLED.get()) return;
         if (target.invulnerableTime <= 0) return;
         long endTime = target.level().getGameTime() + ModConfig.AWAKEN_PIERCING_GAZE_NO_IFRAME_TICKS.get();
         PIERCING_GAZE_NO_IFRAME_END.put(target, endTime);
@@ -197,17 +198,22 @@ public class CombatAbilityHandler {
      * mod 拦截则通过 HealthUtil 直写血量兜底。
      */
     private static void handleSoulQuench(LivingHurtEvent event, LivingEntity target, Player attacker, IAdventureProgress progress) {
-        // PVP 禁用：淬魂按真实血量（getEffectiveHealth）计算百分比伤害，
-        // 对玩家目标会扫到冒险者自身的真实血条备份（true_health 通道），
-        // 且兜底直写（setHealthLikeAny 含对象图插针）与玩家侧防御体系冲突
-        if (target instanceof Player) return;
+        // PVP 分层分支（v1.4.9.1，soul_quench_pvp_enabled 默认 false 整体禁用）：开启后对玩家
+        // 仅走"自定义伤害"——下方 hurt(soulStrike) 管线照常结算，受击方真血/伤害抗性/死亡抗拒
+        // 公平处理；引擎语义三件对玩家恒短路：①清盾（对象图探测与玩家防御自冲突）②清无敌帧
+        // （保留原版 PVP 节奏）③兜底直写（BloodWriteEngine 对玩家短路）。读侧无冲突：
+        // getEffectiveHealth 对玩家=DataItem 直读（只读不写，不碰真血备份通道）
+        boolean pvpBranch = target instanceof Player;
+        if (pvpBranch && !ModConfig.SOUL_QUENCH_PVP_ENABLED.get()) return;
 
         // v1.4.3 灵魂打击（破盾，用户构思）：淬魂直击灵魂——护盾类次分量先清零（每刀维持，
         // 对面回充下刀再清）。清盾后 getEffectiveHealth 读到的即真血：下方伤害基准/觉醒
         // 斩杀线/兜底写入全部自动基于真血，多存储合成血 Boss（真血+护盾）恢复单分量模型
         // （识别两级：结构级[getHealth 覆写分量集合 − 死亡判定消费字段，混淆免疫]优先，
         // 名字词根兜底——见 MultiStoreWriter.clearShieldComponents）。普通目标零影响（负缓存空转）
-        com.ayin90723.adventure_power.util.probe.MultiStoreWriter.clearShieldComponents(target);
+        if (!pvpBranch) {
+            com.ayin90723.adventure_power.util.probe.MultiStoreWriter.clearShieldComponents(target);
+        }
 
         int milestones = AbilityGate.effectiveCount(progress, AbilityIds.SOUL_QUENCH);
         Ability raw = AbilityRegistry.get(AbilityIds.SOUL_QUENCH);
@@ -253,13 +259,18 @@ public class CombatAbilityHandler {
             extraDamage, actualDealt, healthBefore, HealthUtil.getEffectiveHealth(target), target.isAlive());
 
         // 清零无敌帧 + 受击闪烁：hurt() 后原版会将 invulnerableTime 设为 10
-        target.invulnerableTime = 0;
-        clearHurtTime(target);
+        // （PVP 分层分支恒短路：保留原版 PVP 无敌帧节奏，不参与）
+        if (!pvpBranch) {
+            target.invulnerableTime = 0;
+            clearHurtTime(target);
+        }
 
         // 兜底：hurt() 被外部 mod（Boss 限伤/硬上限等）拦截 → 走五层改血引擎
         // v1.4.2：拦截判定容差量纲化（大血量目标读数 ulp 地板，原裸 0.01 下限会误判拦截）
+        // （PVP 分层分支恒短路：引擎直写与玩家侧真血防御自冲突——玩家目标 hurt 未生效
+        // 就让它未生效，不做直写补刀）
         float epsilon = ProbeScales.interceptTolerance(extraDamage, healthBefore);
-        if (target.isAlive() && actualDealt < extraDamage - epsilon) {
+        if (!pvpBranch && target.isAlive() && actualDealt < extraDamage - epsilon) {
             float correctedHealth = Math.max(healthBefore - extraDamage, 0.0F);
             DebugLog.soulQuench("[淬魂] 兜底直写: hp {} → {}（hurt 被拦截/限伤，实际仅扣 {}）",
                 healthBefore, correctedHealth, actualDealt);
@@ -314,9 +325,12 @@ public class CombatAbilityHandler {
     // ==================== 5. 禁疗之触 — 攻击施加禁疗 ====================
 
     private static void handleHealingBlock(LivingHurtEvent event, LivingEntity target, Player attacker, IAdventureProgress progress) {
-        // PVP 禁用：禁疗标记（含 FORCE_KILL 强制击杀链）对玩家不生效——
-        // 玩家目标拥有本模组自己的死亡抗拒/真实血量防御，禁疗击穿免死特性属行为自冲突
-        if (target instanceof Player) return;
+        // PVP 分层分支（v1.4.9.1，healing_block_pvp_enabled 默认 false 整体禁用）：开启后对玩家
+        // 挂禁疗标记 + 觉醒易伤——heal/药水回血被拦属常规 PVP 效果；"不许活"的终局层对玩家
+        // 恒短路（不随本开关放开）：FORCE_KILL 归零链与终局复验的底层玩家守卫
+        // （HealingBlockEffect.scheduleFinalityRecheck / ExecutionFinalizer Player guard）保留；
+        // 钳制走玩家专用路径（clampBack 跳过引擎，INTERNAL 直写——v1.4.0 预留方案）
+        if (target instanceof Player && !ModConfig.HEALING_BLOCK_PVP_ENABLED.get()) return;
         int milestones = AbilityGate.effectiveCount(progress, AbilityIds.HEALING_BLOCK);
         Ability ability = AbilityRegistry.get(AbilityIds.HEALING_BLOCK);
         if (ability == null) return;
