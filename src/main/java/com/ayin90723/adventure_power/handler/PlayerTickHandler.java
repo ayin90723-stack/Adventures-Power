@@ -13,7 +13,9 @@ import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.effect.MobEffectCategory;
 import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.event.entity.player.PlayerEvent.PlayerLoggedOutEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
@@ -36,6 +38,7 @@ import java.util.UUID;
  *   <li>环境免疫（每 tick 清火）</li>
  *   <li>受击坚韧（超时层数归零）</li>
  *   <li>庇护无敌过期清除</li>
+ *   <li>不朽装备耐久守护（v1.4.9.2，每 tick 巡检 6 槽修满）</li>
  * </ul>
  * <p>
  * v1.4.0：移除「持有冒险的终点 → 自动全解锁」测试入口——终点已移出创造物品栏，
@@ -96,6 +99,17 @@ public class PlayerTickHandler {
             player.clearFire();
         }
 
+        // 不朽装备耐久守护（v1.4.9.2）：能力激活时装备 Damage 字段的合法上升为零——
+        // 原版全部损耗路径已被 LegacyHurtAndBreakMixin 在 hurtAndBreak/hurt 入口拦截，
+        // 修复方向（经验修补/铁砧/砂轮）全部降向。因此任何非零 Damage 都是绕过损耗链的
+        // 直接操纵（setDamageValue/NBT 直写，如"每秒磨损 1% 耐久"类效果），巡检直接修满。
+        // 目标状态是常量（满耐久），无需快照对账；damage>0 才写，满耐久零写入零同步开销；
+        // 服务端改 NBT 后背包 menu 的 broadcastChanges 自动推给客户端，无需手动发包
+        if (progress.isAbilityEnabled(AbilityIds.UNDYING_GEAR)
+                && ModConfig.UNDYING_GEAR_DURABILITY_GUARD.get()) {
+            repairEquipmentDurability(player);
+        }
+
         // 受击坚韧：超过 5 秒无受伤 -> 层数归零
         if (progress.isAbilityEnabled(AbilityIds.RESILIENCE)) {
             long lastHurt = progress.getLastHurtTime();
@@ -110,6 +124,27 @@ public class PlayerTickHandler {
             progress.setSanctuaryInvulEnd(0);
             SyncUtil.syncCapabilityToPersistent(player, progress);
             SyncUtil.syncToClient(player);
+        }
+    }
+
+    /** 守护的 6 个标准槽位（Curios 饰品槽不纳入——饰品大多无耐久，复用型物品反而会被清坏） */
+    private static final EquipmentSlot[] GUARDED_SLOTS = {
+        EquipmentSlot.MAINHAND, EquipmentSlot.OFFHAND,
+        EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET
+    };
+
+    /**
+     * 耐久守护巡检：非零损伤直接修满（v1.4.9.2）。
+     * 仅作用于有耐久上限的物品（getMaxDamage &gt; 0）——拿 Damage 字段当计时器/能量的
+     * 复用型物品若未设 maxDamage 则天然免疫；设了 maxDamage 的复用型会被清零，
+     * 已知边界，遇到再加物品黑名单（暂不做，最小修改）。
+     */
+    private static void repairEquipmentDurability(Player player) {
+        for (EquipmentSlot slot : GUARDED_SLOTS) {
+            ItemStack stack = player.getItemBySlot(slot);
+            if (!stack.isEmpty() && stack.getMaxDamage() > 0 && stack.getDamageValue() > 0) {
+                stack.setDamageValue(0);
+            }
         }
     }
 

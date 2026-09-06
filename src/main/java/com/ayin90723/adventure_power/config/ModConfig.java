@@ -134,6 +134,10 @@ public class ModConfig {
     /** PVP 嗜血开关（v1.4.9.1，默认 false=对玩家不吸血/PVP 击杀不回馈；true 时两处同步放开） */
     public static final BooleanValue LIFESTEAL_PVP_ENABLED;
 
+    // --- 不朽装备 ---
+    /** 耐久守护巡检开关（v1.4.9.2，默认 true=每 tick 巡检 6 槽把非零 Damage 修满，覆盖绕过损耗链的直接操纵） */
+    public static final BooleanValue UNDYING_GEAR_DURABILITY_GUARD;
+
     // --- 大地之力 ---
     public static final DoubleValue DIGGING_POWER_BASE;
     public static final DoubleValue DIGGING_POWER_PER_MILESTONE;
@@ -410,6 +414,11 @@ public class ModConfig {
             .defineInRange("fortune_favor_bonus_step", 1, 0, 5);
         FORTUNE_FAVOR_LUCK_SCALE = BUILDER.comment("幸运属性倍率（乘在时运/抢夺等级上写入 Attributes.LUCK，0=关闭幸运加成）")
             .defineInRange("fortune_favor_luck_scale", 1.0, 0.0, 10.0);
+        BUILDER.pop();
+
+        BUILDER.push("不朽装备");
+        UNDYING_GEAR_DURABILITY_GUARD = BUILDER.comment("耐久守护巡检开关（默认 true=每 tick 巡检主手/副手/四甲，非零损伤直接修满——覆盖绕过 hurtAndBreak/hurt 损耗链的直接操纵[setDamageValue/NBT 直写]；仅作用于有耐久上限的物品，未设 maxDamage 的复用型物品[Damage 字段当计时器/能量]不受影响）")
+            .define("undying_gear_durability_guard_enabled", true);
         BUILDER.pop();
 
         BUILDER.push("坚韧之躯");
