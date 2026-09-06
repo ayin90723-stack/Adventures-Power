@@ -72,7 +72,16 @@ public class DeathDefyHandler {
             // 真血同步恢复 → 锁定 → 无敌期"闭环（无敌期锁定已由 DeathDefyMixin 双层保证，
             // 缺的只有救场瞬间这一环）。TrueHealthHandler 事件层兜底无此问题（其 cancel
             // 前提本就是 backup > 0，写入值即 backup 值）
-            progress.setBackupHealth(restoreHealth);
+            // 审查修（同类问题排查）：仅 true_health 激活时才写——二连 die 第二击的拦截层
+            // （TrueHealthServerPlayerMixin / TrueHealthHandler 第一道 / 重生门禁）全带
+            // true_health 门禁，未解锁玩家无人消费该值；无条件写入会让 backup>0 残留注入
+            // 未解锁玩家（persistentData 持久化，无撤销点），而容器守护链门禁只查
+            // isAdventurer+backup>0（无 true_health 检查）会误纳其入受保护名单——容器抹除
+            // 自动重建 + repairHealth 拉满血 = 真血效果未解锁生效。此处加门禁后 backup
+            // 恢复"仅真血 gated 路径写入"的隐含不变量
+            if (progress.isAbilityEnabled(AbilityIds.TRUE_HEALTH)) {
+                progress.setBackupHealth(restoreHealth);
+            }
 
             // 写入无敌和冷却结束时间
             long invulEnd = currentTime + ModConfig.DEATH_DEFY_INVUL_DURATION.get();
