@@ -81,6 +81,19 @@ public class PlayerTickHandler {
         long serverTick = player.level().getServer() != null
             ? player.level().getServer().getTickCount() : currentTime;
 
+        // 存量清扫（审查修复，DeathDefyHandler backup 门禁的存量补全）：backup>0 但
+        // true_health 未启用 = 旧版死亡抗拒救场残留（v1.4.9~v1.4.9.2 无条件写 backup，
+        // 未解锁玩家无归零路径——toggle 需先解锁、gated 层休眠、死亡重生/登录 Clone
+        // 整体 NBT 复制保留残留）或未来异常注入；容器守护 backup>0 判据会误纳其入
+        // 受保护名单（真血效果未解锁生效）。v1.4.9.3 起 backup 只可能于 true_health
+        // 启用时写入，本条件成立=必然异常态；归零幂等（清后恒 false 零开销），
+        // 落盘防下次登录读回残留
+        if (progress.getBackupHealth() > 0.0F
+                && !progress.isAbilityEnabled(AbilityIds.TRUE_HEALTH)) {
+            progress.setBackupHealth(0.0F);
+            SyncUtil.syncCapabilityToPersistent(player, progress);
+        }
+
         // Buff 延长（每 3 秒）
         if (progress.isAbilityEnabled(AbilityIds.PERPETUAL_BLESSING)) {
             long lastCheck = lastBuffCheck.getOrDefault(player.getUUID(), -1L);
