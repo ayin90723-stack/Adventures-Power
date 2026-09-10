@@ -16,6 +16,52 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 
 println "Java: ${System.getProperty 'java.version'}, JVM: ${System.getProperty 'java.vm.version'} (${System.getProperty 'java.vendor'}), Arch: ${System.getProperty 'os.arch'}"
 
+// FG6 的 fg.deobf 只重映射依赖 jar 的类字节码、不重写 mixin refmap（SRG 值原样保留），
+// dev（Mojmap 运行时）下第三方 mixin 依赖（Curios AccessorEntity 等）查 refmap 得 SRG 名
+// 找不到目标成员。ForgeGradle/Forge 链均无兜底（Curios #424 同配置用户未解决），
+// 用 Mixin 0.8 自带的 RemappingReferenceMapper 运行时重映射兜底：
+//   -Dmixin.env.remapRefMap=true + -Dmixin.env.refMapRemappingFile=<标准 srg 文件>
+// 注意 srg 文件必须用「裸成员名」做 key（Mixin 对 refmap 值做子串替换，完整路径永不命中；
+// 数字/单字符 srg 名是子串炸弹须过滤）——由 genMixinRemapSrg 从 MCPConfig tsrg 自动生成。
+def genMixinRemapSrg = tasks.register('genMixinRemapSrg') {
+    def output = layout.buildDirectory.file('mixin-remap-official.srg')
+    outputs.file(output)
+    outputs.upToDateWhen { false }
+    doLast {
+        def mcpConfigDir = new File(System.getProperty('user.home'),
+                '.gradle/caches/forge_gradle/minecraft_user_repo/de/oceanlabs/mcp/mcp_config')
+        def tsrg = []
+        if (mcpConfigDir.isDirectory()) {
+            mcpConfigDir.eachDir { vDir ->
+                if (vDir.name.startsWith('1.20.1-')) {
+                    vDir.eachFile { f -> if (f.name.startsWith('srg_to_official_1.20.1') && f.name.endsWith('.tsrg')) tsrg << f }
+                }
+            }
+        }
+        if (tsrg.isEmpty()) {
+            throw new GradleException("未找到 srg_to_official tsrg（先执行一次 build 让 ForgeGradle 下载 MCPConfig 后重试）: ${mcpConfigDir}")
+        }
+        def outFile = output.get().asFile
+        outFile.parentFile.mkdirs()
+        int n = 0
+        outFile.withWriter('UTF-8') { w ->
+            tsrg.first().eachLine('UTF-8') { raw ->
+                if (raw.isEmpty() || raw.startsWith('#')) return
+                if (!raw.startsWith('\t') && !raw.startsWith(' ')) return // 类行：跳过（1.20.1 类名不混淆）
+                def parts = raw.trim().split(/\s+/)
+                // 只保留 f_/m_ 前缀的成员行（字段 2 列 / 方法 ≥3 列），输出裸名映射
+                if (parts.length == 2 && parts[0].startsWith('f_')) {
+                    w.writeLine("FD: ${parts[0]} ${parts[1]}"); n++
+                } else if (parts.length >= 3 && parts[0].startsWith('m_')) {
+                    w.writeLine("MD: ${parts[0]} ${parts[1]}"); n++
+                }
+            }
+        }
+        logger.lifecycle("genMixinRemapSrg: ${n} 条成员映射 <- ${tsrg.first().name}")
+    }
+}
+tasks.matching { it.name ==~ /run(Client|Server|GameTestServer|Data)/ }.configureEach { dependsOn genMixinRemapSrg }
+
 minecraft {
     mappings channel: mapping_channel, version: mapping_version
     copyIdeResources = true
@@ -25,6 +71,8 @@ minecraft {
             workingDirectory project.file('run')
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'debug'
+            property 'mixin.env.remapRefMap', 'true'
+            property 'mixin.env.refMapRemappingFile', layout.buildDirectory.file('mixin-remap-official.srg').get().asFile.absolutePath
             mods {
                 "${mod_id}" {
                     source sourceSets.main

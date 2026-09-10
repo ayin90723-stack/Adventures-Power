@@ -8,8 +8,6 @@ import com.ayin90723.adventure_power.util.BuffExclusionManager;
 import com.ayin90723.adventure_power.util.SyncUtil;
 import com.ayin90723.adventure_power.input.DoubleJumpHandler;
 import com.ayin90723.adventure_power.skill.ActiveSkillHandler;
-import com.ayin90723.adventure_power.ui.AdventureMainScreen;
-import net.minecraft.client.Minecraft;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
@@ -298,13 +296,9 @@ public class NetworkHandler {
                         new BuffBlacklistSyncPacket(blacklist));
                 });
             } else {
-                // 服务端→客户端：接收完整排除列表
-                ctx.get().enqueueWork(() -> {
-                    Minecraft mc = Minecraft.getInstance();
-                    if (mc.screen instanceof AdventureMainScreen screen) {
-                        screen.onSyncReceived(msg.blacklist);
-                    }
-                });
+                // 服务端→客户端：接收完整排除列表（客户端动作在 ClientPacketActions——
+                // 本类在服务端注册网络时即被加载，字节码不得直引客户端类，v1.4.9.4 dist 隔离）
+                ctx.get().enqueueWork(() -> ClientPacketActions.applyBuffBlacklist(msg.blacklist));
                 ctx.get().setPacketHandled(true);
             }
         }
@@ -332,20 +326,7 @@ public class NetworkHandler {
                 ctx.get().setPacketHandled(true);
                 return;
             }
-            ctx.get().enqueueWork(() -> {
-                Minecraft mc = Minecraft.getInstance();
-                if (mc.player != null) {
-                    // 先提取里程碑注册表元数据初始化客户端 MilestoneRegistry（直接 NBT 构建，不经 JSON 中转）
-                    if (msg.data.contains("_milestone_registry")) {
-                        com.ayin90723.adventure_power.util.MilestoneRegistry.clientInitFromNbt(
-                            msg.data.getCompound("_milestone_registry"));
-                    }
-                    mc.player.getCapability(AdventureProgressCapability.CAPABILITY).ifPresent(
-                        progress -> progress.deserializeNBT(msg.data));
-                    // 如果有等待同步后打开的屏幕，现在打开
-                    AdventureProgressCapability.tryOpenPendingScreen();
-                }
-            });
+            ctx.get().enqueueWork(() -> ClientPacketActions.applyAdventureSync(msg.data));
             ctx.get().setPacketHandled(true);
         }
     }

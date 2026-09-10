@@ -9,6 +9,7 @@ import com.ayin90723.adventure_power.util.MilestoneRegistry;
 import com.ayin90723.adventure_power.util.ScoreboardUtil;
 import com.ayin90723.adventure_power.util.SyncUtil;
 import com.ayin90723.adventure_power.network.NetworkHandler;
+import com.ayin90723.adventure_power.ui.ClientPanelOpener;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -76,21 +77,18 @@ public class AdventureProgressCapability {
         NetworkHandler.sendAdventureSyncRequest();
     }
 
-    /** 同步包到达后，如有等待中的屏幕则打开 */
+    /** 同步包到达后，如有等待中的屏幕则打开。
+     * <p>
+     * 开屏动作在 {@link com.ayin90723.adventure_power.ui.ClientPanelOpener}——本类是双端
+     * {@code @EventBusSubscriber} 注解类，专用服务器上 AutomaticEventSubscriber 以
+     * initialize=true 强制加载本类，方法体直接引用 Minecraft/AdventureMainScreen 会在
+     * 类链接期触发客户端类加载被 RuntimeDistCleaner 拒绝（v1.4.9.4 服务端崩溃修复）；
+     * 本方法仅被客户端方向的进度同步包 handler 调用，运行时天然只在客户端执行 */
     public static void tryOpenPendingScreen() {
         if (pendingScreen == PENDING_NONE) return;
         int type = pendingScreen;
         pendingScreen = PENDING_NONE;
-        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
-        if (mc.player != null) {
-            if (type == PENDING_BUFF) {
-                mc.setScreen(new com.ayin90723.adventure_power.ui.AdventureMainScreen(com.ayin90723.adventure_power.ui.AdventureMainScreen.Tab.BUFF));
-            } else if (type == PENDING_ABILITY) {
-                mc.setScreen(new com.ayin90723.adventure_power.ui.AdventureMainScreen());
-            } else if (type == PENDING_MILESTONE) {
-                mc.setScreen(new com.ayin90723.adventure_power.ui.AdventureMainScreen(com.ayin90723.adventure_power.ui.AdventureMainScreen.Tab.MILESTONE));
-            }
-        }
+        ClientPanelOpener.open(type);
     }
 
     /** 能力注册表（有序，面板按此顺序显示）。从 AbilityRegistry 注册顺序生成，避免重复维护。 */

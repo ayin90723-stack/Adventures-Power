@@ -7,7 +7,6 @@ import com.ayin90723.adventure_power.milestone.Milestone;
 import com.ayin90723.adventure_power.util.MilestoneRegistry;
 import com.ayin90723.adventure_power.util.ProgressCache;
 import net.minecraft.ChatFormatting;
-import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.entity.player.Player;
@@ -122,7 +121,7 @@ public class AdventureCurioItem extends Item {
                     .withStyle(ChatFormatting.GRAY));
             return;
         }
-        Player player = Minecraft.getInstance().player;
+        Player player = ClientCurioTooltip.localPlayer();
         if (player == null) return;
         IAdventureProgress progress = ProgressCache.get(player);
 
