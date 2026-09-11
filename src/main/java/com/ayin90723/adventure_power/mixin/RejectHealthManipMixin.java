@@ -80,7 +80,7 @@ public abstract class RejectHealthManipMixin {
         float currentHealth = HealthUtil.getHealthDirect(player);
         // NaN 任何比较都返回 false，+Infinity 会被误判为回血穿透
         // 这两种特殊浮点值写入 DataItem 后会导致血量永久异常
-        if (Float.isNaN(newHealth) || Float.isInfinite(newHealth)) {
+        if (HealthUtil.isSpecialFloat(newHealth)) {
             ci.cancel();
             return;
         }
@@ -93,12 +93,10 @@ public abstract class RejectHealthManipMixin {
         // reject_manip 防的是外部篡改，不拦模组自身的状态维护
         if (HealthUtil.INTERNAL_HEALTH_WRITE.get()) return;
 
-        // 审查修 P3#4：原版 maxHealth 属性驱动的 clamp 降值放行——onAttributeModified →
-        // onHealthChanged 写入 setHealth(clamp(current, 0, maxHealth))，生命上限下移
-        // （诅咒装备/药水类机制）时写入值精确等于新 maxHealth。拦截它会让血量停在新上限
-        // 之上直到下次受伤才自纠；写 maxHealth 值在当前血 ≤ 上限时属升血方向已被上方放行，
-        // 能进到这里的 newHealth==maxHealth 必然是"血高于上限的归位"，与 clamp 语义一致
-        if (newHealth == player.getMaxHealth()) return;
+        // 审查修 P3#4：原版 maxHealth 属性驱动的 clamp 降值放行——判定收束到
+        // HealthUtil.isMaxHealthClampSettle（与数据层/死亡抗拒层共用的唯一判定源，
+        // 三层豁免必须同步演化，勿在本类复制裸表达式）
+        if (HealthUtil.isMaxHealthClampSettle(player, newHealth)) return;
 
         // 外部直接 setHealth 降血 → 检查能力（ProgressCache 按 tick 缓存引用，避免每次 resolve）
         var progress = com.ayin90723.adventure_power.util.ProgressCache.get(player);

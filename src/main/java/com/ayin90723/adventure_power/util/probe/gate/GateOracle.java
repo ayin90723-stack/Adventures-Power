@@ -252,8 +252,13 @@ public final class GateOracle {
         /** 钥匙执行（resolved 回放共用）：写钥匙 + 读回验证 + pending 窗口。 */
         private boolean unlockDeathGateWith(GateAnalyzer.DeathKeyRecord key) {
             Object snapshot = null;
+            // v1.4.9.5 审查修：snapshot==null 是引用型 codec 字段的合法初值——以
+            // snapshot!=null 判定是否回滚会漏"已读到初值 null"的场景，encoder/decoder
+            // 抛异常时字段残留 encoded 死亡态（正是下方注释点名的"比不翻更糟"）
+            boolean snapshotRead = false;
             try {
                 snapshot = key.field.get(target);
+                snapshotRead = true;
                 Object encoded = key.encoder.invoke(null, key.deathValue);
                 key.field.set(target, encoded);
                 // 读回验证是硬门槛：decoder 读回不等于 deathValue 即回滚——防 encoder/decoder
@@ -269,8 +274,9 @@ public final class GateOracle {
                 scheduleDeathKeyPending(key, snapshot);
                 return true;
             } catch (Exception e) {
-                // 异常路径回滚（快照在手）：写已发生即还原，未发生还原也无害（写回原值）
-                if (snapshot != null) {
+                // 异常路径回滚（快照在手）：读到快照即还原（null 初值照 set(null)），
+                // 写未发生时还原也无害（写回原值）
+                if (snapshotRead) {
                     try {
                         key.field.set(target, snapshot);
                     } catch (Exception ignored) {
@@ -528,7 +534,19 @@ public final class GateOracle {
                         } else if (value instanceof Float fl) {
                             f.setFloat(target, fl);
                         } else if (value instanceof Integer in) {
-                            f.setInt(target, in);
+                            // v1.4.9.5 审查修按字段实际类型分派 long/double/int。现状说明
+                            //（复查 2026-09）：classifyFieldRead 把 D/J desc 归 PROGRESS_FIELD，
+                            // 但该类候选在 execComboVerify 的 deadValueOf（getFloat）即抛
+                            // IllegalArgumentException → FAIL，走不到本方法——本分派为防御性
+                            // 完备分支，当前实际不可达；若要真正启用 D/J 候选需同步改
+                            // deadValueOf 按 desc 取值（getLong/getDouble）
+                            if (f.getType() == long.class) {
+                                f.setLong(target, in);
+                            } else if (f.getType() == double.class) {
+                                f.setDouble(target, in);
+                            } else {
+                                f.setInt(target, in);
+                            }
                         }
                     }
                     case PERMIT_DATA_ITEM, PROGRESS_DATA_ITEM -> {

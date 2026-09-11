@@ -364,8 +364,9 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
                 String name = abilityNames.get(i);
                 int y = TOP_Y + i * ROW_HEIGHT - scrollOffset;
                 boolean isDisabled = disabledAbilities.contains(id);
+                // hover 高亮同样对齐可视区（防被裁剪半行的信息框在表头区弹出）
                 if (mouseX >= leftX && mouseX <= leftX + PANEL_WIDTH
-                    && mouseY >= y - 1 && mouseY < y + ROW_HEIGHT - 1) {
+                    && mouseY >= Math.max(y - 1, TOP_Y) && mouseY < Math.min(y + ROW_HEIGHT - 1, TOP_Y + visibleHeight())) {
                     graphics.fill(leftX, y - 1, leftX + PANEL_WIDTH, y + ROW_HEIGHT - 1, 0x22FFFFFF);
                     hoveredAbilityId = id;
                 }
@@ -660,8 +661,9 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
                 int y = TOP_Y + i * ROW_HEIGHT - scrollOffset;
                 String effectId = i < displayEffectIds.size() ? displayEffectIds.get(i) : "";
                 boolean isExcluded = excludedEffects.contains(effectId);
+                // hover 判定与可视区 clamp（与 renderAbilityTab 同款，防被裁剪半行在表头区高亮）
                 if (mouseX >= leftX && mouseX <= leftX + PANEL_WIDTH
-                    && mouseY >= y - 1 && mouseY < y + ROW_HEIGHT - 1) {
+                    && mouseY >= Math.max(y - 1, TOP_Y) && mouseY < Math.min(y + ROW_HEIGHT - 1, TOP_Y + visibleHeight())) {
                     graphics.fill(leftX, y - 1, leftX + PANEL_WIDTH, y + ROW_HEIGHT - 1, 0x22FFFFFF);
                 }
                 String dot = isExcluded ? "§7○" : "§a●";
@@ -851,6 +853,10 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
     }
 
     private boolean abilityTabClicked(double mouseX, double mouseY) {
+        // 点击命中区与 enableRowScissors 的可视区 [TOP_Y, TOP_Y+visibleHeight) 对齐（v1.4.9.5
+        // 审查修）：滚动非整行偏移时首行只渲染下半部分，若不裁 y，点被裁剪掉的上半
+        // （视觉上是表头/空白区）会误触该行发包切换能力
+        if (mouseY < TOP_Y || mouseY >= TOP_Y + visibleHeight()) return false;
         for (int i = 0; i < abilityEntries.size(); i++) {
             int y = TOP_Y + i * ROW_HEIGHT - scrollOffset;
             if (y < TOP_Y - ROW_HEIGHT || y > TOP_Y + visibleHeight()) continue;
@@ -870,11 +876,14 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
     }
 
     private boolean buffTabClicked(double mouseX, double mouseY) {
+        // 与 abilityTabClicked 同款可视区对齐（防被裁剪半行误发包）
+        if (mouseY < TOP_Y || mouseY >= TOP_Y + visibleHeight()) return false;
         for (int i = 0; i < displayEffects.size(); i++) {
             int y = TOP_Y + i * ROW_HEIGHT - scrollOffset;
             if (y < TOP_Y - ROW_HEIGHT || y > TOP_Y + visibleHeight()) continue;
+            // hover 判定与可视区 clamp（与 renderAbilityTab 同款，防被裁剪半行在表头区命中）
             if (mouseX >= leftX && mouseX <= leftX + PANEL_WIDTH
-                && mouseY >= y - 1 && mouseY < y + ROW_HEIGHT - 1) {
+                && mouseY >= Math.max(y - 1, TOP_Y) && mouseY < Math.min(y + ROW_HEIGHT - 1, TOP_Y + visibleHeight())) {
                 // 复用 refreshDisplayEffects 的预计算 key（与渲染行同源，避免重复注册表查询）
                 if (i >= displayEffectIds.size()) return false;
                 NetworkHandler.sendBuffToggle(displayEffectIds.get(i));

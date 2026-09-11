@@ -257,17 +257,24 @@ public class NetworkHandler {
 
         public static void encode(BuffBlacklistSyncPacket msg, FriendlyByteBuf buf) {
             buf.writeBoolean(msg.request);
-            // 对称限长（v1.4.0 审查修复）：与 decode 的 readUtf(64) 对齐——外部途径
-            // （手改存档 NBT / 旧版本数据）写入的超长 key 在此过滤，否则服务端
-            // 无界编码成功、客户端 readUtf(64) 解码抛异常，该玩家进入"进服即踢"循环
+            // 对称限长（v1.4.0 审查修复；v1.4.9.5 语义对齐）：与 decode 的 readUtf(64)
+            // 对齐——readUtf/writeUtf 的 64 是 UTF-8 字节数（超限抛异常），过滤判据
+            // 必须同按字节数：原按 UTF-16 字符数过滤，22 个非 ASCII 字符（66 字节）
+            // 即通过过滤后在 writeUtf 编码期炸包。纵深口径与
+            // BuffExclusionManager.parseFromNbt 的字节侧过滤三点对齐
             int count = 0;
             for (String s : msg.blacklist) {
-                if (s != null && s.length() <= 64) count++;
+                if (isEncodableKey(s)) count++;
             }
             buf.writeVarInt(count);
             for (String s : msg.blacklist) {
-                if (s != null && s.length() <= 64) buf.writeUtf(s, 64);
+                if (isEncodableKey(s)) buf.writeUtf(s, 64);
             }
+        }
+
+        /** encode 过滤判据：非 null 且 UTF-8 字节数 ≤ 64（与 readUtf(64) 同量纲）。 */
+        private static boolean isEncodableKey(String s) {
+            return s != null && s.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 64;
         }
 
         public static BuffBlacklistSyncPacket decode(FriendlyByteBuf buf) {

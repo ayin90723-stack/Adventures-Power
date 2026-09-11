@@ -17,8 +17,10 @@ import net.minecraftforge.fml.common.Mod.EventBusSubscriber.Bus;
  * 替代原本 5 个 handler 各自订阅 PlayerTickEvent 的模式（每玩家每 tick 5 次
  * Capability 解析 + 5 次门禁），减少到 1 次。
  * <p>
- * 执行顺序：PlayerTickHandler -> PlayerStateHandler -> ExplorationAbilityHandler
- * -> RecoveryHandler -> KnockbackResistHandler -> FortuneFavorHandler。各 handler 的
+ * 执行顺序（门禁后）：PlayerTickHandler -> PlayerStateHandler -> ExplorationAbilityHandler
+ * -> RecoveryHandler -> KnockbackResistHandler -> FortuneFavorHandler -> MagnetHandler
+ * -> AllSeeingHandler -> SwiftHandler -> MilestoneTriggerManager(surviveNight/yBelow/reachY)
+ * -> DoubleJumpHandler.onTick。各 handler 的
  * onTick 不再做门禁检查（由本分发器统一做），仅保留业务逻辑。
  * <p>
  * 开局安全网（补发饰品 + 自动激活冒险者）与庇护速度维护需对非冒险者执行，在门禁前调用。

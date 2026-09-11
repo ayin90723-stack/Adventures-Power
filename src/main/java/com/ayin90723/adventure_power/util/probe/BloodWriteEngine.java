@@ -117,9 +117,12 @@ public final class BloodWriteEngine {
             HealthUtil.setHealthLikeAny(target, targetHealth);
             return true;
         }
-        REENTRANT.set(true);
-        DebugLog.EngineCaller prevCaller = DebugLog.setEngineCaller(caller);
+        // v1.4.9.5 审查修：set(true) 移入 try——若 DebugLog.setEngineCaller 抛异常，
+        // 守卫永久卡 true，该线程后续全部 execute 静默走 raw（引擎空转）
+        DebugLog.EngineCaller prevCaller = null;
         try {
+            REENTRANT.set(true);
+            prevCaller = DebugLog.setEngineCaller(caller);
             // 二十轮：磨血语义统一清盾前置（自引擎入口下沉——原散布在淬魂/破敌/禁疗钳制×2/审判
             // 五个调用点，每新增调用点都要记得手动加，破敌漏加实测血量乱跳）。写入正确性是引擎
             // 的责任；淬魂入口另有一份清盾服务于伤害计算基准（灵魂打击语义），保留互不冲突
@@ -171,6 +174,8 @@ public final class BloodWriteEngine {
             }
             return executeInner(target, targetHealth);
         } finally {
+            // restoreEngineCaller(null) 安全（ThreadLocal.set(null)）——setEngineCaller
+            // 未执行（首行抛异常）时恢复 null 初值即为正确状态
             DebugLog.restoreEngineCaller(prevCaller);
             REENTRANT.set(false);
         }
@@ -480,56 +485,108 @@ public final class BloodWriteEngine {
                 if (entry == null) return false;
                 path.entryField.setAccessible(true);
                 Object prev = path.entryField.get(entry);
-                if (path.entryBitPacked) {
-                    bitsWrite(entry, path.entryField, Float.floatToRawIntBits(writeValue * path.entryScale) & 0xFFFFFFFFL);
-                } else {
-                    Class<?> ft = path.entryField.getType();
-                    if (ft == Float.class || ft == Object.class) {
-                        path.entryField.set(entry, writeValue);
+                boolean written = false;
+                boolean ok = false;
+                try {
+                    if (path.entryBitPacked) {
+                        bitsWrite(entry, path.entryField, Float.floatToRawIntBits(writeValue * path.entryScale) & 0xFFFFFFFFL);
                     } else {
-                        path.entryField.setFloat(entry, writeValue);
+                        Class<?> ft = path.entryField.getType();
+                        if (ft == Float.class || ft == Object.class) {
+                            path.entryField.set(entry, writeValue);
+                        } else {
+                            path.entryField.setFloat(entry, writeValue);
+                        }
+                    }
+                    written = true;
+                    float after = target.getHealth();
+                    float eps = ProbeScales.epsilon(Math.max(before, 1.0F));
+                    float driftTol = ProbeScales.driftTolerance(eps);
+                    if (after > before + driftTol) return false;
+                    // 复查修（P1）：位打包条目的 prev 是位型整数（如 100.0F 的位型
+                    // 0x42C80000≈1.12e9），按值语义算 expectedDrop 恒天文数字 → 验证恒失败 →
+                    // 每刀级联失效风暴（L3_CACHE.remove + onPositiveCacheDrift + 全层重扫）。
+                    // 位打包分支按解码值参与预期下降量推算
+                    if (prev instanceof Number n) {
+                        float prevVal = path.entryBitPacked
+                            ? Float.intBitsToFloat((int) n.longValue())
+                            : n.floatValue();
+                        // E2.5：位打包条目的解码值在字段刻度上，期望降幅换回读数刻度再比对
+                        float expectedDrop = path.entryBitPacked
+                            ? prevVal / path.entryScale - writeValue
+                            : prevVal - writeValue;
+                        float actualDrop = before - after;
+                        if (expectedDrop >= ProbeScales.verifyThreshold(eps) && actualDrop < expectedDrop - driftTol) {
+                            return false;
+                        }
+                    }
+                    ok = true;
+                    return true;
+                } finally {
+                    // v1.4.9.5 审查修：验证失败/读数异常出口必须还原条目旧值——否则条目
+                    // 永久停留攻击值（级联重扫若判定非血量宿主，Boss 自身代码消费该条目即
+                    // 读到污染值；且重扫 probeStaticMap 会把污染值当 oldVal "还原"，原始
+                    // 真值彻底丢失）。与慢路径 probeStaticMap/probeEntryDrill 的 finally
+                    // 同栈还原纪律对齐
+                    if (written && !ok) {
+                        restoreEntryFieldQuietly(entry, path.entryField, path.entryBitPacked, prev);
                     }
                 }
+            }
+            Object prev = map.get(key);
+            boolean existed = map.containsKey(key);
+            map.put(key, writeValue);
+            boolean ok = false;
+            try {
                 float after = target.getHealth();
                 float eps = ProbeScales.epsilon(Math.max(before, 1.0F));
                 float driftTol = ProbeScales.driftTolerance(eps);
+                // 读数异常上升 = 通路指向错误宿主
                 if (after > before + driftTol) return false;
-                // 复查修（P1）：位打包条目的 prev 是位型整数（如 100.0F 的位型
-                // 0x42C80000≈1.12e9），按值语义算 expectedDrop 恒天文数字 → 验证恒失败 →
-                // 每刀级联失效风暴（L3_CACHE.remove + onPositiveCacheDrift + 全层重扫）。
-                // 位打包分支按解码值参与预期下降量推算
                 if (prev instanceof Number n) {
-                    float prevVal = path.entryBitPacked
-                        ? Float.intBitsToFloat((int) n.longValue())
-                        : n.floatValue();
-                    // E2.5：位打包条目的解码值在字段刻度上，期望降幅换回读数刻度再比对
-                    float expectedDrop = path.entryBitPacked
-                        ? prevVal / path.entryScale - writeValue
-                        : prevVal - writeValue;
+                    float expectedDrop = n.floatValue() - writeValue;
                     float actualDrop = before - after;
                     if (expectedDrop >= ProbeScales.verifyThreshold(eps) && actualDrop < expectedDrop - driftTol) {
                         return false;
                     }
                 }
+                ok = true;
                 return true;
-            }
-            Object prev = map.get(key);
-            map.put(key, writeValue);
-            float after = target.getHealth();
-            float eps = ProbeScales.epsilon(Math.max(before, 1.0F));
-            float driftTol = ProbeScales.driftTolerance(eps);
-            // 读数异常上升 = 通路指向错误宿主
-            if (after > before + driftTol) return false;
-            if (prev instanceof Number n) {
-                float expectedDrop = n.floatValue() - writeValue;
-                float actualDrop = before - after;
-                if (expectedDrop >= ProbeScales.verifyThreshold(eps) && actualDrop < expectedDrop - driftTol) {
-                    return false;
+            } finally {
+                // v1.4.9.5 审查修：同上——失败出口还原（原不存在→remove；原存在[含 null 值
+                // 条目，containsKey 判定而非 prev!=null]→写回快照）
+                if (!ok) {
+                    try {
+                        if (existed) {
+                            map.put(key, prev);
+                        } else {
+                            map.remove(key);
+                        }
+                    } catch (Exception ignored) {
+                    }
                 }
             }
-            return true;
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    /** 条目对象字段还原（applyAttack 失败出口专用；还原自身异常静默——宿主不可写时无法更优）。 */
+    private static void restoreEntryFieldQuietly(Object entry, java.lang.reflect.Field f,
+                                                 boolean bitPacked, Object prev) {
+        try {
+            if (bitPacked) {
+                long bits = prev instanceof Number n ? n.longValue() : 0L;
+                bitsWrite(entry, f, bits & 0xFFFFFFFFL);
+            } else {
+                Class<?> ft = f.getType();
+                if (ft == Float.class || ft == Object.class) {
+                    f.set(entry, prev);
+                } else {
+                    f.setFloat(entry, prev instanceof Number n ? n.floatValue() : 0.0F);
+                }
+            }
+        } catch (Exception ignored) {
         }
     }
 

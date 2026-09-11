@@ -4,6 +4,7 @@ import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.util.AdventureItemNbtUtil;
+import com.ayin90723.adventure_power.util.PersistentDataKeys;
 import com.ayin90723.adventure_power.util.SyncUtil;
 import com.ayin90723.adventure_power.milestone.Milestone;
 import com.ayin90723.adventure_power.util.MilestoneRegistry;
@@ -67,9 +68,14 @@ public class AdvancementEventHandler {
             // obtain_item 无统计可查——原版无"曾拾取过物品"记录，无法追赶，文档注明）
             if (m.trigger() != null) {
                 boolean met = switch (m.trigger().type()) {
-                    // 度过首夜判定：当前处于黎明段 或 曾睡过觉（睡觉跳过黎明窗口，与
-                    // MilestoneTriggerManager 的夜间标记方案语义一致）
-                    case "survive_night" -> (player.level().getDayTime() >= 23000 && player.level().isDay())
+                    // 度过首夜判定（v1.4.9.5 修正）：与 MilestoneTriggerManager 的夜间标记
+                    // 方案同源——读 persistentData 的过夜标记（isNight 时打、白天消费）。
+                    // 旧判定 getDayTime() >= 23000 缺 % 24000：getDayTime 是跨天累计值，
+                    // 世界存活 ~19 分钟后恒真，条件退化为 isDay()——从未过夜的玩家白天
+                    // 即被补发 first_night；且即便补上取模，23000~24000 日内段与 isDay()
+                    //（%24000 < 12000）组合恒 false，原"黎明段"语义本就不可达
+                    case "survive_night" -> (!player.level().isNight()
+                        && player.getPersistentData().getBoolean(PersistentDataKeys.SURVIVE_NIGHT_KEY))
                         || player.getStats().getValue(Stats.CUSTOM.get(Stats.SLEEP_IN_BED)) > 0;
                     case "y_below" -> player.getY() < (m.trigger().y() != null ? m.trigger().y() : 0);
                     case "first_death" -> player.getStats().getValue(Stats.CUSTOM.get(Stats.DEATHS)) > 0;

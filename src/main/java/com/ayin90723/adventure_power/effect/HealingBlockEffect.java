@@ -328,6 +328,10 @@ public class HealingBlockEffect extends MobEffect {
       /** 预先标记：HIGHEST 优先级记录禁疗之触实体即将死亡 */
       @SubscribeEvent(priority = EventPriority.HIGHEST, receiveCanceled = true)
       public static void onLivingDeathPreMark(LivingDeathEvent event) {
+         // PVP 分层（v1.4.9.1）：FORCE_KILL 处决链（打标→归零+uncancel→终局裁决）对玩家恒短路，
+         // 与 scheduleFinalityRecheck 同门禁——守卫必须落在本处：玩家若被打标，LOWEST 消费端的
+         // "归零+uncancel"会绕过自家 DeathDefyHandler（HIGHEST）的取消死亡，强制处决玩家
+         if (event.getEntity() instanceof net.minecraft.world.entity.player.Player) return;
          if (isActive(event.getEntity())) {
             event.getEntity().getPersistentData().putBoolean(FORCE_KILL_KEY, true);
             // v1.4.6 双源：内存表兜底——重写 getPersistentData() 返回空 tag 的 Boss
@@ -441,6 +445,9 @@ public class HealingBlockEffect extends MobEffect {
          FORCE_KILL_MARKED.remove(entity.getUUID());
          if (forceKill) {
             data.remove(FORCE_KILL_KEY);
+            // 防御纵深：打标端已排除玩家（NBT 标记/内存表均不会为玩家存在），此处兜底
+            // 恒短路——防第三方/数据包直写 FORCE_KILL_KEY 把玩家送进处决链
+            if (entity instanceof net.minecraft.world.entity.player.Player) return;
             // 如果被其他模组取消（复活），强制归零血量并放行死亡
             // v1.4.2：五层引擎处决归零（覆盖静态 Map/加密存储型；全层失败退 raw 清零原版+自定义血条）
             if (event.isCanceled()) {

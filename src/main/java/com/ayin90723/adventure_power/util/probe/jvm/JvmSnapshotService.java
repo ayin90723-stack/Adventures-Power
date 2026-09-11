@@ -17,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 /**
- * JVM 只读字节码快照服务（v1.4.8，{@code jvm_snapshot_enabled} 默认关）。
+ * JVM 只读字节码快照服务（v1.4.8，{@code jvm_snapshot_enabled} 默认开——实测通过后翻转）。
  * <p>
  * 能力：dump <b>mod 层类</b>的"运行时真身"字节码——经 Mixin 与（若存在）对方 javaagent
  * 全部 transformation 处理后的最终类形态，供 {@code GateAnalyzer} 的覆写/存储情报分析
@@ -94,7 +94,7 @@ public final class JvmSnapshotService {
      * <p>
      * 线程：服务端主线程（GateAnalyzer 调用语境）；retransform 是 safepoint 操作，
      * mod 类毫秒级、per-class 一次性；首类快照另含一次性自附加开销（本地进程通信典型
-     * 10~100ms，全部发生在战斗 tick 主线程——默认关的配置策略即为此）。
+     * 10~100ms，全部发生在战斗 tick 主线程——分析按类一次后走 per-class 缓存，稳态零重复成本）。
      *
      * @param cls 目标 Class（取其加载态）
      * @return 真身字节码；null = 无快照可用

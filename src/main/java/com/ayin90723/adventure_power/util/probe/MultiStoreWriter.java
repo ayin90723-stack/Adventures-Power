@@ -422,9 +422,9 @@ public final class MultiStoreWriter {
         }
         // ② 名字级兜底（仅在结构级零命中时——避免双重扫描，幂等无害但日志干净）
         if (found.isEmpty()) {
-            scanShieldSlots(target, found, reading);
-            scanShieldFields(target, found, reading);
-            scanShieldMethods(target, found, reading);
+            scanShieldSlots(target, found);
+            scanShieldFields(target, found);
+            scanShieldMethods(target, found);
         }
         if (found.isEmpty()) {
             NO_SHIELD.add(cls);
@@ -560,7 +560,7 @@ public final class MultiStoreWriter {
     }
 
     /** 名字级：扫描类链 static EntityDataAccessor 字段，字段名含护盾词根 → 槽通路候选（行为验证）。 */
-    private static void scanShieldSlots(LivingEntity target, List<ShieldPath> found, float reading) {
+    private static void scanShieldSlots(LivingEntity target, List<ShieldPath> found) {
         for (Class<?> c = target.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
             if (c == net.minecraft.world.entity.player.Player.class) continue;
             for (java.lang.reflect.Field f : c.getDeclaredFields()) {
@@ -582,7 +582,7 @@ public final class MultiStoreWriter {
     }
 
     /** 名字级：扫描类链（LivingEntity 前）实例 float/Float 字段，名字含护盾词根 → 字段通路候选（行为验证）。 */
-    private static void scanShieldFields(LivingEntity target, List<ShieldPath> found, float reading) {
+    private static void scanShieldFields(LivingEntity target, List<ShieldPath> found) {
         for (Class<?> c = target.getClass(); c != null && c != Object.class
             && c != net.minecraft.world.entity.LivingEntity.class; c = c.getSuperclass()) {
             for (java.lang.reflect.Field f : c.getDeclaredFields()) {
@@ -608,7 +608,7 @@ public final class MultiStoreWriter {
      * 存在 → 方法通路候选。getter 是还原的前提（验证失败写回旧值，不残留乱写）——
      * invoke 前先取旧值快照，失败先还原再继续。
      */
-    private static void scanShieldMethods(LivingEntity target, List<ShieldPath> found, float reading) {
+    private static void scanShieldMethods(LivingEntity target, List<ShieldPath> found) {
         for (Class<?> c = target.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
             for (java.lang.reflect.Method m : c.getDeclaredMethods()) {
                 if (java.lang.reflect.Modifier.isStatic(m.getModifiers())) continue;

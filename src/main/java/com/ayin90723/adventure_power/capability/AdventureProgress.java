@@ -191,7 +191,10 @@ public class AdventureProgress implements IAdventureProgress {
      */
     @Override
     public boolean isAbilityEnabled(String id) {
-        if (disabledAbilities.contains(id)) return false;
+        // v1.4.9.5：走 cachedDisabledView（HashSet O(1)）而非 CopyOnWriteArraySet 线性
+        // contains——本方法是全模组最高频门禁，disabled 写点（toggle/deserializeNBT）
+        // 均已同步置 null 缓存，语义等价
+        if (getDisabledAbilities().contains(id)) return false;
         if (AbilityRegistry.get(id) == null) return false;
         if (cachedRegistryHash != System.identityHashCode(MilestoneRegistry.getAll())) {
             rebuildAbilityCache();

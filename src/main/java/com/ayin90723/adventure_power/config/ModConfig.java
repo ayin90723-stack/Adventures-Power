@@ -112,6 +112,9 @@ public class ModConfig {
     public static final DoubleValue SHADOW_KILL_HP_RATIO;
     public static final IntValue SHADOW_KILL_DATA_EXPIRE_TICKS;
     public static final IntValue SHADOW_KILL_CLEANUP_INTERVAL;
+    /** 斩杀伤害倍率（v1.4.9.5 配置化，原硬编码 ×10）：hurt 伤害 = maxHealth × 本值。
+     *  上限含义：足够秒杀任何 Boss；不用 Float.MAX_VALUE 防其他模组 amount×ratio 溢出 NaN */
+    public static final DoubleValue SHADOW_KILL_DAMAGE_MULTIPLE;
 
     // --- 休养生息 ---
     public static final IntValue RAPID_RECOVERY_AMPLIFIER_BASE;
@@ -354,6 +357,9 @@ public class ModConfig {
             .defineInRange("shadow_kill_data_expire_ticks", 6000, 200, 72000);
         SHADOW_KILL_CLEANUP_INTERVAL = BUILDER.comment("全局清理过期影子血量的周期（tick，默认200=10秒）")
             .defineInRange("shadow_kill_cleanup_interval", 200, 20, 1200);
+        SHADOW_KILL_DAMAGE_MULTIPLE = BUILDER.comment("斩杀伤害倍率（hurt 伤害 = 目标最大生命值 × 本值，默认 10；"
+            + "保持足够大以秒杀任何 Boss，且防其他模组做 amount×ratio 时溢出 Infinity/NaN）")
+            .defineInRange("shadow_kill_damage_multiple", 10.0, 1.0, 1000.0);
         BUILDER.pop();
 
         BUILDER.push("休养生息");
@@ -492,8 +498,8 @@ public class ModConfig {
 
         BUILDER.push("全视之眼");
         ALL_SEEING_NIGHT_VISION_DURATION = BUILDER.comment("夜视刷新时长（tick，循环刷新保持常驻；默认2400=2分钟。"
-            + "注意：原版夜视剩余<200tick（10秒）时画面会闪烁，刷新阈值自适应 min(400, max(200, 本值-1))——"
-            + "本值高于400时在剩余400tick刷新，低于400时随本值自适应，均远离闪烁线）")
+            + "注意：原版夜视剩余<200tick（10秒）时画面会闪烁，刷新阈值自适应 min(400, max(200, 本值-200))——"
+            + "本值高于400时在剩余400tick刷新，低于400时在剩余200tick刷新（间隔=本值-200），均远离闪烁线）")
             .defineInRange("all_seeing_night_vision_duration", 2400, 60, 24000);
         BUILDER.pop();
 

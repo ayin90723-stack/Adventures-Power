@@ -21,7 +21,7 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  *
  * @see PiercingGazeArrowMixin
  */
-@Mixin(ThrownTrident.class)
+@Mixin(value = ThrownTrident.class, priority = 1000)
 public class PiercingGazeTridentMixin {
 
     @Redirect(

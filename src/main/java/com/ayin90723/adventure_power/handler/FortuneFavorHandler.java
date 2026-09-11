@@ -77,7 +77,7 @@ public class FortuneFavorHandler {
         FortuneContext.clear();
 
         AbilityGate.getActiveProgress(player, AbilityIds.FORTUNE_FAVOR).ifPresent(progress -> {
-            FortuneContext.setBreaker(player);
+            FortuneContext.setBreaker(player, player.level().getGameTime());
             if (progress.isFullyUnlocked()) {
                 FortuneContext.setAwakened(true);
             }

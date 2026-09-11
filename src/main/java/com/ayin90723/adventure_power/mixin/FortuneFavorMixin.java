@@ -33,6 +33,9 @@ public class FortuneFavorMixin {
         // 只处理时运查询
         if (enchantment != Enchantments.BLOCK_FORTUNE) return;
 
+        // v1.4.9.5 同 tick 时效校验（见 FortuneContext.getBreaker）：上下文无法在破坏完成
+        // 栈尾清理（掉落计算发生在 BreakEvent 回调返回之后），带 tick 校验后第三方在后续
+        // tick 的无关时运查询不再继承上一位玩家的加成
         Player player = FortuneContext.getBreaker();
         if (player == null) return;
 

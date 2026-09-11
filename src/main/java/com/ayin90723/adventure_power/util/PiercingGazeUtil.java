@@ -70,7 +70,13 @@ public final class PiercingGazeUtil {
      * （Mixin Applicator 会尝试混入目标类导致 InvalidMixinException）。
      */
     private static final ThreadLocal<Long> VANILLA_HURT_EVENT_POST_COUNT = ThreadLocal.withInitial(() -> 0L);
-    /** Layer 0（Player.attack）的本次攻击作用域基线（begin 时记录，consume 比较增量） */
+    /**
+     * Layer 0（Player.attack/弹射物侧 interceptAttackHurt）的本次攻击作用域基线
+     * （interceptAttackHurt 入口压栈记录、finally 弹栈恢复——v1.4.9.5 栈式化：
+     * 嵌套攻击各自持有基线，外层基线不被内层覆盖）。
+     * consume 只反映"基线之后的增量"——环境噪声 hurt（怪物互殴等）在两次 attack
+     * 之间的 post 计入基线，不会被下一次 attack 误消费
+     */
     private static final ThreadLocal<Long> VANILLA_HURT_SCOPE_BASE = ThreadLocal.withInitial(() -> 0L);
 
     /** 每个实体最近一次 post 事件时的全局计数（WeakHashMap 弱 key：实体 unload/死亡后自动回收）。
@@ -96,13 +102,6 @@ public final class PiercingGazeUtil {
     /** 读取当前 post 计数（Layer 2 onHurtEnter 压栈时记录本层基准用） */
     public static long getVanillaHurtEventPostCount() {
         return VANILLA_HURT_EVENT_POST_COUNT.get();
-    }
-
-    /** Layer 0（Player.attack 重定向）专用：记录本次攻击作用域的 post 计数基线。
-     *  consume 只反映"基线之后的增量"——环境噪声 hurt（怪物互殴等）在两次 attack
-     *  之间的 post 计入基线，不会被下一次 attack 误消费 */
-    public static void beginVanillaHurtScope() {
-        VANILLA_HURT_SCOPE_BASE.set(VANILLA_HURT_EVENT_POST_COUNT.get());
     }
 
     /**
@@ -169,8 +168,23 @@ public final class PiercingGazeUtil {
         // 算生效不算拦截（吸收是原版减伤行为而非无敌，穿透不越权绕过它）
         float absorptionBefore = living.getAbsorptionAmount();
         // 本次攻击作用域隔离：记录 post 计数基线，consume 只反映"本次 hurt 期间"的新增
-        // （环境噪声 hurt（怪物互殴等）在两次 attack 之间的 post 计入基线，不会被下次消费）
-        beginVanillaHurtScope();
+        // （环境噪声 hurt（怪物互殴等）在两次 attack 之间的 post 计入基线，不会被下次消费）。
+        // v1.4.9.5 栈式化：begin 原实现直接覆盖 ThreadLocal 单槽，嵌套攻击（hurt 管线内
+        // 监听器再发起 Player.attack，反伤/连击类模组）会覆盖外层基线，外层返回后 consume
+        // 拿内层基线比较 → 外层已 post 被误判未 post → 补发事件双结算。与 IN_PIERCING 的
+        // finally 恢复同款弹栈模式，保持外层基线连续
+        long prevScopeBase = VANILLA_HURT_SCOPE_BASE.get();
+        VANILLA_HURT_SCOPE_BASE.set(VANILLA_HURT_EVENT_POST_COUNT.get());
+        try {
+            return doInterceptAttackHurt(living, target, source, amount, healthBefore, absorptionBefore);
+        } finally {
+            VANILLA_HURT_SCOPE_BASE.set(prevScopeBase);
+        }
+    }
+
+    /** {@code interceptAttackHurt} 主体（作用域基线已由外层压栈/弹栈管理）。 */
+    private static boolean doInterceptAttackHurt(LivingEntity living, Entity target, DamageSource source,
+                                                 float amount, float healthBefore, float absorptionBefore) {
         boolean hurtResult = target.hurt(source, amount);
 
         // 实际生效（扣血或扣吸收）就放行（不管 hurtResult 真假）。用 getEffectiveHealth 直读真实血量，

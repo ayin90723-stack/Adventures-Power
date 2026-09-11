@@ -34,7 +34,7 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  * @see PiercingGazePlayerAttackMixin
  * @see PiercingGazeUtil
  */
-@Mixin(AbstractArrow.class)
+@Mixin(value = AbstractArrow.class, priority = 1000)
 public class PiercingGazeArrowMixin {
 
     @Redirect(

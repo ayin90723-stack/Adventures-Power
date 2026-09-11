@@ -53,6 +53,14 @@ public class HealingBlockMixin {
         if (health > tracked) {
             DebugLog.healingBlock("[禁疗] setHealth HEAD 拦截回血: {} -> 低点 {}（原请求 {}）",
                 self, tracked, health);
+            // v1.4.9.5 审查修：PVP 禁疗开放后玩家目标不跑引擎——引擎为 Boss 血量存储设计，
+            // 玩家是标准 DataItem 通道（与 clampBack 的玩家 INTERNAL 直写分支同口径，
+            // 此前仅 clampBack 配了玩家分支、源头层漏配）。拒写已足够：血量停留当前值，
+            // 低点压回由 tick 末钳制层兜底（对玩家走 INTERNAL setHealth 直写）
+            if (self instanceof net.minecraft.world.entity.player.Player) {
+                ci.cancel();
+                return;
+            }
             // v1.4.3 二十轮：清盾前置已下沉引擎 execute 磨血分支统一处理（调用点零纪律）；
             // 禁疗语义：cancel 拒绝回血请求无条件执行，写低点交给引擎（清盾后读数≤低点时
             // 引擎磨血通道自然无降向空间不写血）

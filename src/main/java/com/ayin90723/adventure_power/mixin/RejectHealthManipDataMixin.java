@@ -73,6 +73,9 @@ public abstract class RejectHealthManipDataMixin {
         EntityDataAccessor<Float> dataHealthId = HealthUtil.getDataHealthId();
         if (dataHealthId == null || key != dataHealthId) return false;
         if (!(value instanceof Float newHealth)) return false;
+        // 特殊浮点值直写数据条目同样污染（方法层拦 setHealth，绕过 setHealth 直调
+        // data.set(NaN/Inf) 的路径只有本层能拒）——判定收束 HealthUtil.isSpecialFloat
+        if (HealthUtil.isSpecialFloat(newHealth)) return true;
 
         // 伤害链内写入放行（合法 hurt 结算路径——玩家与禁疗目标共用）
         if (HealthUtil.HURT_DEPTH.get() > 0) return false;
@@ -88,6 +91,13 @@ public abstract class RejectHealthManipDataMixin {
 
         // 升血放行（回血/修复）
         if (newHealth >= HealthUtil.getHealthDirect(player)) return false;
+
+        // P0 修复（审查 2026-09）：原版 maxHealth clamp 归位放行——生命提升药水到期等
+        // 合法降上限走 onAttributeModified → setHealth(clamp(current,0,maxHealth))，
+        // 方法层（P3#4）放行后其体内 data.set 携带 newHealth==maxHealth 进入本层，
+        // 若无此豁免会被 cancel，DataItem 永不归位（血停新上限之上直到下次受伤）。
+        // 判定收束 HealthUtil.isMaxHealthClampSettle（三层共用唯一判定源）
+        if (HealthUtil.isMaxHealthClampSettle(player, newHealth)) return false;
 
         // 能力门禁（ProgressCache 按 tick 缓存，高频安全）
         var progress = com.ayin90723.adventure_power.util.ProgressCache.get(player);

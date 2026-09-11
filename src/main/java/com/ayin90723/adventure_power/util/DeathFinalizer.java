@@ -85,9 +85,31 @@ public final class DeathFinalizer {
             // die 覆写四类良性豁免：调 super（演出型）/ deathSequence / killTool /
             // 自足重写型（v1.4.6-fix：覆写自带 dropAllDeathLoot 全套死亡结算，如灾变
             // Cataclysm 基类--掉落只存在于覆写体内，跳过补完 = 零掉落零经验）
-            if (GateAnalyzer.analyze(target).hasDeathInterception()) {
+            GateAnalyzer.GatePlan plan = GateAnalyzer.analyze(target);
+            if (plan.hasDeathInterception()) {
                 DebugLog.deathFinalize(caller, "[死亡结算] {} 存在拦截型死亡覆写（die 链不自足 / liveness 覆写），跳过 die 补完（处决=影杀）", target);
                 return;
+            }
+
+            // v1.4.9.5 审查修：自杀能力豁免类（deathSequence/killTool 型）的追加硬判据——
+            // 此类目标的 isDeadOrDying 可能是自家演出/击杀体系的阶段判定（无敌相/格挡相
+            // 也返回 true，hasDeathInterception 对其 liveness 覆写豁免），不能再当"已致死"
+            // 依据。只认容器/读数硬证据：deathTime>0（死亡动画已启动）或有效读数已归零
+            // （ProbeScales 量纲，约定 14 禁裸绝对量纲）——否则满血目标会被提前补 die
+            // （死亡演出+掉落提前）。普通怪（无豁免）不受影响：isDeadOrDying 是原版实现。
+            if (plan.isSelfKillCapable()) {
+                int deathTime = ((LivingEntityFieldsAccessor) target).adventure_power$getDeathTime();
+                float reading = TrustedRead.value(target);
+                // 地板取 1.0 而非 ProbeScales.epsilon（复查 2026-09）：epsilon 随
+                // quench_probe_eps_base 配置可低于 1.0，而"写 0 被钩回 1.0"是已认证的
+                // 反弹场景（太阳神使型）——eps<1.0 时该场景会被误判"读数未归零"跳过补 die；
+                // 硬地板 1.0 保证钩回 1.0 恰好在边界放行（1.0 > 1.0 为 false → 补 die）
+                float eps = Math.max(1.0F,
+                    com.ayin90723.adventure_power.util.probe.ProbeScales.epsilon(Math.max(reading, 1.0F)));
+                if (deathTime <= 0 && reading > eps) {
+                    DebugLog.deathFinalize(caller, "[死亡结算] {} 豁免类目标读数未归零且无死亡流程（isDeadOrDying 疑似演出阶段谎报），跳过 die 补完", target);
+                    return;
+                }
             }
 
             DebugLog.deathFinalize(caller, "[死亡结算] {} 血量归零但 die 未执行（绕过 hurt 管线击杀）-> 补完原版死亡", target);

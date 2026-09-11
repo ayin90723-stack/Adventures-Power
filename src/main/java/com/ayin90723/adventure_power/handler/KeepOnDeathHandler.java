@@ -87,6 +87,11 @@ public class KeepOnDeathHandler {
      * 复制时序）。背包满时掉在重生点兜底，物品不消失。
      */
     static void restoreKeptCurioStacks(Player oldPlayer, Player newPlayer) {
+        // 只清 oldPlayer 侧即完成双实体清理——**引用共享语义（字节码实证，勿"修复"此处）**：
+        // Forge ServerPlayer.restoreFrom 的 PERSISTED_NBT_TAG 复制是 put(key, old.get(key))
+        // 且无 copy()，oldPlayer 与 newPlayer 的该子 tag 是同一个 CompoundTag 对象；
+        // 因此本方法不存在"newPlayer 继承 stale 副本需另行清理"的问题（若在此对
+        // newPlayer 侧 remove，会清掉共享源导致下方 getList 恒空、饰品恢复被短路丢失）。
         CompoundTag persisted = oldPlayer.getPersistentData().getCompound(Player.PERSISTED_NBT_TAG);
         ListTag kept = persisted.getList(PersistentDataKeys.KEEP_CURIO_STACK_KEY, Tag.TAG_COMPOUND);
         if (kept.isEmpty()) return;

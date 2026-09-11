@@ -14,6 +14,7 @@ import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.event.TickEvent;
@@ -188,11 +189,17 @@ public class TrueHealthHandler {
         boolean repaired = false;
 
         // ① 已移除复活：removalReason 字段直读（EntityLivenessMixin 空转后 isRemoved()
-        //    读侧不再强制 false，直读判据语义不变）
-        if (((EntityFieldsAccessor) (Object) player).adventure_power$getRemovalReason() != null) {
+        //    读侧不再强制 false，直读判据语义不变）。
+        //    v1.4.9.5 审查修：UNLOADED_WITH_PLAYER/CHANGED_DIMENSION 是登出/换维度的
+        //    合法移除（与 ContainerAuditHandler.gateReason 短路集同口径）——登出玩家的
+        //    快照可能仍在 ServerTick END 名册里，对其"复活+修血"是对已从所有容器丢弃
+        //    对象的无意义操作且污染 debug 日志
+        var removalReason = ((EntityFieldsAccessor) (Object) player).adventure_power$getRemovalReason();
+        if (removalReason != null && removalReason != Entity.RemovalReason.UNLOADED_WITH_PLAYER
+                && removalReason != Entity.RemovalReason.CHANGED_DIMENSION) {
             if (debugLog()) {
                 DebugLog.trueHealth("[TrueHealth-Guard] 实体被标记移除！" +
-                    " reason=" + ((EntityFieldsAccessor) (Object) player).adventure_power$getRemovalReason() +
+                    " reason=" + removalReason +
                     " backup=" + backup + " -> 清除 + 血量恢复");
             }
             HealthUtil.clearRemovedFlag(player);

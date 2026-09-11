@@ -21,8 +21,9 @@ import java.lang.reflect.Method;
 
 /**
  * 处决收尾工具（v1.4.6 提权自 {@code ShadowKillHelper.finalizeSaturationKill} 善后段②~⑨，
- * docs/execution-finality-proposal.md §3.4）：战利品 + 死亡事件 + 五重移除链 + 客户端包 +
- * 容器抹除 + 兜底确认。影杀与禁疗终局层共用的处决语义终端。
+ * docs/execution-finality-proposal.md §3.4）：死亡事件 + 战利品（事件先于掉落，对齐原版
+ * die 顺序——v1.4.9.5）+ 五重移除链 + 客户端包 + 容器抹除 + 兜底确认。
+ * 影杀与禁疗终局层共用的处决语义终端。
  *
  * <h3>调用方门禁（语义纪律）</h3>
  * 仅<b>处决语义所有者</b>可调：影杀（处决）与禁疗终局层（"不许活"兜底，GateOracle
@@ -30,7 +31,7 @@ import java.lang.reflect.Method;
  * <b>禁止</b>调本类——强移善后 = 处决语义（v1.4.5 收敛方案被否的边界就在这里）。
  *
  * <h3>各段不幂等</h3>
- * ②强制掉装备/③dropAllDeathLoot/④事件 post 双跑即双掉落双事件（七轮双善后 bug 同型；
+ * ④事件 post/②强制掉装备/③dropAllDeathLoot 双跑即双事件双掉落（七轮双善后 bug 同型；
  * ⑨ 兜底确认自带重写除外）——防双跑靠调用方契约：{@code GateOracle.tryOpen} 返回 FAILED
  * 时善后已由 finalizeFallback 在其内部跑过，调用方直接 return 勿再调。
  */
@@ -46,7 +47,8 @@ public final class ExecutionFinalizer {
     }
 
     /**
-     * 处决善后段（②~⑨）：战利品 + 死亡事件 + 五重移除链 + 客户端包 + 容器抹除 + 兜底确认。
+     * 处决善后段（②~⑨）：死亡事件 + 战利品（事件先于掉落，对齐原版 die 顺序——
+     * v1.4.9.5）+ 五重移除链 + 客户端包 + 容器抹除 + 兜底确认。
      * <p>
      * 各段独立降级捕获（v1.4.0 分段异常保护随迁）：战利品/事件段失败不阻断移除段；
      * 移除段（⑥~⑨）逐层捕获，保证任一层失败其余层仍执行。
@@ -72,9 +74,17 @@ public final class ExecutionFinalizer {
             return;
         }
 
+        // ④ 手动 post LivingDeathEvent（墓碑/任务模组可正常处理）—— v1.4.9.5 顺序对齐
+        //     原版 die：原版先 post 事件（可被取消，监听器在回调里看到装备未卸/掉落未落地
+        //     的实体、可改写掉落）再 dropAllDeathLoot；此前先掉落后事件与原版相反，
+        //     LootModifier/统计类监听器语义漂移
         // ② 强制掉落全套装备 + ③ 反射调用 dropAllDeathLoot（触发战利品表 /
-        //     LivingDropsEvent / LootModifier）+ ④ 手动 post LivingDeathEvent（墓碑/任务
-        //     模组可正常处理）+ ⑤ 善后清理 —— 战利品/事件段失败不阻断移除
+        //     LivingDropsEvent / LootModifier）+ ⑤ 善后清理 —— 战利品/事件段失败不阻断移除
+        try {
+            MinecraftForge.EVENT_BUS.post(new LivingDeathEvent(target, source));
+        } catch (Exception e) {
+            LOGGER.error("[ExecutionFinalizer] 死亡事件段失败（④），继续移除链 target={}", target, e);
+        }
         try {
             for (EquipmentSlot slot : EquipmentSlot.values()) {
                 ItemStack equipment = target.getItemBySlot(slot);
@@ -90,11 +100,10 @@ public final class ExecutionFinalizer {
             LOGGER.error("[ExecutionFinalizer] 战利品段失败（②③），继续移除链 target={}", target, e);
         }
         try {
-            MinecraftForge.EVENT_BUS.post(new LivingDeathEvent(target, source));
             target.unRide();
             target.ejectPassengers();
         } catch (Exception e) {
-            LOGGER.error("[ExecutionFinalizer] 死亡事件/善后段失败（④⑤），继续移除链 target={}", target, e);
+            LOGGER.error("[ExecutionFinalizer] 善后清理段失败（⑤），继续移除链 target={}", target, e);
         }
 
         // ⑥ 五重移除链 — 逐层递增，确保无 Boss 可拦截（逐层捕获：任一层失败其余层仍执行）

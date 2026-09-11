@@ -82,6 +82,37 @@ public class HealthUtil {
         HURT_DEPTH.set(0);
     }
 
+    // ===== 玩家血量降写拦截层的共享豁免谓词 =====
+    // RejectHealthManipMixin（方法层）/ RejectHealthManipDataMixin（数据层）/
+    // DeathDefyMixin（层1）三处拦截的降写闸门语义必须同步演化——历史上"maxHealth
+    // clamp 归位"豁免（P3#4）只落在方法层、数据层与死亡抗拒层漂移，导致合法归位
+    // 被数据层 cancel（血停新上限之上）。以下谓词是三层的唯一判定源，新增豁免
+    // 一律改这里，禁止在各 Mixin 内复制裸表达式。
+
+    /**
+     * 特殊浮点值判定：NaN 任何比较都返回 false，±Infinity 会被误判为回血穿透——
+     * 这两种值写入 DataItem 后血量永久异常，拦截层必须 cancel。
+     */
+    public static boolean isSpecialFloat(float v) {
+        return Float.isNaN(v) || Float.isInfinite(v);
+    }
+
+    /**
+     * 原版 maxHealth 属性驱动的 clamp 归位判定（审查修 P3#4 同语义，三层共用）。
+     * <p>
+     * 原版 {@code onAttributeModified → onHealthChanged} 走
+     * {@code setHealth(clamp(current, 0, maxHealth))}：生命上限下移（生命提升药水
+     * 到期/装备 modifier 卸下/诅咒装备）且当前血高于新上限时，写入值精确等于新
+     * maxHealth。拦截它会让 DataItem 停在新上限之上直到下次受伤才自纠（方法层放行
+     * 而数据层拦截时尤甚——setHealth 体内的 data.set 会被数据层 cancel）。能进入
+     * 降写分支（newHealth &lt; 当前读数）且 newHealth==maxHealth 的写入必然是
+     * "血高于上限的归位"；写高方向已被升血放行覆盖，本豁免不新增攻击面
+     * （攻击者降血写的是远低于 maxHealth 的值）。
+     */
+    public static boolean isMaxHealthClampSettle(Player player, float newHealth) {
+        return newHealth == player.getMaxHealth();
+    }
+
     private static Field DATA_HEALTH_ID_FIELD;
     /** volatile：初始化可能在客户端/服务端两条线程发生，保证可见性 */
     private static volatile EntityDataAccessor<Float> DATA_HEALTH_ID;
@@ -166,7 +197,10 @@ public class HealthUtil {
                 Float value = target.getEntityData().get(DATA_HEALTH_ID);
                 if (value != null) return value;
             }
-        } catch (IllegalAccessException | ClassCastException e) {
+        } catch (RuntimeException | IllegalAccessException e) {
+            // v1.4.9.5 收宽 RuntimeException：DataItem accessor 未注册的槽缺失形态
+            // （SynchedEntityData.get 内部 getItem 返回 null）在此降级——对 LivingEntity
+            // 实际不可达（DATA_HEALTH_ID 恒注册），纯热路径鲁棒面
             LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
         }
         return target.getHealth();
@@ -1675,7 +1709,10 @@ public class HealthUtil {
                         matched = Math.abs(d - (double) healthBefore) <= tol;
                         if (matched) DATA_ITEM_VALUE_FIELD.set(item, Double.valueOf((double) health));
                     } else if (rawValue instanceof Integer i) {
-                        // Integer 型血量近似匹配（部分 mod 用 Integer 存百分比血量）
+                        // Integer 型血量近似匹配（部分 mod 用 Integer 存百分比血量）。
+                        // ±1 为裸绝对量纲（约定 14 例外声明）：Integer 血量条目量级固定
+                        // （20 上下），无 Float 型的 ulp 量纲问题——Float/Double 分支按
+                        // ulp 派生、本分支按固定 ±1，两者各自成立
                         matched = Math.abs(i - (int) healthBefore) <= 1;
                         if (matched) DATA_ITEM_VALUE_FIELD.set(item, (int) health);
                     }
@@ -1850,6 +1887,9 @@ public class HealthUtil {
     }
 
     private static Method ENTITY_REMOVE_METHOD;
+    /** 查找失败一次性降级标志（v1.4.9.5）：双名都查不到时不再每次调用重复查找并刷 ERROR
+     *  （处决移除链每次触发都会走到——降级后静默跳过，与 {@code degradeWarned} 惯例一致） */
+    private static volatile boolean ENTITY_REMOVE_LOOKUP_FAILED;
 
     /**
      * 反射调用 {@code Entity.remove(RemovalReason)}，绕过一切覆写。
@@ -1865,6 +1905,7 @@ public class HealthUtil {
      * @param reason 移除原因（通常为 {@code KILLED}）
      */
     public static void removeDirect(LivingEntity target, Entity.RemovalReason reason) {
+        if (ENTITY_REMOVE_LOOKUP_FAILED) return;
         try {
             if (ENTITY_REMOVE_METHOD == null) {
                 try {
@@ -1875,12 +1916,17 @@ public class HealthUtil {
                 ENTITY_REMOVE_METHOD.setAccessible(true);
             }
             ENTITY_REMOVE_METHOD.invoke(target, reason);
+        } catch (NoSuchMethodException e) {
+            ENTITY_REMOVE_LOOKUP_FAILED = true;
+            LOGGER.error("[HealthUtil] Entity.remove 反射双名均不可达，永久降级（移除链层3失效）", e);
         } catch (Exception e) {
             LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
         }
     }
 
     private static Method ENTITY_SET_REMOVED_METHOD;
+    /** 查找失败一次性降级标志（v1.4.9.5，同 {@link #ENTITY_REMOVE_LOOKUP_FAILED}） */
+    private static volatile boolean ENTITY_SET_REMOVED_LOOKUP_FAILED;
 
     /**
      * 反射调用 {@code Entity.setRemoved(RemovalReason)} (SRG: {@code m_142467_})，
@@ -1899,6 +1945,7 @@ public class HealthUtil {
      * @param reason 移除原因（通常为 {@code KILLED}）
      */
     public static void setRemovedDirect(LivingEntity target, Entity.RemovalReason reason) {
+        if (ENTITY_SET_REMOVED_LOOKUP_FAILED) return;
         try {
             if (ENTITY_SET_REMOVED_METHOD == null) {
                 try {
@@ -1909,6 +1956,9 @@ public class HealthUtil {
                 ENTITY_SET_REMOVED_METHOD.setAccessible(true);
             }
             ENTITY_SET_REMOVED_METHOD.invoke(target, reason);
+        } catch (NoSuchMethodException e) {
+            ENTITY_SET_REMOVED_LOOKUP_FAILED = true;
+            LOGGER.error("[HealthUtil] Entity.setRemoved 反射双名均不可达，永久降级（移除链层4失效）", e);
         } catch (Exception e) {
             LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
         }

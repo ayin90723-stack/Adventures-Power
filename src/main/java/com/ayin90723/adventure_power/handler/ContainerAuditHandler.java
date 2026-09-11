@@ -222,11 +222,15 @@ public class ContainerAuditHandler {
 
     // ==================== 生命周期：换维度冷却登记 + 登出清理 ====================
 
-    /** 换维度登记审计冷却（自订阅——CapabilityLifecycleHandler 不动，七轮评审定落点）。 */
+    /** 换维度登记审计冷却（自订阅——CapabilityLifecycleHandler 不动，七轮评审定落点）。
+     *  v1.4.9.5 审查修：时钟源与比较侧（overworld().getGameTime()）统一——登记原用
+     *  player.level()（传送后=新维度时钟），给非主世界维度挂独立 LevelData 的整合包
+     *  环境下两源恒差 N，40 tick 冷却虚长/虚短（与 shiftTimers 防御的同类环境） */
     @SubscribeEvent
     public static void onChangedDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
-        long now = player.level().getGameTime();
+        net.minecraft.server.MinecraftServer server = player.getServer();
+        long now = server != null ? server.overworld().getGameTime() : player.level().getGameTime();
         DIM_COOLDOWN.put(player.getUUID(), now + DIM_CHANGE_COOLDOWN);
     }
 

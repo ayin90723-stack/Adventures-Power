@@ -199,10 +199,14 @@ public class CombatAbilityHandler {
      */
     private static void handleSoulQuench(LivingHurtEvent event, LivingEntity target, Player attacker, IAdventureProgress progress) {
         // PVP 分层分支（v1.4.9.1，soul_quench_pvp_enabled 默认 false 整体禁用）：开启后对玩家
-        // 仅走"自定义伤害"——下方 hurt(soulStrike) 管线照常结算，受击方真血/伤害抗性/死亡抗拒
-        // 公平处理；引擎语义三件对玩家恒短路：①清盾（对象图探测与玩家防御自冲突）②清无敌帧
-        // （保留原版 PVP 节奏）③兜底直写（BloodWriteEngine 对玩家短路）。读侧无冲突：
-        // getEffectiveHealth 对玩家=DataItem 直读（只读不写，不碰真血备份通道）
+        // 仅走"自定义伤害"——下方 hurt(soulStrike) 管线照常结算，受击方真血保护/死亡抗拒等
+        // 防御体系公平生效；引擎语义三件对玩家恒短路：①清盾（对象图探测与玩家防御自冲突）
+        // ②清无敌帧（保留原版 PVP 节奏）③兜底直写（BloodWriteEngine 对玩家短路）。读侧无冲突：
+        // getEffectiveHealth 对玩家=DataItem 直读（只读不写，不碰真血备份通道）。
+        // 边界声明（v1.4.9.5 注释对齐实现）：soul_strike 属内部伤害源，onLivingHurt 入口
+        // （isInternalSource 早退）不触发受击方伤害抗性/觉醒易伤——淬魂的"真实伤害"语义
+        // 本就不吃抗性（与 PVE 一致），PVP 的"公平"指 hurt 管线防御层（死亡抗拒免死/
+        // 真血篡改保护）照常工作，非指吃目标抗性
         boolean pvpBranch = target instanceof Player;
         if (pvpBranch && !ModConfig.SOUL_QUENCH_PVP_ENABLED.get()) return;
 

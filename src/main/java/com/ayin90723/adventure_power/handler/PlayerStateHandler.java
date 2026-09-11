@@ -50,12 +50,16 @@ import net.minecraftforge.fml.common.Mod;
 /**
  * 玩家状态类能力效果处理器。
  * <p>
- * 管理 4 种冒险能力的运行时效果：
+ * 承载的运行时效果（v1.4.9.5 注释补全，随版本演进超出最初 4 能力）：
  * <ul>
- *   <li>灵魂绑定 (soul_bind) — 死亡保 Buff + 经验</li>
- *   <li>净魂 (purified_soul) — 免疫负面效果</li>
- *   <li>翱翔 (soar) — 创造飞行</li>
+ *   <li>灵魂绑定 (soul_bind) — 死亡保 Buff + 觉醒保经验</li>
+ *   <li>净魂 (purified_soul) — 免疫负面效果（净魂 Mixin 的事件层兜底）</li>
+ *   <li>翱翔 (soar) — 创造飞行（tick 对账 + 维度切换重发 abilities）</li>
  *   <li>受击坚韧 (resilience) — 受伤叠层减伤</li>
+ *   <li>环境免疫 (env_immunity) — 火焰/岩浆等环境伤害拦截</li>
+ *   <li>旅者之力·庇护 (active_skill) — 无敌期速度维护（tickSanctuarySpeed，门禁前）</li>
+ *   <li>不朽装备 (undying_gear) — 觉醒属性加成 modifier</li>
+ *   <li>觉醒标识 — PlayerEvent.NameFormat 金色称号前缀</li>
  * </ul>
  * <p>
  * 门禁检查：所有能力统一需要 isAdventurer() 或 isFullyUnlocked()，
@@ -790,7 +794,10 @@ public class PlayerStateHandler {
                 if (existing != null) {
                     armorAttr.removeModifier(AWAKEN_UNDYING_ARMOR_UUID);
                 }
-                armorAttr.addPermanentModifier(new AttributeModifier(
+                // v1.4.9.5 统一 transient（与其余四个 handler 的 modifier 惯例一致）：
+                // permanent 会写入 playerdata，崩溃残留依赖下次 tick 对账清理；transient
+                // 不落盘，重生/登出后由既有 Clone 移除 + 登出移除 + 每 tick 对账补挂兜底
+                armorAttr.addTransientModifier(new AttributeModifier(
                     AWAKEN_UNDYING_ARMOR_UUID, "awakened_undying_armor", bonus,
                     AttributeModifier.Operation.ADDITION));
             }
@@ -806,7 +813,8 @@ public class PlayerStateHandler {
             if (existing != null) {
                 atkAttr.removeModifier(AWAKEN_UNDYING_WEAPON_UUID);
             }
-            atkAttr.addPermanentModifier(new AttributeModifier(
+            // v1.4.9.5 统一 transient（同上：不落盘，靠 tick 对账补挂）
+            atkAttr.addTransientModifier(new AttributeModifier(
                 AWAKEN_UNDYING_WEAPON_UUID, "awakened_undying_weapon", weaponBonus,
                 AttributeModifier.Operation.MULTIPLY_BASE));
         }

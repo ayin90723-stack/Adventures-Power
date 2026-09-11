@@ -145,7 +145,7 @@
   "ability.adventure_power.swift.value": "移速加成 +%.0f%%",
   "ability.adventure_power.damage_resist.value": "减伤率 %.0f%%",
   "ability.adventure_power.extended_reach.value": "触及距离 +%.1f 格",
-  "ability.adventure_power.magnet.value": "吸取半径 %.0f 格",
+  "ability.adventure_power.magnet.value": "吸取半径 %.1f 格",
   "ability.adventure_power.fortune_favor.value": "时运/抢夺 +%.0f 级",
   "ability.adventure_power.xp_boost.value": "经验倍率 ×%.2f",
   "ability.adventure_power.lifesteal.value": "吸血率 %.0f%%",

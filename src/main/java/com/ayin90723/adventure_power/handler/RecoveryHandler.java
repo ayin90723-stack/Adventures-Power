@@ -206,10 +206,11 @@ public class RecoveryHandler {
         // 而 CombatAbilityHandler.onLivingHurt（NORMAL 优先级）对任意玩家攻击者先无条件
         // 占位——LOW 优先级的本监听器同事件同 (attacker,target) 再占位必然失败，
         // 攻击吸血永不执行（v1.3.5 引入的失效 bug）。独立前缀 key 只防穿透三连双重
-        // post 下嗜血自身同 tick 双吸血，与攻击方能力组不再互斥
-        if (!CombatAbilityHandler.tryMarkLifestealTick(attacker, target)) return;
-
-        AbilityGate.getActiveProgress(attacker, AbilityIds.LIFESTEAL).ifPresent(progress -> {
+        // post 下嗜血自身同 tick 双吸血，与攻击方能力组不再互斥。
+        // v1.4.9.5：占位移到下放 progress 门禁后（非冒险者不再写共享集合——与
+        // CombatAbilityHandler:153 的微优化口径一致）
+        AbilityGate.getActiveProgress(attacker, AbilityIds.LIFESTEAL).ifPresentOrElse(progress -> {
+            if (!CombatAbilityHandler.tryMarkLifestealTick(attacker, target)) return;
             Ability ability = AbilityRegistry.get(AbilityIds.LIFESTEAL);
             if (ability == null) return;
 
@@ -233,8 +234,10 @@ public class RecoveryHandler {
                             * ModConfig.AWAKEN_LIFESTEAL_SHIELD_CAP.get().floatValue();
                         excess = Math.min(excess, shieldCap);
                         if (excess > 0.0F) {
-                            // 上限只限模组新增部分：min(新总量, max(既有吸收, shieldCap))——
-                            // 玩家已有更高吸收（金苹果/其他模组护盾）时不被本能力压掉
+                            // 吸收护盾语义：上限只限模组新增部分——min(新总量, max(既有吸收,
+                            // shieldCap))，玩家已有更高吸收（金苹果/其他模组护盾）时不被本能力
+                            // 压掉。护盾为裸 AbsorptionAmount（无 MobEffect 计时，不衰减、不被
+                            // tick 维护，持续到被打掉——与金苹果型计时护盾不同，已知取舍）
                             attacker.setAbsorptionAmount(Math.min(
                                 attacker.getAbsorptionAmount() + excess,
                                 Math.max(attacker.getAbsorptionAmount(), shieldCap)));
@@ -242,6 +245,6 @@ public class RecoveryHandler {
                     }
                 }
             }
-        });
+        }, () -> { });
     }
 }

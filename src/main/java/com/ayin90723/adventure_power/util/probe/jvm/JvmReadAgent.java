@@ -3,7 +3,7 @@ package com.ayin90723.adventure_power.util.probe.jvm;
 import java.lang.instrument.Instrumentation;
 
 /**
- * JVM 只读快照·agentmain 入口（v1.4.8，配置 {@code jvm_snapshot_enabled} 默认关）。
+ * JVM 只读快照·agentmain 入口（v1.4.8，配置 {@code jvm_snapshot_enabled} 默认开——实测通过后翻转）。
  * <p>
  * <b>零依赖纪律</b>：本类不 import 任何 MC/mod 类——运行时自附加
  * （{@link JvmSnapshotService} 经 Unsafe 解禁 ALLOW_ATTACH_SELF + VirtualMachine.attach

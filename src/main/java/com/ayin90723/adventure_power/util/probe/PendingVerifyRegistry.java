@@ -97,7 +97,15 @@ public final class PendingVerifyRegistry {
         PENDING.add(new Entry(new WeakReference<>(target), delayTicks, task, kind));
     }
 
-    /** 丢弃某实体指定归属的全部挂起任务（复验失败级联清理用——GateOracle 等待任务不在此列）。 */
+    /**
+     * 丢弃某实体指定归属的全部挂起任务（复验失败级联清理用——GateOracle 等待任务不在此列）。
+     * <p>
+     * <b>COW 快照语义（v1.4.9.5 标注）</b>：若 cancelAll 发生在 onVerify/onFail 回调链内，
+     * 本 tick 迭代基于 COW 快照——被取消的任务在本轮仍会被裁决一次（之后才消失）。
+     * 当前唯一调用方（MultiStoreWriter.onFail → cancelAll(REVERIFY)）回调幂等、现状无害；
+     * 新增 cancelAll 调用点时须确认"被删任务当 tick 仍被裁决一次"是否可接受
+     * （cancelAll(GATE) 当前无调用点，ExecutionFinalizer 注释已确认）。
+     */
     public static void cancelAll(LivingEntity target, TaskKind kind) {
         if (target == null || kind == null) return;
         PENDING.removeIf(e -> e.ref.get() == target && e.kind == kind);

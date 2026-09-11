@@ -27,6 +27,11 @@ public class DeathDefyHudOverlay {
     /** 倒计时文本颜色 */
     private static final int TEXT_COLOR = 0xAAFFD700;
 
+    /** 按秒缓存倒计时文案（v1.4.9.5：秒数不变时复用，免每帧新建 translatable Component；
+     *  ActiveSkillHudOverlay 的静态 Label 同款范式） */
+    private static int cachedSeconds = -1;
+    private static Component cachedLabel;
+
     @SubscribeEvent
     public static void onRenderOverlay(RenderGuiEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
@@ -41,6 +46,11 @@ public class DeathDefyHudOverlay {
         int remainingTicks = (int) (invulEnd - currentTime);
         int remainingSeconds = (remainingTicks + 20) / 20; // 向上取整
 
+        if (remainingSeconds != cachedSeconds || cachedLabel == null) {
+            cachedSeconds = remainingSeconds;
+            cachedLabel = Component.translatable("hud.adventure_power.death_defy", remainingSeconds);
+        }
+
         GuiGraphics graphics = event.getGuiGraphics();
         int screenW = graphics.guiWidth();
         int screenH = graphics.guiHeight();
@@ -49,9 +59,7 @@ public class DeathDefyHudOverlay {
         renderGoldBorder(graphics, screenW, screenH);
 
         // 中上方倒计时
-        graphics.drawCenteredString(mc.font,
-            Component.translatable("hud.adventure_power.death_defy", remainingSeconds),
-            screenW / 2, screenH / 6, TEXT_COLOR);
+        graphics.drawCenteredString(mc.font, cachedLabel, screenW / 2, screenH / 6, TEXT_COLOR);
     }
 
     private static void renderGoldBorder(GuiGraphics graphics, int screenW, int screenH) {

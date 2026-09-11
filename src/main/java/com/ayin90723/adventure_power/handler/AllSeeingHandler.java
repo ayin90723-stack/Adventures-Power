@@ -25,8 +25,12 @@ public class AllSeeingHandler {
      *  默认 400 tick 留足余量，保证剩余永远 > 200，画面永不闪烁。 */
     private static final int NIGHT_VISION_REFRESH_AT = 400;
 
-    /** 配置时长 ≤ 200 tick 时的一次性告警（v1.4.0） */
-    private static boolean warnedShortDuration = false;
+    /** 原版夜视闪烁线（tick）：剩余低于此值进入强度摆动（画面闪烁） */
+    private static final int VANILLA_FLICKER_LINE = 200;
+
+    /** 配置时长 ≤ 闪烁线时的一次性告警（v1.4.0；v1.4.9.5 记录上次告警值——
+     *  运行期改配置后再改短仍能再次告警，静态布尔置位不复位的旧问题） */
+    private static int lastWarnedDuration = -1;
 
     public static void onTick(Player player, IAdventureProgress progress) {
         if (!progress.isAbilityEnabled(AbilityIds.ALL_SEEING)) return;
@@ -35,16 +39,21 @@ public class AllSeeingHandler {
         // 原版夜视剩余 < 200 tick 会进入强度摆动（画面闪烁）。
         // v1.4.0：刷新阈值随配置自适应——原固定 400 tick 在配置时长 < 400 时
         // 剩余永远低于阈值导致每 tick 刷新（addEffect 每 tick 同步）。
-        // 取 min(400, duration-1)（下限 200）：duration>200 时刷新间隔 = duration-200，
-        // 剩余永远 ≥ 200 不闪烁；duration ≤ 200 无法避免闪烁，启动一次性告警
+        // v1.4.9.5 公式修正：refreshAt = min(400, max(200, duration-200))——旧公式
+        // max(200, duration-1) 在 duration∈[202,400] 时 refreshAt=duration-1，刷新后
+        // 2 tick 即再满足条件（每 2 tick 重发效果包/约 10 包每秒）。新公式下刷新
+        // 间隔 = duration-200（≥2），剩余永远 ≥ 200 不闪烁；duration ≤ 200 无法
+        // 避免闪烁，启动一次性告警
         int duration = ModConfig.ALL_SEEING_NIGHT_VISION_DURATION.get();
-        if (duration <= 200 && !warnedShortDuration) {
-            warnedShortDuration = true;
+        if (duration <= VANILLA_FLICKER_LINE && lastWarnedDuration != duration) {
+            lastWarnedDuration = duration;
             LOGGER.warn(
-                "[AllSeeingHandler] ALL_SEEING_NIGHT_VISION_DURATION 配置 {} tick ≤ 200，"
-                    + "低于原版闪烁线，夜视画面会闪烁——建议配置 > 200", duration);
+                "[AllSeeingHandler] ALL_SEEING_NIGHT_VISION_DURATION 配置 {} tick ≤ {}，"
+                    + "低于原版闪烁线，夜视画面会闪烁——建议配置 > {}",
+                duration, VANILLA_FLICKER_LINE, VANILLA_FLICKER_LINE);
         }
-        int refreshAt = Math.min(NIGHT_VISION_REFRESH_AT, Math.max(200, duration - 1));
+        int refreshAt = Math.min(NIGHT_VISION_REFRESH_AT,
+            Math.max(VANILLA_FLICKER_LINE, duration - VANILLA_FLICKER_LINE));
         MobEffectInstance existing = player.getEffect(MobEffects.NIGHT_VISION);
         if (existing == null || existing.getDuration() < refreshAt) {
             // ambient=false, visible=false(无粒子), showIcon=false(无图标)

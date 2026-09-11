@@ -42,7 +42,7 @@ public abstract class DeathDefyMixin {
 
         float currentHealth = HealthUtil.getHealthDirect(player);
         // 拒绝特殊浮点值：NaN 任何比较都返回 false，+Infinity 被误判为回血
-        if (Float.isNaN(newHealth) || Float.isInfinite(newHealth)) {
+        if (HealthUtil.isSpecialFloat(newHealth)) {
             ci.cancel();
             return;
         }
@@ -50,6 +50,12 @@ public abstract class DeathDefyMixin {
         // 模组内部降血（vitality 关闭/启用时的血量裁剪等）放行——与 RejectHealthManipMixin/TrueHealthMixin
         // 一致：本拦截防的是外部攻击在无敌期的降血，不拦模组自身的状态维护
         if (HealthUtil.INTERNAL_HEALTH_WRITE.get()) return;
+
+        // 原版 maxHealth clamp 归位放行（与 RejectHealthManip 数据层同批收束）：
+        // 无敌期窗口内生命上限下移（药水到期/装备卸下）的合法归位不可拦截——
+        // 本层 cancel 后无重放事件，血停新上限之上要等下次 hurt 才自纠。
+        // 判定收束 HealthUtil.isMaxHealthClampSettle（三层共用唯一判定源）
+        if (HealthUtil.isMaxHealthClampSettle(player, newHealth)) return;
 
         // ProgressCache 按 tick 缓存 progress 引用，避免 setHealth 高频调用每次 resolve
         var progress = com.ayin90723.adventure_power.util.ProgressCache.get(player);

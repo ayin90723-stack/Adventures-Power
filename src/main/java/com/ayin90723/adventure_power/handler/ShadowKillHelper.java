@@ -429,9 +429,11 @@ public class ShadowKillHelper {
         target.invulnerableTime = 0;
         KILLING.add(target.getUUID());
         try {
-            // 用 maxHealth×10 替代 Float.MAX_VALUE：足够秒杀任何 Boss，
-            // 又不会让其他模组做 amount×ratio 时溢出为 Infinity/NaN 导致异常/卡死
-            target.hurt(killSource, target.getMaxHealth() * 10F);
+            // 用 maxHealth×倍率 替代 Float.MAX_VALUE：足够秒杀任何 Boss，
+            // 又不会让其他模组做 amount×ratio 时溢出为 Infinity/NaN 导致异常/卡死。
+            // v1.4.9.5 配置化（约定 4）：倍率入 TOML（shadow_kill_damage_multiple，默认 10）
+            target.hurt(killSource, target.getMaxHealth()
+                * ModConfig.SHADOW_KILL_DAMAGE_MULTIPLE.get().floatValue());
         } finally {
             KILLING.remove(target.getUUID());
         }
@@ -577,11 +579,16 @@ public class ShadowKillHelper {
      */
     @SubscribeEvent
     public static void onPlayerClone(PlayerEvent.Clone event) {
-        Map<UUID, ServerBossEvent> inner = SHADOW_HP_BARS.remove(event.getEntity().getUUID());
+        UUID attackerId = event.getEntity().getUUID();
+        Map<UUID, ServerBossEvent> inner = SHADOW_HP_BARS.remove(attackerId);
         if (inner != null) {
             for (ServerBossEvent bar : inner.values()) {
                 bar.removeAllPlayers();
             }
         }
+        // v1.4.9.5：顺手清理该攻击者的 MISSING 计数残留（原只清 BossBar——计数残留要拖到
+        // 登出或下轮全局清理才自愈；key 前缀 = attackerId.toString()）
+        String prefix = attackerId + ":";
+        MISSING_TARGET_TICKS.keySet().removeIf(k -> k.startsWith(prefix));
     }
 }

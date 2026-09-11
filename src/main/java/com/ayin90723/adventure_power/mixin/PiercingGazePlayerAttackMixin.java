@@ -57,7 +57,7 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  * @see PiercingGazeLivingEntityMixin
  * @see PiercingGazeUtil
  */
-@Mixin(Player.class)
+@Mixin(value = Player.class, priority = 1000)
 public class PiercingGazePlayerAttackMixin {
 
     /**

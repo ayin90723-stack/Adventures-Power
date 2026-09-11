@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.input;
 
+import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import net.minecraft.core.particles.ParticleTypes;
@@ -30,7 +31,7 @@ import java.util.UUID;
  *   <li><b>成功不发包</b>：信任客户端预测（两端 Y 同公式），无顿挫；拒绝时才发包防独飞</li>
  * </ul>
  */
-@EventBusSubscriber(bus = Bus.FORGE)
+@EventBusSubscriber(modid = AdventurePower.MODID, bus = Bus.FORGE)
 public class DoubleJumpHandler {
     /** 本空中周期已跳过二段跳的玩家集合，落地清除 */
     private static final Set<UUID> AIR_JUMPED = new HashSet<>();

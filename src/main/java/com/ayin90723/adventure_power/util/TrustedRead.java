@@ -61,6 +61,9 @@ public final class TrustedRead {
      * 完整对账（低频诊断/关键决策入口）：两方读数 + 一致性标记。
      * 不一致时按"实体 × tick"采样告警一次（防限伤/浮动读数 Boss 刷屏），
      * 采样表弱 key 防泄漏（与 EntityLivenessMixin 日志去重同款纪律）。
+     * <p>
+     * <b>预留未接线（v1.4.9.5 标注）</b>：当前全项目仅 {@link #value()}/{@link #isFactuallyDead()}
+     * 有消费点——本方法为诊断预留 API，未参与运行时判定；勿误以为不一致检测已在运行。
      */
     public static Result read(LivingEntity target) {
         float direct = HealthUtil.getHealthDirect(target);

@@ -202,6 +202,18 @@ public final class GateAnalyzer {
         }
 
         /**
+         * 自杀能力判定（v1.4.9.5 审查修公开）：类有 deathSequence 词根候选或击杀工具
+         * 调用——liveness 覆写（isAlive/isDeadOrDying）对这类目标属于自家演出/击杀体系
+         * 的一部分而非谎报拦截（{@link #hasDeathInterception()} 对其豁免）。
+         * <p>
+         * 消费方 {@code DeathFinalizer}：对此类豁免目标补完 die 前需追加读数硬判据
+         * （其 isDeadOrDying 可能按演出阶段/无敌相返回 true，不能单独作为"已致死"依据）。
+         */
+        public boolean isSelfKillCapable() {
+            return hasDeathSequenceGate() || !killTools.isEmpty();
+        }
+
+        /**
          * 死亡拦截判定（{@code util.DeathFinalizer} 补完原版 die 前的门禁）：
          * die / isAlive / isDeadOrDying 存在模组层覆写即视为拦死者--裸调 die() 会触发
          * 对面的中断/复活逻辑（十七轮半开门同款根因），死亡补完只对干净目标执行。
@@ -413,14 +425,11 @@ public final class GateAnalyzer {
         List<MethodNode> bodies = new ArrayList<>();
         List<String> seen = new ArrayList<>();
         List<MethodNode> frontier = new ArrayList<>(List.of(getter));
-        // 复查修（P3）：hidden class 的 getName() 带 /0x... 后缀，而 readClassNode 读的是
-        // 剥离后缀的原始字节码（INVOKEVIRTUAL owner 写原始类名）——owner 比较同款剥离，
-        // 否则委托 helper（internalHealth/se_int_unpack 级）在 hidden class 上全漏检
-        String ownerJvm = getterDeclaring.getName().replace('.', '/');
-        int hiddenSuffix = ownerJvm.indexOf('/');
-        if (hiddenSuffix > 0) {
-            ownerJvm = ownerJvm.substring(0, hiddenSuffix);
-        }
+        // 复查修（P3）：hidden class 的字节码 owner 写剥离 /0x 后缀的原始类名——owner 比较
+        // 同款剥离，否则委托 helper（internalHealth/se_int_unpack 级）在 hidden class 上全漏检。
+        // v1.4.9.5：剥离口径收束 jvmNameStripHidden（此前先转内部名再 indexOf('/')
+        // 剥到包首段，owner 比较恒失败，BFS 对所有类全灭）
+        String ownerJvm = jvmNameStripHidden(getterDeclaring);
         for (int depth = 0; depth < 3 && !frontier.isEmpty(); depth++) {
             List<MethodNode> next = new ArrayList<>();
             for (MethodNode mn : frontier) {
@@ -492,6 +501,23 @@ public final class GateAnalyzer {
         return new HealthStorageIntel(List.copyOf(found.values()));
     }
 
+    /** dotted 名 → JVM 内部名，hidden 后缀在 dotted 名上剥离。
+     * <p>
+     * 唯一剥离口径（v1.4.9.5 审查修）：{@code getName()} 返回 dotted 名，其中 '/'
+     * 只出现在 hidden class 的 /0x 后缀分隔符（包分隔符是 '.'）——必须先剥离再转内部名。
+     * 此前 scanHealthStorage/resolveCodec 两处先 {@code replace('.','/')} 再
+     * {@code indexOf('/')}，把 "com/example/Boss" 剥成 "com"（hidden 与普通类双双失配：
+     * BFS owner 比较全灭、codec 字段闸形同虚设）。新增 owner/类链比较点一律复用本方法，
+     * 勿再复制剥离表达式；readClassNode 的类路径读取同口径（dotted 名剥离）。 */
+    private static String jvmNameStripHidden(Class<?> c) {
+        String dotted = c.getName();
+        int slash = dotted.indexOf('/');
+        if (slash > 0) {
+            dotted = dotted.substring(0, slash);
+        }
+        return dotted.replace('.', '/');
+    }
+
     /** 字段指令 → StorageField（声明类沿目标类链解析；解析失败跳过）。 */
     private static void recordStorageField(Map<String, StorageField> sink, Class<?> rootClass,
                                            FieldInsnNode f, boolean bitPacked) {
@@ -504,7 +530,7 @@ public final class GateAnalyzer {
         }
         String ownerJvm = f.owner;
         for (Class<?> c = rootClass; c != null && c != Object.class; c = c.getSuperclass()) {
-            if (c.getName().replace('.', '/').equals(ownerJvm)) {
+            if (jvmNameStripHidden(c).equals(ownerJvm)) {
                 sink.put(key, new StorageField(c, f.name, f.desc,
                     f.getOpcode() == org.objectweb.asm.Opcodes.GETSTATIC, bitPacked));
                 return;
@@ -565,7 +591,7 @@ public final class GateAnalyzer {
     private static ClassNode readClassNode(Class<?> cls) {
         try {
             // v1.4.8 JVM 只读快照优先：运行时真身字节码（Mixin+对方 agent 全部 transformation
-            // 后的最终形态），配置 jvm_snapshot_enabled 默认关；不可用返回 null 走下方类路径读
+            // 后的最终形态），配置 jvm_snapshot_enabled 默认开；不可用返回 null 走下方类路径读
             byte[] runtimeBytes = com.ayin90723.adventure_power.util.probe.jvm.JvmSnapshotService.getRuntimeBytes(cls);
             if (runtimeBytes != null) {
                 ClassNode live = new ClassNode();
@@ -1169,24 +1195,19 @@ public final class GateAnalyzer {
             // 字段解析：fieldInsn.owner/name 沿目标类链按名匹配（hidden class 场景——
             // 复查修 P3-2：字节码 owner 是剥离 /0x 后缀的原始类名，链比较同款剥离，
             // 与 readClassNode 口径一致，否则 hidden 目标（本末起源系）钥匙字段必解析失败）；
-            // 字段类型必须与 codec 参数类型一致（配对约束）
+            // 字段类型必须与 codec 参数类型一致（配对约束）。
+            // v1.4.9.5：类链侧剥离收束 jvmNameStripHidden（此前双双向内部名 indexOf('/')
+            // 剥到包首段，owner 闸形同虚设）；字节码 owner 本就是原始内部名不再剥离；
+            // owner 精确命中即 break（防链上同名遮蔽把 field 覆盖为父类声明）
             java.lang.reflect.Field field = null;
             String ownerJvm = fieldInsn.owner;
-            int hiddenSuffix = ownerJvm.indexOf('/');
-            if (hiddenSuffix > 0) {
-                ownerJvm = ownerJvm.substring(0, hiddenSuffix);
-            }
             for (Class<?> c = rootClass; c != null && c != Object.class; c = c.getSuperclass()) {
-                String cJvm = c.getName().replace('.', '/');
-                int cHidden = cJvm.indexOf('/');
-                if (cHidden > 0) {
-                    cJvm = cJvm.substring(0, cHidden);
-                }
-                if (!cJvm.equals(ownerJvm)) continue;
+                if (!jvmNameStripHidden(c).equals(ownerJvm)) continue;
                 try {
                     java.lang.reflect.Field f = c.getDeclaredField(fieldInsn.name);
                     if (f.getType() == paramType && !Modifier.isStatic(f.getModifiers())) {
                         field = f;
+                        break;
                     }
                 } catch (NoSuchFieldException ignored) {
                 }
