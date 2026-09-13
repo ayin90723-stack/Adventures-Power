@@ -2,6 +2,7 @@ package com.ayin90723.adventure_power.mixin;
 
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
 import com.ayin90723.adventure_power.config.ModConfig;
+import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.util.DebugLog;
 import com.ayin90723.adventure_power.util.ProgressCache;
@@ -63,8 +64,7 @@ public abstract class EntityLivenessMixin {
         if (player.level().isClientSide()) return null;
         var progress = ProgressCache.get(player);
         if (progress == null) return null;
-        if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return null;
-        if (!progress.isAbilityEnabled(AbilityIds.TRUE_HEALTH)) return null;
+        if (!AbilityGate.isActive(progress, AbilityIds.TRUE_HEALTH)) return null;
         return progress;
     }
 

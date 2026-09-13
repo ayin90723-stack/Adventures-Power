@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.mixin;
 
+import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.util.HealthUtil;
@@ -99,9 +100,9 @@ public abstract class RejectHealthManipMixin {
         if (HealthUtil.isMaxHealthClampSettle(player, newHealth)) return;
 
         // 外部直接 setHealth 降血 → 检查能力（ProgressCache 按 tick 缓存引用，避免每次 resolve）
+        // 审查修（收束）：身份+能力判定走 AbilityGate 唯一判定源
         var progress = com.ayin90723.adventure_power.util.ProgressCache.get(player);
-        if (progress != null && (progress.isAdventurer() || progress.isFullyUnlocked())
-              && progress.isAbilityEnabled(AbilityIds.REJECT_MANIP)) {
+        if (progress != null && AbilityGate.isActive(progress, AbilityIds.REJECT_MANIP)) {
             ci.cancel();
             // 觉醒：反弹 30% 被拒绝的伤害给攻击来源
             if (progress.isFullyUnlocked()) {

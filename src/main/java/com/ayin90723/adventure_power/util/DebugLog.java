@@ -39,6 +39,34 @@ public final class DebugLog {
         ENGINE_CALLER.set(prev);
     }
 
+    /** 当前调用方上下文（未设置返回 null）。供"跨栈/异步回调需要恢复归属"的调用方取一次存起来。 */
+    public static EngineCaller currentCaller() {
+        return ENGINE_CALLER.get();
+    }
+
+    /**
+     * 在指定调用方上下文内执行（审查修：GateOracle 窗口末的 pending 回调在 tryOpen 返回后才跑，
+     * 此时调用方 ThreadLocal 早已还原 → 其诊断日志全静默）。保存-恢复式，异常安全。
+     */
+    public static void runWithCaller(EngineCaller caller, Runnable body) {
+        EngineCaller prev = setEngineCaller(caller);
+        try {
+            body.run();
+        } finally {
+            restoreEngineCaller(prev);
+        }
+    }
+
+    /** 同 {@link #runWithCaller}，供有返回值的回调（{@code onVerify} 的 boolean 判定型）使用。 */
+    public static boolean callWithCaller(EngineCaller caller, java.util.function.BooleanSupplier body) {
+        EngineCaller prev = setEngineCaller(caller);
+        try {
+            return body.getAsBoolean();
+        } finally {
+            restoreEngineCaller(prev);
+        }
+    }
+
     private DebugLog() {
     }
 

@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.mixin;
 
+import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.ability.Ability;
 import com.ayin90723.adventure_power.ability.AbilityRegistry;
@@ -40,8 +41,7 @@ public class FortuneFavorMixin {
         if (player == null) return;
 
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if (!progress.isAbilityEnabled(AbilityIds.FORTUNE_FAVOR)) return;
-            if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
+            if (!AbilityGate.isActive(progress, AbilityIds.FORTUNE_FAVOR)) return;
 
             Ability ability = AbilityRegistry.get(AbilityIds.FORTUNE_FAVOR);
             if (ability == null) return;

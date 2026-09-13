@@ -81,10 +81,31 @@ public final class GateOracle {
     public static void onLivingDeath(LivingDeathEvent event) {
         if (!event.getEntity().level().isClientSide()) {
             DEATH_SEEN.add(event.getEntity().getUUID());
-            // 审查修 P1#1：异步成功路径兜底——目标最终死亡则开门尝试必然终结，
-            // 清 OPENING 防"复活再战时 tryOpen 被残留集合挡住 → saturationKill 直接
-            // return → finalizeFallback 不调度"的不可击杀死锁
-            OPENING.remove(event.getEntity().getUUID());
+            // 审查修 P1：清 OPENING 必须带容器/字段硬证据——die() 在方法体**第一条指令**就
+            // post LivingDeathEvent（字节码实证：ForgeHooks.onLivingDeath 在偏移 0，dead=true
+            // 在偏移 107，死亡移除更后），事件随后可能被第三方 cancel（复活型/禁疗对手）或被
+            // die 覆写中途 return。原实现无条件清，等价于"只要尝试过 die 就解除开门去重"：
+            // COMBO ASYNC 挂窗口期间再次 tryOpen（影子血量再次归零 / 禁疗二次 cancel）即可
+            // 再挂一个 pending，两个窗口末各自 onFail → 两次 finalizeFallback →
+            // 双 LivingDeathEvent + 双 dropAllDeathLoot（ExecutionFinalizer 各段不幂等）。
+            // <b>口径说明（复查修正）</b>：因事件时点恒早于 dead/deathTime 置位，本处的
+            // hardDead 判定在真实 die 路径下**几乎恒为 false**——即本处理器实际不再承担清除
+            // 职责，只覆盖"重复 post / die 覆写先递增 deathTime 再 post"等边角。窗口内的正常
+            // 清理由各 pending 任务的四路回调（onVerify/onDead/onCancel/onFail）与 tryOpen
+            // 自身的非 PENDING 出口承担；唯一"不清"的出口是各 onDead/onFail 里
+            // `runLadderTail() == PENDING`，而返回 PENDING 的两个来源都必然新挂一个 pending
+            // 任务（后者自清），归纳闭合、无遗漏路径（复查已逐条枚举验证）
+            Entity died = event.getEntity();
+            // 死期字段经 @Accessor 直读（与 TrueHealthMixin 同通道；GateAttempt.deathTimeOf
+            // 是内层类私有，外层事件处理器不复用）
+            boolean hardDead = died.isRemoved();
+            if (!hardDead && died instanceof LivingEntity le) {
+                hardDead = ((com.ayin90723.adventure_power.mixin.LivingEntityFieldsAccessor) (Object) le)
+                    .adventure_power$getDeathTime() > 0;
+            }
+            if (hardDead) {
+                OPENING.remove(died.getUUID());
+            }
         }
     }
 
@@ -122,9 +143,15 @@ public final class GateOracle {
             OpenResult r = new GateAttempt(target, source, plan, finalizeFallback).run();
             if (r != OpenResult.PENDING) OPENING.remove(target.getUUID());
             return r;
-        } catch (Exception e) {
-            DebugLog.probe("[GateOracle] tryOpen 异常（零退化退影杀）: {}", e.toString());
+        } catch (Throwable t) {
+            // 审查修（复查补，安全网）：原为 catch (Exception)——Error（典型即 GateAnalyzer
+            // 反射段抛 NoClassDefFoundError）会穿透而不清 OPENING，该 UUID 永久留在集合里 →
+            // 之后每次 tryOpen 恒 PENDING（影杀善后死锁）。此处收宽到 Throwable，
+            // 与 BloodWriteEngine.execute / PiercingGazeUtil.interceptAttackHurt 同口径：
+            // VirtualMachineError 清完状态后仍上抛（不带着 JVM 不一致状态继续）
+            DebugLog.probe("[GateOracle] tryOpen 异常（零退化退影杀）: {}", t.toString());
             OPENING.remove(target.getUUID());
+            if (t instanceof VirtualMachineError vme) throw vme;
             return OpenResult.NOT_APPLICABLE;
         }
     }
@@ -149,12 +176,53 @@ public final class GateOracle {
         GateAnalyzer.StateCandidate active;
         /** 探针裁决出的"死态写入值"（PERMIT 的死向布尔 / PROGRESS 的过阈值值）。 */
         Object probeDeadValue;
+        /** 审查修 P2：deathSequence 触发模式失败过一次后置位——runLadderTail 复入时跳过
+         *  deathSequence 循环，避免"onFail → 复入 → 同候选再触发 → 再失败"的往返，同时
+         *  兑现本节注释与方案 §6.1 承诺的"窗口末未启动演出 → 退回 EXEC_COMBO 常规梯"。
+         *  per-attempt 生命周期（GateAttempt 每次 tryOpen 新建），不跨击杀残留。 */
+        boolean skipDeathSequence;
+        /** 本次开门的调用方归属（审查修：tryOpen 入口取一次 ThreadLocal 快照——pending 回调
+         *  在 tryOpen 返回后才执行，那时上下文已还原，必须靠这里存的值恢复，否则窗口内
+         *  onVerify/onDead/onFail 的全部诊断日志静默。调用方未包裹上下文时为 null → 与既有一致静默）。 */
+        final DebugLog.EngineCaller caller;
 
         GateAttempt(LivingEntity target, DamageSource source, GateAnalyzer.GatePlan plan, Runnable finalizeFallback) {
             this.target = target;
             this.source = source;
             this.plan = plan;
             this.finalizeFallback = finalizeFallback;
+            this.caller = DebugLog.currentCaller();
+        }
+
+        /**
+         * 带调用方归属的 pending 注册（审查修，可观测性）：窗口末的异步回调在 tryOpen 返回后
+         * 才被 PendingVerifyRegistry 驱动，那时 ENGINE_CALLER 已还原 → 任务体内的
+         * onVerify/onDead/onCancel/onFail 日志全部静默（现场排障拿不到窗口内证据）。
+         * 本包装在每次回调前后恢复本次开门的调用方归属，使日志按触发能力（影杀/禁疗）落开关。
+         */
+        private void registerPending(int ticks, PendingVerifyRegistry.PendingTask delegate) {
+            PendingVerifyRegistry.register(target, ticks, PendingVerifyRegistry.TaskKind.GATE,
+                new PendingVerifyRegistry.PendingTask() {
+                    @Override
+                    public boolean onVerify(LivingEntity t) {
+                        return DebugLog.callWithCaller(caller, () -> delegate.onVerify(t));
+                    }
+
+                    @Override
+                    public void onDead(LivingEntity t) {
+                        DebugLog.runWithCaller(caller, () -> delegate.onDead(t));
+                    }
+
+                    @Override
+                    public void onCancel() {
+                        DebugLog.runWithCaller(caller, delegate::onCancel);
+                    }
+
+                    @Override
+                    public void onFail(LivingEntity t) {
+                        DebugLog.runWithCaller(caller, () -> delegate.onFail(t));
+                    }
+                });
         }
 
         OpenResult run() {
@@ -200,9 +268,11 @@ public final class GateOracle {
             // 死亡序列演出，不调 die）——removalAuthorized 等快进通道实测被 Integrity 恢复
             // （移除成功 0.5s 后 restored：对面管理系统的注销钩子挂在死亡序列流程里，快进
             // 死亡它看不到）；19:46 成功案例实锤完整演出走完会打"所有使徒已消失"注销遭遇
-            for (GateAnalyzer.StateCandidate sc : plan.candidates) {
-                if (isDeathSequenceGate(sc) && triggerDeathSequence(sc)) {
-                    return OpenResult.PENDING; // 演出期间等待，pending 裁决终态
+            if (!skipDeathSequence) {
+                for (GateAnalyzer.StateCandidate sc : plan.candidates) {
+                    if (isDeathSequenceGate(sc) && triggerDeathSequence(sc)) {
+                        return OpenResult.PENDING; // 演出期间等待，pending 裁决终态
+                    }
                 }
             }
             for (GateAnalyzer.StateCandidate sc : plan.candidates) {
@@ -289,13 +359,14 @@ public final class GateOracle {
 
         /**
          * 钥匙 pending 窗口（挂接照抄 deathSequence 既有挂法——增量评审）：TaskKind.GATE
-         * 归属（防 MultiStoreWriter 复验级联 cancelAll 误删）+ OPENING 五路清理齐备
-         * （onVerify/onDead/onCancel 直清 + onFail 经 finishWithInlineDie 间接清 +
-         * onLivingDeath 兜底）。
+         * 归属（防 MultiStoreWriter 复验级联 cancelAll 误删）+ OPENING 清理齐备
+         * （onVerify/onDead/onCancel 直清 + onDead 无硬证据与 onFail 经 {@code runLadderTail} 间接清
+         * [仅在返回非 PENDING 时清；返回 PENDING 的两种来源都必然新挂一个自清 pending] +
+         * onLivingDeath 硬证据兜底）。
          */
         private void scheduleDeathKeyPending(GateAnalyzer.DeathKeyRecord key, Object snapshot) {
-            PendingVerifyRegistry.register(target, ModConfig.GATE_ORACLE_WAIT_TICKS.get(),
-                PendingVerifyRegistry.TaskKind.GATE, new PendingVerifyRegistry.PendingTask() {
+            registerPending(ModConfig.GATE_ORACLE_WAIT_TICKS.get(),
+                new PendingVerifyRegistry.PendingTask() {
                     @Override
                     public boolean onVerify(LivingEntity t) {
                         if (confirmDead()) {
@@ -373,13 +444,18 @@ public final class GateOracle {
          * 窗口末未启动 → 退回 EXEC_COMBO 常规梯。
          */
         private boolean triggerDeathSequence(GateAnalyzer.StateCandidate sc) {
+            // 审查修 P2（复查补，写后必还原）：orig 提到 try 外，使 catch 路径也能还原——
+            // 异常可能发生在 writeCandidateValue(sc, TRUE) 之后（如 registerPending 抛），
+            // 原先直接 false 返回会让候选永久停在"序列已激活"且无 pending 事后还原
+            Object restoreTo = null; // 仅供 catch 还原；orig 保持 effectively final 供匿名任务捕获
             try {
                 Object orig = snapshotCandidate(sc);
                 if (!(orig instanceof Boolean b) || b) return false; // 非 false 布尔（已激活/非布尔）→ 不适用
+                restoreTo = orig;
                 writeCandidateValue(sc, Boolean.TRUE);
                 DebugLog.probe("[GateOracle] 死亡序列触发模式：激活 {} → 等待对面演出启动", sc);
-                PendingVerifyRegistry.register(target, ModConfig.GATE_ORACLE_WAIT_TICKS.get(),
-                    PendingVerifyRegistry.TaskKind.GATE, new PendingVerifyRegistry.PendingTask() {
+                registerPending(ModConfig.GATE_ORACLE_WAIT_TICKS.get(),
+                    new PendingVerifyRegistry.PendingTask() {
                         @Override
                         public boolean onVerify(LivingEntity t) {
                             if (confirmDead()) {
@@ -393,7 +469,16 @@ public final class GateOracle {
 
                         @Override
                         public void onDead(LivingEntity t) {
-                            OPENING.remove(t.getUUID());  // 审查修 P1#1：窗口内死亡终结开门尝试
+                            // 复查修（刻意与 DEATH_KEY/EXEC_COMBO 不同）：本处**不做**硬证据复核、
+                            // 不还原、不落梯。触发模式写下的 TRUE 语义就是"死亡序列已激活"，对该类
+                            // Boss 而言 isAlive() 翻死正是预期（判据与 isAlive 同源），而它的演出
+                            // 由对面自己的 tick 启动、启动时刻完全可能晚于等待窗口（默认 10 tick）。
+                            // 若照 EXEC_COMBO 那样在 deathTime 证据缺失时判失败并退常规梯，梯尾
+                            // finishWithInlineDie 会经影杀 ExecutionFinalizer 强抹——正是本模式当初
+                            // 要规避的"快进死亡被对面管理系统 Integrity 恢复"失败模式。
+                            // 且本路径不写 plan.resolved，不存在"假 resolved 永久缓存"问题
+                            //（那才是 DEATH_KEY 必须回滚的原因），故只终结开门尝试即可
+                            OPENING.remove(t.getUUID());
                         }
 
                         @Override
@@ -409,11 +494,26 @@ public final class GateOracle {
                         public void onFail(LivingEntity t) {
                             DebugLog.probe("[GateOracle] 死亡序列触发失败（窗口内未启动演出），还原候选退常规梯", sc);
                             writeCandidateValue(sc, orig);
-                            finishWithInlineDie();  // 内部已清 OPENING
+                            plan.resolved = null;
+                            // 审查修 P2：原实现直接 finishWithInlineDie()，与本段注释及方案 §6.1
+                            // "窗口末未启动 → 退回 EXEC_COMBO 常规梯"不符——类里只要存在
+                            // deathSequence 命名候选，runLadderTail 首循环每次都吃掉它，
+                            // EXEC_COMBO 在每次击杀中都被跳过。置 skip 位后复入剩余梯
+                            skipDeathSequence = true;
+                            OpenResult rr = runLadderTail();
+                            if (rr != OpenResult.PENDING) {
+                                OPENING.remove(t.getUUID());
+                            }
                         }
                     });
                 return true; // 触发已提交，等待裁决
             } catch (Exception e) {
+                if (restoreTo != null) {
+                    try {
+                        writeCandidateValue(sc, restoreTo);
+                    } catch (Exception ignored) {
+                    }
+                }
                 return false;
             }
         }
@@ -431,10 +531,15 @@ public final class GateOracle {
          * restored 二阶段复制）。
          */
         private ComboOutcome execComboVerify(GateAnalyzer.StateCandidate sc) {
+            // 审查修 P2（复查补，写后必还原）：orig 提到 try 外，使 catch 路径也能还原——
+            // 异常可能发生在 writeCandidateValue(sc, deadVal) 之后、还原之前（如目标覆写
+            // isAlive/isRemoved 在 confirmDead 内抛异常），原先直接 FAIL 返回会把候选死态
+            // 永久留在目标上（无 pending 事后收尾）。介质不可读时 writeCandidateValue 静默失败，无害
+            Object orig = null;
             try {
                 Object deadVal = deadValueOf(sc);
                 if (deadVal == null) return ComboOutcome.FAIL;
-                Object orig = snapshotCandidate(sc);
+                orig = snapshotCandidate(sc);
                 if (orig == null) return ComboOutcome.FAIL; // 介质不可读——该候选不可行
                 writeCandidateValue(sc, deadVal);
                 boolean diePosted;
@@ -456,6 +561,12 @@ public final class GateOracle {
                 writeCandidateValue(sc, orig);
                 return ComboOutcome.FAIL;
             } catch (Exception e) {
+                if (orig != null) {
+                    try {
+                        writeCandidateValue(sc, orig);
+                    } catch (Exception ignored) {
+                    }
+                }
                 return ComboOutcome.FAIL;
             }
         }
@@ -466,8 +577,8 @@ public final class GateOracle {
         /** EXEC_COMBO 异步确认（十五轮）：窗口末 removed/deathTime → 成功自清；否则还原候选退影杀。 */
         private void scheduleComboConfirm(GateAnalyzer.StateCandidate sc, Object orig) {
             DebugLog.probe("[GateOracle] die 已发事件但死亡流程异步启动中，挂窗口等待硬证据（候选={}）", sc);
-            PendingVerifyRegistry.register(target, ModConfig.GATE_ORACLE_WAIT_TICKS.get(),
-                PendingVerifyRegistry.TaskKind.GATE, new PendingVerifyRegistry.PendingTask() {
+            registerPending(ModConfig.GATE_ORACLE_WAIT_TICKS.get(),
+                new PendingVerifyRegistry.PendingTask() {
                     @Override
                     public boolean onVerify(LivingEntity t) {
                         if (confirmDead()) {
@@ -481,7 +592,22 @@ public final class GateOracle {
 
                     @Override
                     public void onDead(LivingEntity t) {
-                        OPENING.remove(t.getUUID());  // 审查修 P1#1：窗口内死亡终结开门尝试
+                        // 审查修 P1（与 DEATH_KEY 的 onDead 对齐）：PendingVerifyRegistry 到点
+                        // 先判 isRemoved()||!isAlive()，成立即 onDead 短路（onVerify/onFail 都
+                        // 不执行）。而 EXEC_COMBO 刚写下去的就是"死态值"——对 isAlive 覆写型
+                        // 目标（本层的主目标类），写入本身就让 isAlive() 返回 false → 单凭
+                        // !isAlive() 是假成功：候选死态永久残留（无还原）、plan.resolved 不写、
+                        // finalizeFallback 一次不跑 → 实体 isAlive=false 却不移除、影杀入口
+                        // isAlive 早退 → 该 Boss 不可击杀（与"开门优先、抹除兜底、零退化"相反）。
+                        // 硬证据成立 = 真死亡（保留死态不还原）；否则按 onFail 语义收尾
+                        if (t.isRemoved() || deathTimeOf(t) > 0) {
+                            OPENING.remove(t.getUUID());
+                            plan.resolved = new ResolvedPlan("EXEC_COMBO", sc);
+                            return;
+                        }
+                        DebugLog.probe("[GateOracle] EXEC_COMBO onDead 无硬证据（判据名义翻死但死亡流程未启动），"
+                            + "还原候选退影杀善后");
+                        onFail(t);
                     }
 
                     @Override
@@ -524,6 +650,9 @@ public final class GateOracle {
 
         /** 按指定值写候选（字段/槽介质分派；介质不可用静默失败）。 */
         private void writeCandidateValue(GateAnalyzer.StateCandidate sc, Object value) {
+            // 审查修 P1：哨兵绝不落盘（见 deadValueOf 同款注释——写进 DataItem 槽会造成
+            // 类型污染与主线程 CCE）。防御纵向：调用方即便漏判也在此拦一道
+            if (value == NOT_A_CANDIDATE) return;
             try {
                 switch (sc.kind) {
                     case PERMIT_FIELD, PROGRESS_FIELD, DERIVED_BLOOD_FIELD -> {
@@ -535,11 +664,15 @@ public final class GateOracle {
                             f.setFloat(target, fl);
                         } else if (value instanceof Integer in) {
                             // v1.4.9.5 审查修按字段实际类型分派 long/double/int。现状说明
-                            //（复查 2026-09）：classifyFieldRead 把 D/J desc 归 PROGRESS_FIELD，
-                            // 但该类候选在 execComboVerify 的 deadValueOf（getFloat）即抛
-                            // IllegalArgumentException → FAIL，走不到本方法——本分派为防御性
-                            // 完备分支，当前实际不可达；若要真正启用 D/J 候选需同步改
-                            // deadValueOf 按 desc 取值（getLong/getDouble）
+                            //（复查 2026-09 修正口径）：classifyFieldRead 把 I/D/J desc 归
+                            // PROGRESS_FIELD，三者在取值/写回两侧的失败点并不相同——
+                            //  · D（double）：deadValueOf 的 Field.getFloat 抛 IAE → 候选 FAIL；
+                            //  · I/J（int/long）：getFloat 按 JDK 宽化语义**成功**，于是会走完
+                            //    "写 + die + 可能挂窗口"，却在 writeCandidateValue 的 setFloat
+                            //    （收窄恒抛）处被 catch 吞掉 ⇒ 写入静默失效、白耗一个窗口。
+                            // 即：本分派（按字段类型 setInt/setLong/setDouble）当前实际不可达，
+                            // 要真正启用 I/D/J 候选需同时改 deadValueOf 的读取侧分派
+                            // （见 GateAnalyzer.classifyFieldRead 的 javadoc 同款说明）
                             if (f.getType() == long.class) {
                                 f.setLong(target, in);
                             } else if (f.getType() == double.class) {
@@ -625,11 +758,21 @@ public final class GateOracle {
          * 当前不可达。 */
         private void scheduleWait(Runnable onTimeout) {
             int wait = ModConfig.GATE_ORACLE_WAIT_TICKS.get();
-            PendingVerifyRegistry.register(target, wait, PendingVerifyRegistry.TaskKind.GATE,
-                new PendingVerifyRegistry.PendingTask() {
+            registerPending(wait, new PendingVerifyRegistry.PendingTask() {
                     @Override
                     public boolean onVerify(LivingEntity t) {
-                        return isDeadish(t); // 窗口到点仍未死 → onFail 降级
+                        // 审查修 P3（预留项正确性）：PendingVerifyRegistry 对 onVerify 返回 true
+                        // 视为成功，此后**不再**回调 onDead/onFail —— 若不在此清 OPENING，
+                        // 将来把本梯级接线到轮询型 Boss 时，成功路径会永久残留该目标
+                        // （后续 tryOpen 恒 PENDING → saturationKill 直接 return →
+                        // finalizeFallback 永不调度 = 不可击杀死锁）。本方法当前不可达
+                        // （run() 不产生 POLL_SILENT/LOUD_SET），属"修好预留避免接线踩坑"
+                        if (isDeadish(t)) {
+                            OPENING.remove(t.getUUID());
+                            DebugLog.probe("[GateOracle] 轮询型等待：窗口内目标进入死亡态（预留梯级成功）");
+                            return true;
+                        }
+                        return false; // 窗口到点仍未死 → onFail 降级
                     }
 
                     @Override
@@ -898,7 +1041,17 @@ public final class GateOracle {
                     case PERMIT_DATA_ITEM, PROGRESS_DATA_ITEM -> {
                         DataItemMedium medium = resolveDataItem(sc);
                         if (medium == null) return null;
-                        return dataItemDeadValue(HealthUtil.readDataItemValue(medium.item()), sc);
+                        // 审查修 P1：NOT_A_CANDIDATE 是"介质不可用"哨兵（语义上等价于
+                        // "该候选不可用"，即 null），而本方法原样返回 →
+                        // execComboVerify 只判 `deadVal == null` → 哨兵被当"死态值"经
+                        // writeCandidateValue → HealthUtil.writeDataItemValue 裸反射
+                        // DATA_ITEM_VALUE_FIELD.set 写进任意槽（Object 擦除、无类型校验）。
+                        // AS 编解码器的 Byte/String/ItemStack/Optional 槽会被塞入匿名 Object：
+                        // 该槽的 get()/packDirty 的 copy() 桥方法强转即 ClassCastException，
+                        // 且发生在 ChunkMap 主线程无兜底 → 服务端 tick 崩溃。
+                        // 语义与探针路径对齐：不可用 → null（→ 调用方判 FAIL）
+                        Object deadVal = dataItemDeadValue(HealthUtil.readDataItemValue(medium.item()), sc);
+                        return deadVal == NOT_A_CANDIDATE ? null : deadVal;
                     }
                     case PROGRESS_FIELD -> {
                         Field f = resolveInstanceField(sc);
@@ -916,13 +1069,22 @@ public final class GateOracle {
             }
         }
 
-        /** DataItem 槽死态值：Boolean→取反；Float/Integer→progressDeadValue；其他形态 NOT_A_CANDIDATE（运行时定型）。 */
+        /** DataItem 槽死态值：Boolean→取反；数值 →progressDeadValue 并**按原值类型回写**；其他形态 NOT_A_CANDIDATE（运行时定型）。 */
         private Object dataItemDeadValue(Object orig, GateAnalyzer.StateCandidate sc) {
             if (orig instanceof Boolean b) return !b;
             Float base = HealthUtil.readDataItemFloatLike(orig);
             if (base != null) {
                 Float d = progressDeadValue(base, sc);
-                if (orig instanceof Integer) return d == null ? null : (int) (float) d;
+                if (d == null) return null;
+                // 审查修 P1（类型忠实回写）：DataItem.value 是 Object 擦除槽，
+                // HealthUtil.writeDataItemValue 是裸字段 set（无任何类型校验）——回写值必须与
+                // 原值同型。原实现只对 Integer 转换、其余一律返回 Float，于是 **Double/Long 槽
+                // 会被塞入 Float**：该槽的 get() 或 packDirty 的 serializer.copy() 桥方法强转即
+                // ClassCastException（发生在 ChunkMap 主线程、无兜底）——与非数值哨兵污染是同一
+                // 崩服类别，只是换了介质。Float/Double/Integer/Long 四种装箱值全按原类型回写
+                if (orig instanceof Integer) return (int) (float) d;
+                if (orig instanceof Double) return (double) (float) d;
+                if (orig instanceof Long) return (long) (float) d;
                 return d;
             }
             return NOT_A_CANDIDATE;

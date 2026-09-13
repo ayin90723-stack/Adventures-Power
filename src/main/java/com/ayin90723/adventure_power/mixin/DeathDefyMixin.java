@@ -58,9 +58,10 @@ public abstract class DeathDefyMixin {
         if (HealthUtil.isMaxHealthClampSettle(player, newHealth)) return;
 
         // ProgressCache 按 tick 缓存 progress 引用，避免 setHealth 高频调用每次 resolve
+        // 审查修（收束）：三连门禁走 AbilityGate 唯一判定源（同文件层2 已用同一 API，
+        // 此处原为内联拷贝——同一文件两种写法）
         var progress = com.ayin90723.adventure_power.util.ProgressCache.get(player);
-        if (progress != null && (progress.isAdventurer() || progress.isFullyUnlocked())
-              && progress.isAbilityEnabled(AbilityIds.DEATH_DEFY)
+        if (progress != null && AbilityGate.isActive(progress, AbilityIds.DEATH_DEFY)
               && progress.isDeathDefyInvulnerable(player.level().getGameTime())) {
             ci.cancel();
         }
@@ -90,7 +91,13 @@ public abstract class DeathDefyMixin {
         float current = HealthUtil.getHealthDirect(player);
         // 钳制目标与 DeathDefyHandler 一致：max(20, maxHealth)——低 maxHealth（<20）时
         // 固定 20 会超出上限，统一两处语义
-        float clampTarget = Math.max(DEATH_DEFY_CLAMP_HEALTH, player.getMaxHealth());
+        // 审查修（遗漏补，与 DeathDefyHandler 同款有限性守卫）：Math.max 对 NaN 传播，
+        // maxHealth 被 modifier 通道污染成 NaN 时 clampTarget 也是 NaN → `current < NaN` 恒 false
+        // → 本 tick 兜底钳制静默失效（玩家停在 0 血不死也不被救回）；+Inf 时算出 +Inf、写入被
+        // 数据层 isSpecialFloat 拦下，同样不放行。降级为下限常量即可（与事件的救场语义一致）
+        float maxHealth = player.getMaxHealth();
+        float clampTarget = Float.isFinite(maxHealth)
+            ? Math.max(DEATH_DEFY_CLAMP_HEALTH, maxHealth) : DEATH_DEFY_CLAMP_HEALTH;
         if (current < clampTarget) {
             // catchSetTrueHealth 直写了 DataItem.value → getHealth() 已反映新值
             // setAllHealthLikeRaw 遍历所有血量条目并直接用反射写回，

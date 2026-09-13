@@ -1,6 +1,8 @@
 package com.ayin90723.adventure_power.mixin;
 
+import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.AbilityIds;
+import com.ayin90723.adventure_power.util.HealthUtil;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.util.RejectHealthManipUtil;
 import net.minecraft.server.MinecraftServer;
@@ -30,7 +32,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(value = AttributeInstance.class)
 public class RejectHealthManipAttributeMixin {
 
-    private static final double SUSPICIOUS_THRESHOLD = 6.0;
+    /** 属性层"可疑 base 值"阈值——审查修（收束）：改引 HealthUtil 唯一来源。
+     *  语义与数值不变（6.0）。注意这与 clamp 归位豁免的下界**不是同一个东西**：
+     *  后者只排除 0（早期游戏"减少生命上限的诅咒"会让 maxHealth 合法落到 6 以下，
+     *  归位豁免若沿用 6.0 会把那段时期的合法归位写入一并拦掉）。 */
+    private static final double SUSPICIOUS_THRESHOLD = HealthUtil.SUSPICIOUS_MAX_HEALTH_BASE;
 
     @Inject(method = "m_22100_", at = @At("HEAD"), cancellable = true)
     private void rejectSetBaseValue(double newValue, CallbackInfo ci) {
@@ -63,8 +69,8 @@ public class RejectHealthManipAttributeMixin {
 
     private static void checkAndReject(Player player, CallbackInfo ci) {
         AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
-            if ((progress.isAdventurer() || progress.isFullyUnlocked())
-                  && progress.isAbilityEnabled(AbilityIds.REJECT_MANIP)) {
+            // 审查修（收束）：三连门禁走 AbilityGate 唯一判定源
+            if (AbilityGate.isActive(progress, AbilityIds.REJECT_MANIP)) {
                 ci.cancel();
             }
         });

@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.ui;
 
+import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.config.ModConfig;
@@ -68,13 +69,14 @@ public class ClientHudDataCache {
         //（原实现该路径 ifPresent 空转，旧字段残留）
         mc.player.getCapability(AdventureProgressCapability.CAPABILITY).resolve()
             .ifPresentOrElse(p -> {
-                activeSkillReady = (p.isAdventurer() || p.isFullyUnlocked()) && p.isAbilityEnabled(AbilityIds.ACTIVE_SKILL);
+                // 审查修（收束）：三连门禁走 AbilityGate 唯一判定源
+                activeSkillReady = AbilityGate.isActive(p, AbilityIds.ACTIVE_SKILL);
                 activeSkillIndex = p.getActiveSkillIndex();
                 judgmentCdEnd = p.getJudgmentCooldownEnd();
                 sanctuaryCdEnd = p.getSanctuaryCooldownEnd();
                 deathDefyEnabled = p.isAbilityEnabled(AbilityIds.DEATH_DEFY);
                 deathDefyInvulEnd = p.getDeathDefyInvulEnd();
-                allSeeingEnabled = (p.isAdventurer() || p.isFullyUnlocked()) && p.isAbilityEnabled(AbilityIds.ALL_SEEING);
+                allSeeingEnabled = AbilityGate.isActive(p, AbilityIds.ALL_SEEING);
                 fullyUnlocked = p.isFullyUnlocked();
             }, ClientHudDataCache::resetToZero);
 
@@ -188,7 +190,8 @@ public class ClientHudDataCache {
         return cardinal ? key(base + "_cardinal") : key(base);  // 正前 / 左前 / ...
     }
 
-    /** 方位词翻译缓存（30 个键，首次使用时解析；语言切换需重开游戏生效，可接受） */
+    /** 方位词翻译缓存（26 个可达键：8 方位×上/下 16 + `_cardinal` 4 + 斜向裸键 4 + 正上/正下 2；
+     *  首次使用时解析；语言切换需重开游戏生效，可接受） */
     private static final java.util.Map<String, String> DIR_KEY_CACHE = new java.util.HashMap<>();
 
     private static String key(String suffix) {

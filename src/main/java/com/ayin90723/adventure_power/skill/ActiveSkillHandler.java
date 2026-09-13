@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.skill;
 
+import com.ayin90723.adventure_power.util.TrustedRead;
 import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
@@ -123,8 +124,7 @@ public class ActiveSkillHandler {
         var progress = progressOpt.get();
 
         // 防御性门禁：冒险者 + 里程碑解锁 active_skill 即可释放审判
-        if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return 0;
-        if (!progress.isAbilityEnabled(AbilityIds.ACTIVE_SKILL)) return 0;
+        if (!AbilityGate.isActive(progress, AbilityIds.ACTIVE_SKILL)) return 0;
 
         // 指令后门解锁的 active_skill 按解锁时刻快照平移，之后随里程碑正常成长
         int milestones = com.ayin90723.adventure_power.util.AbilityGate.effectiveCount(progress, AbilityIds.ACTIVE_SKILL);
@@ -149,7 +149,11 @@ public class ActiveSkillHandler {
 
             // v1.4.2：拦截判定容差量纲化（大血量目标读数 ulp 地板，同淬魂）
             float epsilon = ProbeScales.interceptTolerance(totalDamage, healthBefore);
-            if (target.isAlive() && actualDealt < totalDamage - epsilon) {
+            // 审查修（判据收束，约定 14）：与淬魂兜底同款——存活判定用容器/字段事实
+            // （isFactuallyDead = isRemoved || deathTime>0），不用可被覆写谎报的 isAlive()
+            // （= !isRemoved && getHealth>0）。新纳入"0 血未死"幽灵实体与"只覆写 isAlive、
+            // getHealth 诚实"的谎报型；新排除"deathTime>0 且血>0"的复活/演出残留形态
+            if (!TrustedRead.isFactuallyDead(target) && actualDealt < totalDamage - epsilon) {
                 float correctedHealth = Math.max(healthBefore - totalDamage, 0.0F);
                 // v1.4.3 二十轮：清盾前置已下沉引擎 execute 磨血分支统一处理（调用点零纪律）
                 // v1.4.2：五层引擎（磨血语义）--L3/L4 覆盖静态 Map/加密存储型高级 Boss；

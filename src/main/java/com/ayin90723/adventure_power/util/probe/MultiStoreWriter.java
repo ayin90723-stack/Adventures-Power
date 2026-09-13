@@ -68,7 +68,7 @@ public final class MultiStoreWriter {
     /**
      * 双分量通路。A 可能是原版主槽（部分联动型：getHealth = 主槽 + B，主槽写走
      * {@code setHealthDirect} 与直通道一致）；B 一定是 DataItem 槽或对象图字段
-     * （GraphWritePath 统一表示，DataItem 槽即 field=DataItem.value + steps=[entityData, id]）。
+     * （GraphWritePath 统一表示，DataItem 槽即 field=DataItem.value + steps=[entityData, itemsById, id]）。
      */
     private static final class MultiStorePath {
         /** true = A 是原版 DATA_HEALTH_ID 主槽；false = A 是 GraphWritePath 通路。 */
@@ -103,11 +103,16 @@ public final class MultiStoreWriter {
             PATHS.remove(target);
             return false;
         }
+        // 复查修 P3：把两个写前值提到 try 外 + 写入发生标记——使异常路径也能回滚
+        // （异常可能发生在写入之后，原先只作废通路、已落地的分量留在目标上）
+        float aCur = 0.0F;
+        float bCur = 0.0F;
+        boolean wrote = false;
         try {
             float reading = target.getHealth();
-            float aCur = cached.aMain ? HealthUtil.getHealthDirect(target)
+            aCur = cached.aMain ? HealthUtil.getHealthDirect(target)
                 : readOrZero(HealthUtil.readGraphPathValue(target, cached.a));
-            float bCur = readOrZero(HealthUtil.readGraphPathValue(target, cached.b));
+            bCur = readOrZero(HealthUtil.readGraphPathValue(target, cached.b));
             // 通路漂移防御：分量现值之和必须仍解释当前合成读数，否则通路指向错误宿主
             if (Math.abs(aCur + bCur - reading) > ProbeScales.gateTolerance(reading)) {
                 PATHS.remove(target);
@@ -118,6 +123,7 @@ public final class MultiStoreWriter {
             float damage = reading - writeValue;
             float bNew = Math.max(0.0F, bCur - damage);
             float aNew = writeValue - bNew;
+            wrote = true;
             HealthUtil.writeGraphPath(target, cached.b, bNew);
             if (cached.aMain) {
                 HealthUtil.setHealthDirect(target, aNew);
@@ -125,11 +131,41 @@ public final class MultiStoreWriter {
                 HealthUtil.writeGraphPath(target, cached.a, aNew);
             }
             // 各写入无失败信号路径（主槽写 void / 图写吞异常）——统一由终态验证裁决
-            return verifyFinal(target, writeValue, cached);
+            boolean ok = verifyFinal(target, writeValue, cached);
+            if (!ok) {
+                // 审查修 P2（双写回滚）：终态验证失败时把两个分量还原为写前值。原先只作废
+                // 通路缓存，已落地的 aNew/bNew 留在目标上——非线性合成血下即"写歪"残留，
+                // 且下一刀单分量梯会基于被改过的分量重新推断。回滚成本为零（两个现值都在栈上）
+                restoreBoth(target, cached.aMain, cached.a, aCur, cached.b, bCur);
+            }
+            return ok;
         } catch (Exception e) {
             PATHS.remove(target);
             BloodWriteEngine.onPositiveCacheDrift();
+            // 复查修 P3：仅在"确实写过"时回滚——否则 aCur/bCur 未赋值（0/0），
+            // 回滚会把血量误写为 0
+            if (wrote) {
+                restoreBoth(target, cached.aMain, cached.a, aCur, cached.b, bCur);
+            }
             return false;
+        }
+    }
+
+    /** 双分量回滚：终态验证失败时把 A/B 还原为写前值（顺序与写入相反；失败静默——
+     *  通路已作废 + onPositiveCacheDrift 级联信号已在 verifyFinal 内发出，此处只求残留最小）。 */
+    private static void restoreBoth(LivingEntity target, boolean aMain, GraphWritePath aPath,
+                                    float aCur, GraphWritePath bPath, float bCur) {
+        try {
+            if (aMain) {
+                HealthUtil.setHealthDirect(target, aCur);
+            } else {
+                HealthUtil.writeGraphPath(target, aPath, aCur);
+            }
+        } catch (Exception ignored) {
+        }
+        try {
+            HealthUtil.writeGraphPath(target, bPath, bCur);
+        } catch (Exception ignored) {
         }
     }
 
@@ -150,6 +186,11 @@ public final class MultiStoreWriter {
      * 审查修 P2#7：delay=2——写入若发生在实体 tick 内调用链（非包处理窗口），同 tick END 在
      * 对面下一轮对账之前到达，delay=1 会漏检回刷且任务已移除；2 个 END 保证对面至少跑完一轮。 */
     private static void scheduleReverify(LivingEntity target, float expected) {
+        // 审查修（遗漏补，可观测性）：窗口末回调在本调用链返回后才被 PendingVerifyRegistry 驱动，
+        // 那时 ENGINE_CALLER 已还原 → 原先 onFail 的 DebugLog.probe 恒静默（多存储复验失败这一
+        // 最需要现场证据的路径看不到任何输出）。取一次调用方快照、回调内恢复归属——与
+        // GateOracle.registerPending 同款机制（本批新增的 DebugLog.runWithCaller 首次用于此域）
+        final DebugLog.EngineCaller reverifyCaller = DebugLog.currentCaller();
         PendingVerifyRegistry.register(target, 2, PendingVerifyRegistry.TaskKind.REVERIFY, new PendingVerifyRegistry.PendingTask() {
             @Override
             public boolean onVerify(LivingEntity t) {
@@ -160,14 +201,16 @@ public final class MultiStoreWriter {
 
             @Override
             public void onFail(LivingEntity t) {
-                PATHS.remove(t);
-                TICK_REVERTED.add(t.getClass());
-                // 审查修 P1#1：按归属只清复验任务——原 cancelAll 全删会把同实体挂起中的
-                // GateOracle 等待裁决任务一并静默删除（无回调），OPENING 残留 + 死序列候选
-                // 残留无人还原 → 之后 tryOpen 恒 PENDING，Boss 卡"0 血不死"不可击杀
-                PendingVerifyRegistry.cancelAll(t, PendingVerifyRegistry.TaskKind.REVERIFY);
-                DebugLog.probe("[多存储] {} 下 tick 复验失败（读数被对账回刷，tick 延迟耦合），封存该类多存储通道",
-                    t.getClass().getSimpleName());
+                DebugLog.runWithCaller(reverifyCaller, () -> {
+                    PATHS.remove(t);
+                    TICK_REVERTED.add(t.getClass());
+                    // 审查修 P1#1：按归属只清复验任务——原 cancelAll 全删会把同实体挂起中的
+                    // GateOracle 等待裁决任务一并静默删除（无回调），OPENING 残留 + 死序列候选
+                    // 残留无人还原 → 之后 tryOpen 恒 PENDING，Boss 卡"0 血不死"不可击杀
+                    PendingVerifyRegistry.cancelAll(t, PendingVerifyRegistry.TaskKind.REVERIFY);
+                    DebugLog.probe("[多存储] {} 下 tick 复验失败（读数被对账回刷， tick 延迟耦合），封存该类多存储通道",
+                        t.getClass().getSimpleName());
+                });
             }
         });
     }
@@ -211,35 +254,62 @@ public final class MultiStoreWriter {
      * B 写 {@code B_new}、A 重写 {@code A_new}（B 优先承伤分配）→ 终态验证 →
      * 缓存双分量通路 + 下 tick 复验。
      * <p>
-     * 失败语义：A 已写 writeValue 的部分写入状态保留（读数较写前下降 damage，方向无害），
-     * 调用方继续走既有梯（L3/L4/raw）。
+     * 失败语义（复查修同步）：A 写失败（只回滚 B）/ 终态验证失败（回滚 A+B）/ 任意异常
+     * （回滚 A+B，以 {@code wroteB} 守卫确保只在"确实写过 B"时动 B；A 的还原值 aCur 在任何
+     * 写入之前取好，写回同值无害）三条路径都会**回滚已落地的分量**（{@link #restoreBoth}，
+     * 写入的逆序 A→B），通路缓存作废并发出级联信号，调用方继续走既有梯（L3/L4/raw）。
+     * 注：{@code writeSecondary} 返回 null 时 B 未被写入（其内部各候选已自行还原），无需回滚。
      */
     private static boolean upgradeCore(LivingEntity target, float writeValue, float readingBefore,
                                        float bCur, boolean aMain, GraphWritePath aPath) {
         float damage = readingBefore - writeValue;
         float bNew = Math.max(0.0F, bCur - damage);
         float aNew = writeValue - bNew;
-        GraphWritePath bPath = writeSecondary(target, bCur, bNew);
-        if (bPath == null) {
-            DebugLog.probe("[多存储] 第二分量未找到（B_cur={}），回落既有梯", bCur);
+        // A 写前值（在任何写入之前取，异常路径也用它还原；写回同值无害）
+        float aCur = aMain ? HealthUtil.getHealthDirect(target)
+            : readOrZero(HealthUtil.readGraphPathValue(target, aPath));
+        GraphWritePath bPath = null;
+        boolean wroteB = false;
+        try {
+            bPath = writeSecondary(target, bCur, bNew);
+            if (bPath == null) {
+                // 复查澄清：writeSecondary 内部各候选"写→验证失败即自行还原"，返回 null 即 B 未落地
+                DebugLog.probe("[多存储] 第二分量未找到（B_cur={}），回落既有梯", bCur);
+                return false;
+            }
+            wroteB = true;
+            // A 重写：主槽走 setHealthDirect（与直通道同款 data.set 完整链）；图通路静默直写
+            if (aMain) {
+                HealthUtil.setHealthDirect(target, aNew);
+            } else if (!HealthUtil.writeGraphPath(target, aPath, aNew)) {
+                // 复查修 P3：B 已写为 bNew、A 写失败 → 只回滚 B（A 未改动）
+                try {
+                    HealthUtil.writeGraphPath(target, bPath, bCur);
+                } catch (Exception ignored) {
+                }
+                return false;
+            }
+            MultiStorePath path = new MultiStorePath(aMain, aPath, bPath);
+            if (!verifyFinal(target, writeValue, path)) {
+                restoreBoth(target, aMain, aPath, aCur, bPath, bCur);
+                return false;
+            }
+            PATHS.put(target, path);
+            // A 的单分量缓存让位（双分量通路接管快路径；B 通路若来自图插针也已在 writeSecondary 摘出）
+            HealthUtil.dropCachedWritePath(target);
+            DebugLog.probe("[多存储] 命中 A={} B={} → A'={} B'={}（读数 → {}）",
+                aMain ? "主槽" : "图通路", bPath.field().getName(), aNew, bNew, writeValue);
+            return true;
+        } catch (Exception e) {
+            // 复查修 P2（异常路径回滚）：原实现无 try/catch，异常沿 probeFresh → executeInner →
+            // execute 上抛（由 execute 顶层 catch 兜住退 raw），但已落地的 A/B 无人还原。
+            // 仅当"确实写过 B"才回滚——否则 bPath 可能为 null，且 aCur/bCur 的"写前值"语义
+            // 在写入未发生时虽然仍成立，但无谓回滚会多写一次（同值，无害）而掩盖真实未写状态
+            if (wroteB) {
+                restoreBoth(target, aMain, aPath, aCur, bPath, bCur);
+            }
             return false;
         }
-        // A 重写：主槽走 setHealthDirect（与直通道同款 data.set 完整链）；图通路静默直写
-        if (aMain) {
-            HealthUtil.setHealthDirect(target, aNew);
-        } else if (!HealthUtil.writeGraphPath(target, aPath, aNew)) {
-            return false;
-        }
-        MultiStorePath path = new MultiStorePath(aMain, aPath, bPath);
-        if (!verifyFinal(target, writeValue, path)) {
-            return false;
-        }
-        PATHS.put(target, path);
-        // A 的单分量缓存让位（双分量通路接管快路径；B 通路若来自图插针也已在 writeSecondary 摘出）
-        HealthUtil.dropCachedWritePath(target);
-        DebugLog.probe("[多存储] 命中 A={} B={} → A'={} B'={}（读数 → {}）",
-            aMain ? "主槽" : "图通路", bPath.field().getName(), aNew, bNew, writeValue);
-        return true;
     }
 
     /**
@@ -389,7 +459,16 @@ public final class MultiStoreWriter {
             injectPrimaryPath(target, cls);
             return;
         }
-        if (NO_SHIELD.contains(cls)) return;
+        if (NO_SHIELD.contains(cls)) {
+            // 审查修 P2：NO_SHIELD 早退必须仍然补一次真血通路重注入——原实现在
+            // injectPrimaryPath 之前 return，而 PRIMARY_FIELDS 命中（结构级定位成功）
+            // 的类即使盾清零全败也要保住定向直血通路。HealthUtil.dropCachedWritePath
+            // （upgradeCore 失败 / 写路径漂移作废）与 GRAPH_OVERWHELMED 封存叠加时，
+            // 一次性注入的通路被作废后再无重建点 → 该类彻底失去写入能力。
+            // PRIMARY_FIELDS 为空时注入本身零成本（内部查表即返回）
+            injectPrimaryPath(target, cls);
+            return;
+        }
         float reading = HealthUtil.getEffectiveHealth(target);
         List<ShieldPath> found = new java.util.ArrayList<>();
         // ① 结构级：ASM 分量集合 − 死亡判定消费 = 护盾类次分量
@@ -444,7 +523,8 @@ public final class MultiStoreWriter {
      * 失败还原返回 false）；NaN = 缓存路径幂等清零（分量已 ≤0 直接跳过）。
      */
     private static boolean applyShieldZero(LivingEntity target, ShieldPath p, float readingBefore) {
-        boolean verify = !Float.isNaN(readingBefore);
+        // 审查修（收束）：裸 isNaN 只挡 NaN，+Inf 会被当可信读数；改用 isSpecialFloat 全挡
+        boolean verify = !HealthUtil.isSpecialFloat(readingBefore);
         float verifyTh = ProbeScales.verifyThreshold(ProbeScales.epsilon(Math.max(readingBefore, 0.0F)));
         try {
             switch (p.kind) {
@@ -464,7 +544,7 @@ public final class MultiStoreWriter {
                     Object curObj = p.field.get(target);
                     float cur = curObj instanceof Float f ? f
                         : curObj instanceof Number n ? n.floatValue() : Float.NaN;
-                    if (Float.isNaN(cur)) return false;
+                    if (HealthUtil.isSpecialFloat(cur)) return false; // 审查修（收束）：同上一并挡 ±Inf
                     if (cur <= 0.0F) return true;
                     if (p.field.getType() == float.class) {
                         p.field.setFloat(target, 0.0F);
@@ -483,12 +563,26 @@ public final class MultiStoreWriter {
                 }
                 default: { // METHOD：缓存路径幂等清零（扫描期已带 getter 验证，运行期 invoke(0) 即可）
                     // 审查修 P3#11：先读后判——盾已空时不再空转 invoke（避免每刀触发 setter 回调/同步）
+                    Float prev = null;
                     if (p.getter != null) {
                         Object curObj = p.getter.invoke(target);
-                        if (curObj instanceof Number n && n.floatValue() <= 0.0F) return true;
+                        if (curObj instanceof Number n) {
+                            if (n.floatValue() <= 0.0F) return true;
+                            prev = n.floatValue();
+                        }
                     }
                     p.method.invoke(target, 0.0F);
-                    return !verify || HealthUtil.getEffectiveHealth(target) < readingBefore - verifyTh;
+                    boolean ok = !verify || HealthUtil.getEffectiveHealth(target) < readingBefore - verifyTh;
+                    // 审查修 P2（遗漏补）：验证失败必须还原——同函数 SLOT/FIELD 两分支都有还原，
+                    // 唯独本分支原先直接 return false，会在目标上留下一次不可逆的 invoke(0)；
+                    // 缓存路径每刀重清会反复发生，非"方向无害的一次性残余"。有 getter 才有还原值
+                    if (!ok && prev != null) {
+                        try {
+                            p.method.invoke(target, prev);
+                        } catch (Exception ignored) {
+                        }
+                    }
+                    return ok;
                 }
             }
         } catch (Exception e) {
@@ -632,7 +726,7 @@ public final class MultiStoreWriter {
                     float verifyTh = ProbeScales.verifyThreshold(ProbeScales.epsilon(Math.max(base, 0.0F)));
                     Object oldObj = getter.invoke(target);
                     float old = oldObj instanceof Number n ? n.floatValue() : Float.NaN;
-                    if (Float.isNaN(old) || old <= 0.0F) continue;
+                    if (HealthUtil.isSpecialFloat(old) || old <= 0.0F) continue; // 审查修（收束）：挡 NaN/±Inf
                     Object zero = pts[0] == double.class ? (Object) Double.valueOf(0.0) : (Object) Float.valueOf(0.0F);
                     m.invoke(target, zero);
                     if (HealthUtil.getEffectiveHealth(target) < base - verifyTh) {

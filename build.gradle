@@ -53,7 +53,15 @@ def genMixinRemapSrg = tasks.register('genMixinRemapSrg') {
                 if (parts.length == 2 && parts[0].startsWith('f_')) {
                     w.writeLine("FD: ${parts[0]} ${parts[1]}"); n++
                 } else if (parts.length >= 3 && parts[0].startsWith('m_')) {
-                    w.writeLine("MD: ${parts[0]} ${parts[1]}"); n++
+                    // 审查修（dev 实测暴露）：MD 行必须是**三段**——Mixin 的
+                    // RemappingReferenceMapper.processLine 对 MD 取 entries[2] 作为映射值
+                    // （FD 取 entries[1]），原实现只写两段 → 首行即
+                    // ArrayIndexOutOfBoundsException（Index 2 out of bounds for length 2），
+                    // 异常逃出 loadSrgs（只 catch IOException）→ 该 mixin 配置整体 Skipped
+                    // （实测 curios.mixins.json 被跳过），且 srgs 缓存里只留下"读到崩溃前"的
+                    // 空/残缺映射 → 全部配置的重映射实际失效。tsrg 方法行为
+                    // `\tm_x (desc) officialName` → parts[2] 即 dev 侧目标名
+                    w.writeLine("MD: ${parts[0]} ${parts[1]} ${parts[2]}"); n++
                 }
             }
         }
@@ -82,6 +90,16 @@ minecraft {
 
         client {
             property 'forge.enabledGameTestNamespaces', mod_id
+            // 可选 quickPlay 参数（仅在显式传属性时生效，正常构建/运行完全不受影响）：
+            //   ./gradlew runClient -PquickPlayMp=localhost:25565   直连多人服务器（配合 runServer）
+            //   ./gradlew runClient -PquickPlaySp=DevTest           直进单人存档 run/saves/DevTest
+            // 用途：免 GUI 导航地跑通"玩家真正进服/进世界"的链路（能力挂载、首登发放、tick 分发等）
+            if (project.hasProperty('quickPlayMp')) {
+                args '--quickPlayMultiplayer', project.property('quickPlayMp')
+            }
+            if (project.hasProperty('quickPlaySp')) {
+                args '--quickPlaySingleplayer', project.property('quickPlaySp')
+            }
         }
 
         server {
@@ -122,12 +140,20 @@ dependencies {
 }
 
 tasks.named('processResources', ProcessResources).configure {
+    // 审查修（规范）：只保留模板真正引用的占位符——mods.toml 用
+    // mod_id/mod_license/mod_version/minecraft_version_range/forge_version_range/
+    // loader_version_range，pack.mcmeta 用 mod_id。原先还传了 5 个**未被模板占位符引用**的键
+    // （minecraft_version/forge_version 另用于依赖坐标、mod_authors 另用于 jar manifest，
+    // 二者与本 map 无关故删除无影响；mod_name 是中文、mod_description 是英文——中文值经
+    // Gradle expand 的 ISO-8859-1 处理会 mojibake（历史踩坑），留着等于给后续"把
+    // displayName/authors 改成 ${mod_name}/${mod_description}"埋雷）。
+    // expand 对"模板有占位符但 map 无键"会抛错，故只删"无引用"方向安全。
+    // 注：gradle.properties 里的 mod_name/mod_description 现已成为无消费方的属性，保留备用
     var replaceProperties = [
-            minecraft_version: minecraft_version, minecraft_version_range: minecraft_version_range,
-            forge_version: forge_version, forge_version_range: forge_version_range,
+            minecraft_version_range: minecraft_version_range,
+            forge_version_range: forge_version_range,
             loader_version_range: loader_version_range,
-            mod_id: mod_id, mod_name: mod_name, mod_license: mod_license, mod_version: mod_version,
-            mod_authors: mod_authors, mod_description: mod_description,
+            mod_id: mod_id, mod_license: mod_license, mod_version: mod_version,
     ]
     inputs.properties replaceProperties
 

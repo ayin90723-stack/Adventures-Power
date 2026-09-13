@@ -258,7 +258,15 @@ final class NumericInverter {
                 live.add(c);
             }
             for (Cell c : live) {
-                c.write(c.doubleValue() + err / c.slope);
+                // 审查修 P1（割线符号 + 多 Cell 归一）：err = 读数 − 目标值，欲使 Δ读数 = −err；
+                // slope = Δ读数/Δ字段。n 个 Cell 时 Δ读数 = Σ slope_i·Δfield_i，故每个 Cell 需取
+                // Δfield_i = −err/(slope_i·n) 才能使总变化恰为 −err（n=1 退化为 −err/slope；
+                // 该恒等式对任意 n 成立，与各 slope 正负无关）。
+                // 不除 n 则一步过冲 n·err，而 applyCached 无步长重试 ⇒ 必然 restoreCells +
+                // onPositiveCacheDrift() ⇒ 下一刀 executeInner 级联清空通用负缓存 / L4 封存 /
+                // MultiStoreWriter per-class / GateAnalyzer 计划缓存 / L5 缓存 ⇒ 每刀重走全梯。
+                // （修复前 L5 全死、永不成功，此风暴不可达；符号修正把它激活后才成为现实风险）
+                c.write(c.doubleValue() - err / (c.slope * live.size()));
             }
             float after = TrustedRead.value(target);
             if (Math.abs(after - writeValue) <= driftTol) return true;
@@ -379,6 +387,14 @@ final class NumericInverter {
                     if (child instanceof Map<?, ?> m) {
                         if (fStatic && m.size() > STATIC_MAP_ENTRY_LIMIT) continue;
                         for (Map.Entry<?, ?> e : m.entrySet()) {
+                            // 审查修 P2（预算闸收口）：同级迭代也必须查时间预算——
+                            // 原实现只在 collectCells 入口检查，而递归调用对"无元素可收但条目极多"
+                            // 的容器（如超大 Map<String,String>）每次都入口即返回 → 迭代次数不受
+                            // 预算约束，可单次超预算数倍。与 L4 probeOwners 的 r != 0 中止写法对齐。
+                            // 附注（复查澄清）：VISIT_HARD_LIMIT 对这种病态容器**不生效**——递归到
+                            // String 就在入口提前 return、visited 不增长；真正兜住的是 deadline 分支。
+                            // visited 上限在此仅作"已访问对象多到该停"的次要护栏
+                            if (System.nanoTime() > deadline || visited.size() > VISIT_HARD_LIMIT) return;
                             // 归属过滤（四轮评审）：静态 Map 条目 key 为其他实体时其 value
                             // 整体不进收集——"静态容器中归属 target 的条目"之外一步不碰
                             if (e.getKey() instanceof Entity ke && ke != target) continue;
@@ -388,6 +404,8 @@ final class NumericInverter {
                         }
                     } else if (child instanceof java.util.Collection<?> col) {
                         for (Object v : col) {
+                            // 审查修 P2（预算闸收口）：同上——集合同级迭代同样受预算与上限约束
+                            if (System.nanoTime() > deadline || visited.size() > VISIT_HARD_LIMIT) return;
                             collectCells(target, v, depth + 1, visited, out, excluded,
                                 staticSeen, maxCells, absReading, deadline);
                             if (out.size() >= maxCells) return;
@@ -476,7 +494,9 @@ final class NumericInverter {
             try {
                 for (int i = 0; i < relevant.size(); i++) {
                     Cell c = relevant.get(i);
-                    c.write(before[i] + (err / c.slope) * scale);
+                    // 审查修 P1（割线符号 + 多 Cell 归一）：同缓存快路径——Δ字段 = −err/(slope·n)
+                    // （原 `+` 号使方向恒反；不除 n 则 n≥2 时过冲，本层靠 scale 减半自纠但白耗重试）
+                    c.write(before[i] - (err / (c.slope * relevant.size())) * scale);
                 }
                 float after = TrustedRead.value(target);
                 if (Math.abs(after - writeValue) <= driftTol) return true;  // 达标即收

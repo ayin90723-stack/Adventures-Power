@@ -1,7 +1,7 @@
 package com.ayin90723.adventure_power;
 
+import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.AbilityIds;
-import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.config.ModConfig;
 import com.ayin90723.adventure_power.effect.ModAttributes;
 import com.ayin90723.adventure_power.effect.ModEffects;
@@ -42,17 +42,14 @@ public class AdventurePower {
     }
 
     // ===== 能力检查（Mixin 调用） =====
+    // 审查修（收束）：三连门禁（冒险者/觉醒 + 能力启用）统一走 AbilityGate 唯一判定源，
+    // 不再内联拷贝——原先主类与 AbilityGate 两份实现，门禁语义演化时会漏改
 
     public static boolean hasPiercingGaze(LivingEntity entity) {
-        if (entity instanceof Player player) {
-            return AdventureProgressCapability.getAdventureProgress(player)
-                .map(p -> (p.isAdventurer() || p.isFullyUnlocked()) && p.isAbilityEnabled(AbilityIds.PIERCING_GAZE)).orElse(false);
-        }
-        return false;
+        return entity instanceof Player player && AbilityGate.isAbilityActive(player, AbilityIds.PIERCING_GAZE);
     }
 
     public static boolean hasUndyingGear(Player player) {
-        return AdventureProgressCapability.getAdventureProgress(player)
-            .map(p -> (p.isAdventurer() || p.isFullyUnlocked()) && p.isAbilityEnabled(AbilityIds.UNDYING_GEAR)).orElse(false);
+        return AbilityGate.isAbilityActive(player, AbilityIds.UNDYING_GEAR);
     }
 }

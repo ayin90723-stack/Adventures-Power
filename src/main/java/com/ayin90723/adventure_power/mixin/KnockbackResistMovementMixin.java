@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.mixin;
 
+import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.util.ProgressCache;
 import net.minecraft.world.entity.Entity;
@@ -66,8 +67,7 @@ public abstract class KnockbackResistMovementMixin {
         // 能力门禁（ProgressCache 按 tick 缓存）
         var progress = ProgressCache.get(player);
         if (progress == null) return false;
-        if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return false;
-        if (!progress.isAbilityEnabled(AbilityIds.KNOCKBACK_RESIST)) return false;
+        if (!AbilityGate.isActive(progress, AbilityIds.KNOCKBACK_RESIST)) return false;
 
         // 正在移动：当前位置与上 tick 位置（xo/yo/zo，baseTick 更新）有水平位移
         double moved = Math.abs(player.getX() - player.xo) + Math.abs(player.getZ() - player.zo);

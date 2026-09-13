@@ -40,6 +40,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class BloodWriteEngine {
 
+    private static final org.slf4j.Logger LOGGER = com.mojang.logging.LogUtils.getLogger();
+
+    /** 审查修 P2：execute 顶层异常的一次性告警标记（后续同类异常静默零退化，不刷屏）。 */
+    private static volatile boolean executeFaultLogged = false;
+
     private BloodWriteEngine() {
     }
 
@@ -173,6 +178,29 @@ public final class BloodWriteEngine {
                 }
             }
             return executeInner(target, targetHealth);
+        } catch (Throwable t) {
+            // 审查修 P2（异常安全）：execute 由 mixin 注入点同步调用（HealingBlockMixin 的
+            // setHealth HEAD / tick TAIL、穿透三连的 hurt RETURN 与 @Redirect）——原实现
+            // 只有 finally 没有 catch，任一 Throwable（NoClassDefFoundError、探针目标方法
+            // 抛出的 RuntimeException、StackOverflowError）都会穿透到原版
+            // setHealth / hurt / tick 链，表现为伤害管线断裂或服务端 tick 崩溃。
+            // 此处兜住并退化为 raw 直写（与 REENTRANT / 引擎关闭同款兼容路径），
+            // 保证**可恢复异常**绝不越过注入边界；返回 false 让调用方按"未命中"处理。
+            // （VM 级错误按设计重抛，见下方 VME 分支——故"绝不越过"仅对可恢复异常成立）
+            if (!executeFaultLogged) {
+                executeFaultLogged = true;
+                LOGGER.warn("[走梯] BloodWriteEngine.execute 顶层异常（后续同类异常静默零退化退 raw 直写）", t);
+            }
+            // 复查加固：VirtualMachineError（OutOfMemoryError / StackOverflowError / InternalError）
+            // 一律不上吞——吞掉 VM 级错误后继续跑后续逻辑，比让它沿原链上抛更危险。
+            // raw 兜底与 return false 只用于可恢复异常（反射失败、目标写方法抛出的
+            // RuntimeException、LinkageError 等）
+            if (t instanceof VirtualMachineError vme) throw vme;
+            try {
+                HealthUtil.setAllHealthLikeRaw(target, targetHealth);
+            } catch (Throwable ignored) {
+            }
+            return false;
         } finally {
             // restoreEngineCaller(null) 安全（ThreadLocal.set(null)）——setEngineCaller
             // 未执行（首行抛异常）时恢复 null 初值即为正确状态
@@ -577,7 +605,12 @@ public final class BloodWriteEngine {
         try {
             if (bitPacked) {
                 long bits = prev instanceof Number n ? n.longValue() : 0L;
-                bitsWrite(entry, f, bits & 0xFFFFFFFFL);
+                // 审查修 P2（还原忠实性）：还原必须用完整快照，不得掩 0xFFFFFFFFL —— 低 32 位
+                // 是 float 位型约定，但 long 字段的原值高 32 位可能另有数据（0x00000001_42C80000），
+                // 掩码会把高 32 位永久清成 0、原值不可恢复。写入侧掩码是"低 32 位约定"，
+                // 还原侧必须是完整值（对照：probeEntryDrill 与 HealthUtil.probeBitsField 均用完整
+                // origBits 还原）。bitsWrite 对 int 字段自会截断，无需在此收窄
+                bitsWrite(entry, f, bits);
             } else {
                 Class<?> ft = f.getType();
                 if (ft == Float.class || ft == Object.class) {

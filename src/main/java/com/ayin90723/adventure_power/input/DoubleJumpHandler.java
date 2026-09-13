@@ -1,8 +1,8 @@
 package com.ayin90723.adventure_power.input;
 
 import com.ayin90723.adventure_power.AdventurePower;
+import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.AbilityIds;
-import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.server.level.ServerLevel;
@@ -93,9 +93,9 @@ public class DoubleJumpHandler {
     }
 
     private static boolean isDoubleJumpEnabled(ServerPlayer player) {
-        return AdventureProgressCapability.getAdventureProgress(player)
-            .map(p -> p.isAdventurer() && p.isAbilityEnabled(AbilityIds.VOID_STEP))
-            .orElse(false);
+        // 审查修（收束）：门禁走 AbilityGate 唯一判定源——原写法缺 isFullyUnlocked 析取，
+        // 因 activateFullyUnlocked 强制 adventurer=true 而当前等价，但属未纳入收束口径的漏改点
+        return AbilityGate.isAbilityActive(player, AbilityIds.VOID_STEP);
     }
 
     // ==================== 效果 ====================

@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.mixin;
 
+import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import net.minecraft.network.syncher.EntityDataAccessor;
@@ -102,8 +103,7 @@ public abstract class RejectHealthManipDataMixin {
         // 能力门禁（ProgressCache 按 tick 缓存，高频安全）
         var progress = com.ayin90723.adventure_power.util.ProgressCache.get(player);
         if (progress == null) return false;
-        if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return false;
-        if (!progress.isAbilityEnabled(AbilityIds.REJECT_MANIP)) return false;
+        if (!AbilityGate.isActive(progress, AbilityIds.REJECT_MANIP)) return false;
 
         // 外部直写血量降值 -> cancel
         return true;

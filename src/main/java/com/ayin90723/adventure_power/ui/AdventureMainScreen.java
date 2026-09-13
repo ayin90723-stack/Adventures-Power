@@ -51,6 +51,17 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
     private final Set<String> disabledAbilities = new HashSet<>();
     private final List<Map.Entry<String, Component>> abilityEntries = new ArrayList<>();
     private final List<String> abilityNames = new ArrayList<>();
+    /** 状态文本常量（initAbilityData 时解析一次，渲染按 live 的 isDisabled 二选一）。
+     *  审查修 P3（性能）：原先每行每帧 `Component.translatable(...).getString()`，
+     *  30 行 × 60fps ≈ 1800 次/秒的对象分配与翻译查找——与本文件 refreshDisplayEffects
+     *  的"预计算避免每帧对象创建"范式自相矛盾。
+     *  <p>
+     *  复查修（回归）：初版做成"按行预计算列表"，但 {@code abilityTabClicked} 是**乐观就地
+     *  改写** `disabledAbilities`（不重建列表），于是点击后圆点立即翻转、同行状态文字却
+     *  滞后到下一次 20 tick 重建——同帧自相矛盾。改为只预计算两个字符串、渲染时按 live
+     *  的 isDisabled 取值：既免掉每帧格式化，又不引入任何状态同步问题（无索引对齐风险）。 */
+    private String statusEnabledText = "启用";
+    private String statusDisabledText = "禁用";
 
     // ===== Buff tab =====
     private final Set<String> excludedEffects = new HashSet<>();
@@ -168,6 +179,9 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
         disabledAbilities.clear();
         abilityEntries.clear();
         abilityNames.clear();
+        // 状态文本常量（与列表正交，不随条目增减变化；语言变化时随本方法一并刷新）
+        statusEnabledText = Component.translatable("screen.adventure_power.enabled").getString();
+        statusDisabledText = Component.translatable("screen.adventure_power.disabled").getString();
         if (mc.player == null) return;
         mc.player.getCapability(AdventureProgressCapability.CAPABILITY).ifPresent(progress -> {
             disabledAbilities.addAll(progress.getDisabledAbilities());
@@ -373,11 +387,10 @@ public class AdventureMainScreen extends AbstractScrollableScreen {
                 String dot = isDisabled ? "§7○" : "§a●";
                 graphics.drawString(this.font, dot, leftX + 5, y, isDisabled ? COLOR_GRAY : COLOR_GREEN);
                 graphics.drawString(this.font, name, leftX + 22, y, COLOR_WHITE);
-                Component status = isDisabled
-                    ? Component.translatable("screen.adventure_power.disabled")
-                    : Component.translatable("screen.adventure_power.enabled");
-                graphics.drawString(this.font, status.getString(), leftX + 140, y,
-                    isDisabled ? COLOR_GRAY : COLOR_GREEN);
+                // 审查修 P3：状态文本取预计算常量（不再每帧 new Component）；
+                // 复查修：按 live 的 isDisabled 二选一，与圆点同源、永不出现同帧矛盾
+                graphics.drawString(this.font, isDisabled ? statusDisabledText : statusEnabledText,
+                    leftX + 140, y, isDisabled ? COLOR_GRAY : COLOR_GREEN);
             }
         } finally {
             disableRowScissors();

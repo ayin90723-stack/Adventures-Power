@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.mixin;
 
+import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.util.ProgressCache;
 import net.minecraft.world.effect.MobEffectCategory;
@@ -39,9 +40,9 @@ public class PurifiedSoulMixin {
 
         // 与其他能力 Mixin（DeathDefyMixin 等）统一门禁：
         // ProgressCache 按 tick 缓存 progress 引用 + 冒险者/觉醒身份检查
+        // 审查修（收束）：身份+能力判定走 AbilityGate 唯一判定源
         var progress = ProgressCache.get(player);
-        if (progress != null && (progress.isAdventurer() || progress.isFullyUnlocked())
-              && progress.isAbilityEnabled(AbilityIds.PURIFIED_SOUL)) {
+        if (progress != null && AbilityGate.isActive(progress, AbilityIds.PURIFIED_SOUL)) {
             cir.setReturnValue(false);
         }
     }

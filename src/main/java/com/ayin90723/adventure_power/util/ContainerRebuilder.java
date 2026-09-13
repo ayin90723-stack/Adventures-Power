@@ -170,6 +170,30 @@ public final class ContainerRebuilder {
                     ((net.minecraft.world.level.entity.EntityLookup) (Object)
                         ((PesmFieldAccessor) (Object) rawPesm).adventure_power$getVisibleEntityStorage())
                         .remove(player);
+                    // ChunkMap 追踪条目预清（审查修 P1）：重注册链必然走到
+                    // startTracking → ServerLevel$EntityCallbacks.onTrackingStart →
+                    // ServerChunkCache.addEntity → ChunkMap.addEntity，而后者对
+                    // "entityMap 已含本 id" 无条件抛 IllegalStateException("Entity is
+                    // already tracked!")（字节码实证：方法首段 containsKey 命中即 athrow）。
+                    // A4/A5 损坏但 A7 追踪完好（玩家常态）时，原实现必然抛异常 → 回滚
+                    // knownUuids → 每轮审计重复失败、容器永久不修，且第 0.5 步已移除
+                    // section 条目使状态进一步恶化。摘除后重注册自带的重建路径成立
+                    // （新建 TrackedEntity + 向观察者重新广播 spawn，语义自洽；第 5 步的
+                    // 幂等追踪补建随之短路）。失败路径不回滚——与上一行 visibleEntityStorage
+                    // 同款取舍：缺项由下次审计（A7/A4）捕获后重试，而重注册失败后下轮
+                    // A7 已不健康，恰好解除本处抛异常前提。
+                    // 已知代价（复查披露，非缺陷）：走通 ChunkMap.addEntity 后 vanilla 会对
+                    // 该玩家执行 updatePlayerStatus(add=true) → 视距内全部区块（视距 10 约
+                    // 529 个含光照数据的包）重发一次。原实现因首段抛异常从未发生，属"完整
+                    // 重建"语义的固有成本（罕见攻击恢复路径），不做抑制——抑制需绕过
+                    // vanilla 区块追踪，代价与风险都高于收益
+                    Object staleEntityMap = ((com.ayin90723.adventure_power.mixin.ChunkMapAccessor) (Object)
+                        ((com.ayin90723.adventure_power.mixin.ServerChunkCacheAccessor) (Object)
+                            level.getChunkSource()).adventure_power$getChunkMap())
+                        .adventure_power$getEntityMap();
+                    if (staleEntityMap instanceof it.unimi.dsi.fastutil.ints.Int2ObjectMap<?> staleMap) {
+                        staleMap.remove(player.getId());
+                    }
                 try {
                     // Forge patch 方法（无 tsrg 条目，生产保留 dev 名，强类型直调先例
                     // = Entity.revive()）；不发 EntityJoinLevelEvent，无被对手 cancel
@@ -218,9 +242,24 @@ public final class ContainerRebuilder {
                 }
 
                 // 第 6 步：players 表直补（公共方法直返字段本体，直改生效）
-                if (!level.players().contains(player)) {
-                    level.players().add(player);
-                }
+                // 审查修 P1：必须"先按 == 去重、再补一份"——本步之前重注册链的
+                // ServerLevel$EntityCallbacks.onTrackingStart 对 ServerPlayer 是**无条件**
+                // players.add（字节码实证：直接 List.add，无任何 contains 判断），而
+                // onTrackingEnd 只有 List.remove(Object) 删第一处、ServerLevel 内再无其它
+                // remove 点 → 重复条目跨换维度/登出永久残留（幽灵玩家：getPlayers(pred)/
+                // sendParticles/wakeUpAllPlayers/updateSleepingPlayerList 重复消费，登出后
+                // 残留 ServerPlayer 强引用泄漏）。审计 A8 只查 contains，永远发现不了重复。
+                // 原实现因 ChunkMap.addEntity 在首段抛 already-tracked 而根本走不到
+                // onTrackingStart，第 3 步预清后该路径变得可达（第 5 步的 onTrackingStart
+                // 补建同理），故在此统一收口。removeIf 按身份删全部重复，幂等
+                List<ServerPlayer> levelPlayers = level.players();
+                levelPlayers.removeIf(p -> p == player);
+                levelPlayers.add(player);
+                // 复查补：vanilla 的 onTrackingStart 在 `players.add` 之后会调
+                // updateSleepingPlayerList() 重算 SleepStatus；本条去重改动了同一列表，
+                // 需重算一次，否则该玩家正在睡觉时 SleepStatus 的计数会保留一段瞬态偏差
+                // （仅影响睡眠投票计数，直到下次列表变动自纠）
+                level.updateSleepingPlayerList();
 
                 // 第 7 步：PlayerList 名册直补（vp 连招腿②）——playersByUUID 同步重塞保
                 // 双表一致；已有条目跳过。反射不可用回退公共 getPlayers()（同为直返字段本体）

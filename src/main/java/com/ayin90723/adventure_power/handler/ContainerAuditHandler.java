@@ -19,6 +19,7 @@ import org.slf4j.Logger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -63,6 +64,10 @@ public class ContainerAuditHandler {
     private static final Map<UUID, Integer> FAIL_STREAK = new ConcurrentHashMap<>();
     /** 告警标记：上一轮审计即缺失（缺失→健康的状态翻转才再告警，防周期刷屏）。 */
     private static final Map<UUID, Boolean> WARNED = new ConcurrentHashMap<>();
+    /** 审查修 P3："容器缺失但重建开关关闭"ERROR 的一次性标记（与 WARNED 同生命周期）——
+     *  否则 container_rebuild_enabled=false 且持续受击时，每个审计周期（默认 20 tick）
+     *  输出一条 ERROR。 */
+    private static final Set<UUID> REBUILD_OFF_WARNED = ConcurrentHashMap.newKeySet();
 
     @SubscribeEvent
     public static void onServerTick(TickEvent.ServerTickEvent event) {
@@ -120,6 +125,7 @@ public class ContainerAuditHandler {
                 LOGGER.info("[容器审计] {} 容器状态恢复健康（告警清除）", player.getGameProfile().getName());
                 FAIL_STREAK.remove(uuid);
             }
+            REBUILD_OFF_WARNED.remove(uuid);
             return;
         }
 
@@ -156,12 +162,22 @@ public class ContainerAuditHandler {
         // ⑤ 分级动作：一级轻修复（不受重建开关限制）/ 二级完整重建（受开关门控）
         boolean ok;
         if (result.containerEntriesHealthy()) {
+            // 复查补：一级轻修复（容器条目 A3~A9 全在）也是"不再是二级缺失"的状态翻转，
+            // 必须一并清"仅告警"标记——否则"二级缺失+开关关闭 → 恢复为一级 → 再回二级缺失"
+            // 翻转后，标记仍置位会吞掉本应输出的 ERROR 告警
+            REBUILD_OFF_WARNED.remove(uuid);
             ok = ContainerRebuilder.rebuild(player, false);
         } else if (ModConfig.CONTAINER_REBUILD_ENABLED.get()) {
+            // 复查修：开关已重新打开 → 清"仅告警"标记，使再次关闭时能重新输出一次
+            REBUILD_OFF_WARNED.remove(uuid);
             ok = ContainerRebuilder.rebuild(player, true);
         } else {
-            LOGGER.error("[容器审计] {} 容器缺失但重建开关关闭（container_rebuild_enabled=false），仅告警",
-                player.getGameProfile().getName());
+            // 审查修 P3：改为状态翻转时一次性输出（与上方 WARN 同款去重）——原先每审计
+            // 周期（默认 20 tick）输出一条 ERROR，开关关闭 + 持续受击即刷屏
+            if (REBUILD_OFF_WARNED.add(uuid)) {
+                LOGGER.error("[容器审计] {} 容器缺失但重建开关关闭（container_rebuild_enabled=false），仅告警",
+                    player.getGameProfile().getName());
+            }
             return;
         }
 
@@ -242,5 +258,6 @@ public class ContainerAuditHandler {
         BACKOFF.remove(uuid);
         FAIL_STREAK.remove(uuid);
         WARNED.remove(uuid);
+        REBUILD_OFF_WARNED.remove(uuid);
     }
 }

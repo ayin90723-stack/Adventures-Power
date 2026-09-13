@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.input;
 
+import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.network.NetworkHandler;
@@ -59,9 +60,10 @@ public class JumpInputHandler {
         boolean jumpEdge = jumpDown && !wasJumpDown;
         wasJumpDown = jumpDown;
 
-        // 门禁：必须已激活冒险者 + 已解锁虚空踏步能力
+        // 门禁：冒险者/觉醒 + 已启用虚空踏步能力
+        // 审查修（收束）：门禁走 AbilityGate 唯一判定源（原写法缺 isFullyUnlocked 析取）
         var progress = AdventureProgressCapability.getAdventureProgress(player);
-        boolean abilityReady = progress.map(p -> p.isAdventurer() && p.isAbilityEnabled(AbilityIds.VOID_STEP)).orElse(false);
+        boolean abilityReady = AbilityGate.isAbilityActive(player, AbilityIds.VOID_STEP);
         // 觉醒状态（御风）
         boolean awakened = progress.map(p -> p.isFullyUnlocked()).orElse(false);
 

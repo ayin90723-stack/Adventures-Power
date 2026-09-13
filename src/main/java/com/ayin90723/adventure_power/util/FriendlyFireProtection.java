@@ -12,11 +12,17 @@ import net.minecraft.world.entity.TamableAnimal;
  *   <li>模组：车万女仆 (EntityMaid) 等</li>
  * </ul>
  * <p>
- * 调用点：
+ * 调用点（审查修 2026-09：原清单只列 3 处已过期，改为按"统一入口 + 目标集 filter"两级口径）：
  * <ul>
- *   <li>{@code CombatAbilityHandler.onLivingHurt()} — 事件入口统一拦截</li>
- *   <li>{@code PiercingGazeMixin.onIsInvulnerableTo()} — 破敌之眼 Mixin Layer1</li>
- *   <li>{@code PiercingGazeLivingEntityMixin.onHurtReturn()} — 破敌之眼 Mixin Layer2</li>
+ *   <li><b>事件入口</b>：{@code CombatAbilityHandler.onLivingHurt()}（含内部伤害源早退之后的
+ *       全部攻击事件路径）</li>
+ *   <li><b>穿透统一入口</b>：{@code PiercingGazeUtil.shouldPierce()}（Layer 0 / 0.5 / 2 三层
+ *       共用，兼容 Mixin 直调 {@code PiercingGazeMixin} / {@code PiercingGazeLivingEntityMixin}）</li>
+ *   <li><b>各能力的目标集 filter</b>：{@code RecoveryHandler}（嗜血击杀回馈 / 过量护盾）×2、
+ *       {@code ActiveSkillHandler.isHostileTarget()}、{@code LootAllHandler}</li>
+ *   <li><b>觉醒 AOE 目标集</b>：{@code ShadowKillHelper.shadowKillAoe()}（链式处决）、
+ *       {@code PlayerStateHandler}（净魂虚弱光环）、{@code SwiftHandler}（疾跑推开）——
+ *       这三处走内部伤害源/直接施效，绕不过事件层，必须各自 filter</li>
  * </ul>
  */
 public class FriendlyFireProtection {

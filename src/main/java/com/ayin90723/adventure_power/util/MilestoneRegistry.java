@@ -155,7 +155,23 @@ public class MilestoneRegistry {
             // externalDisabled 传入递归加载，内置里程碑解析时同步剔除被禁能力
             Set<String> keepDisabled = new HashSet<>(externalDisabled);
             keepDisabled.addAll(disabledAbilities);
-            loadBuiltinDefaults(keepDisabled);
+            // 审查修 P2：回退必须带 inBuiltinFallback 守卫——若内置资源自身也是
+            // "milestones 数组为空/缺失"（同路径被外部 jar 资源遮蔽、或未来误改），
+            // 本分支会无限递归 loadBuiltinDefaults → loadFromJson 直至 StackOverflowError；
+            // StackOverflowError 属 Error，apply() 外层只 catch Exception → 在
+            // /reload（AddReloadListener 服务端线程）直接崩服。同函数另一条回退路径
+            // （loaded.isEmpty()）已有同款守卫，此处补齐口径
+            if (inBuiltinFallback) {
+                LOGGER.error("[MilestoneRegistry] 内置 milestones.json 的 milestones 数组同样为空，"
+                    + "终止回退（防无限递归）——注册表保持空");
+                return;
+            }
+            inBuiltinFallback = true;
+            try {
+                loadBuiltinDefaults(keepDisabled);
+            } finally {
+                inBuiltinFallback = false;
+            }
             if (!keepDisabled.isEmpty()) {
                 Set<String> merged = new HashSet<>(disabledAbilities);
                 merged.addAll(keepDisabled);

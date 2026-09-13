@@ -750,9 +750,22 @@ public final class GateAnalyzer {
         }
     }
 
-    /** GETFIELD/GETSTATIC 普通（非 accessor）字段读的结构分类：Z=PERMIT、F=派生血候选（无比较常量时）/PROGRESS、I/D=PROGRESS。
+    /** GETFIELD/GETSTATIC 普通（非 accessor）字段读的结构分类：Z=PERMIT、F=派生血候选（无比较常量时）/PROGRESS、I/D/J=PROGRESS。
      * 审查修 P3#9：staticField=true 的候选不再生成——GateOracle.resolveInstanceField 对静态
-     * 候选恒 null（不可解死条目，每次击杀空转+日志噪声）。 */
+     * 候选恒 null（不可解死条目，每次击杀空转+日志噪声）。
+     * <p>
+     * <b>已知限制（审查 2026-09 复核，口径已按实测修正）</b>：字段型"进度阈值"域当前
+     * <b>零可用候选</b>——{@code GateOracle.deadValueOf} 的 PROGRESS_FIELD 分支取值恒走
+     * {@code Field.getFloat}，而该调用按 JDK 字段宽化语义：<b>int/long 字段成功（宽化）</b>、
+     * double/装箱 Integer 抛 IllegalArgumentException。于是 D 型候选在取值即 FAIL，
+     * 而 <b>I/J 型候选取值成功、却在 {@code writeCandidateValue} 的 {@code setFloat}</b>
+     * （收窄恒抛）处被 catch 吞掉 ⇒ <b>写入静默失效，白耗一个等待窗口且已调过 die()</b>。
+     * 另注：float 字段被归类为 DERIVED_BLOOD_FIELD，不进 PROGRESS，故"进度阈值只覆盖 float"
+     * 的说法也不成立；DataItem 槽型不受影响（走 dataItemDeadValue→progressDeadValue，
+     * 已按原值类型回写）。
+     * 要真正启用需同步补齐读写两侧的类型分派（deadValueOf 按 f.getType() 取
+     * getInt/getLong/getDouble，writeCandidateValue 按字段类型 setInt/setLong/setDouble），
+     * 属行为扩张（新增写入面），需先有加密/阈值型 Boss 实弹验证，故本轮只做口径修正、不放开。 */
     private static void classifyFieldRead(List<StateCandidate> candidates, FieldInsnNode f) {
         boolean isStatic = f.getOpcode() == org.objectweb.asm.Opcodes.GETSTATIC;
         if (isStatic) return;  // 静态许可字段介质不可解（v1 支持实例字段/槽两形态已覆盖已知形态）

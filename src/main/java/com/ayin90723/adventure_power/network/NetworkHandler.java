@@ -376,6 +376,13 @@ public class NetworkHandler {
                 TOGGLE_COOLDOWN.put(player.getUUID(), now);
                 if (AdventureProgressCapability.isAdventurer(player)
                     || AdventureProgressCapability.isFullyUnlocked(player)) {
+                    // 审查修 P3（放大面）：未知 id / 未解锁 id 直接丢弃，不再触发下方
+                    // 全量 syncToClient（含里程碑元数据的 KB 级 Capability NBT）——恶意
+                    // 客户端按限频下限每 5 tick 刷无效包即可稳定换取约 4 次/秒的 KB 级回包。
+                    // 注意不能用 toggleAbility 的返回值收口：它返回的是"新启用态"，
+                    // 关闭能力时同样返回 false，会被误判为无变更而吞掉同步
+                    var toggleProgress = AdventureProgressCapability.getAdventureProgress(player);
+                    if (toggleProgress.isEmpty() || !toggleProgress.get().isAbilityUnlocked(msg.id)) return;
                     AdventureProgressCapability.toggleAbility(player, msg.id);
                     SyncUtil.syncToClient(player);
                     // v1.4.0 审查修复：补 persistentData 第二层同步——toggle 是此前唯一
@@ -510,7 +517,13 @@ public class NetworkHandler {
                     || AdventureProgressCapability.isFullyUnlocked(player)) {
                     AdventureProgressCapability.getAdventureProgress(player).ifPresent(progress -> {
                         if (progress.isAbilityEnabled(AbilityIds.ACTIVE_SKILL)) {
-                            progress.setActiveSkillIndex(msg.skillIndex == 0 ? 0 : 1);
+                            // 审查修（遗漏补，与 AbilityTogglePacket 同款放大面）：非法索引丢弃、
+                            // 索引未变化直接 return——原实现把任意值强转为 0/1 后无条件落库并回发
+                            // KB 级全量 NBT，恶意客户端每 5 tick（限频下限）刷同值即可稳定换取
+                            // 约 4 次/秒的 KB 级回包。有效技能槽为 0..1（HUD 同为两槽）
+                            if (msg.skillIndex < 0 || msg.skillIndex > 1) return;
+                            if (progress.getActiveSkillIndex() == msg.skillIndex) return;
+                            progress.setActiveSkillIndex(msg.skillIndex);
                             // 回发同步（v1.4.0 审查修复：移入门禁内）——接受时持久化确认，
                             // 拒绝时（两端数据短暂不一致）让客户端乐观更新回滚到服务端
                             // 真实状态，避免 HUD 索引永久偏离。未激活玩家客户端不会

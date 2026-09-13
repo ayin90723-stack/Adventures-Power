@@ -47,6 +47,11 @@ import java.util.WeakHashMap;
  */
 public final class PiercingGazeUtil {
 
+    private static final org.slf4j.Logger LOGGER = com.mojang.logging.LogUtils.getLogger();
+
+    /** 注入点顶层异常的一次性告警标记（审查修：本方法在 @Redirect 注入点上高频调用，异常稳定出现会刷屏） */
+    private static volatile boolean interceptFaultLogged = false;
+
     private PiercingGazeUtil() {
     }
 
@@ -177,6 +182,18 @@ public final class PiercingGazeUtil {
         VANILLA_HURT_SCOPE_BASE.set(VANILLA_HURT_EVENT_POST_COUNT.get());
         try {
             return doInterceptAttackHurt(living, target, source, amount, healthBefore, absorptionBefore);
+        } catch (Throwable t) {
+            // 审查修（遗漏补，异常安全）：本方法是 Layer 0/0.5 三个 @Redirect 的返回值来源，
+            // 且内部 postHurtEvent 会经事件总线调用**第三方模组的 hurt 监听器**——异常面比
+            // BloodWriteEngine.execute 更大。原先无顶层 catch，任一 RuntimeException 会沿注入点
+            // 穿透到原版攻击链（伤害管线断裂）。兜住并退化为原版 hurt；VirtualMachineError 上抛
+            // （与 execute 同口径——带着可能的 JVM 不一致状态继续跑更危险）
+            if (t instanceof VirtualMachineError vme) throw vme;
+            if (!interceptFaultLogged) {
+                interceptFaultLogged = true;
+                LOGGER.warn("[破敌] interceptAttackHurt 顶层异常（后续同类异常静默，本次退化为原版 hurt）", t);
+            }
+            return target.hurt(source, amount);
         } finally {
             VANILLA_HURT_SCOPE_BASE.set(prevScopeBase);
         }
@@ -278,9 +295,14 @@ public final class PiercingGazeUtil {
      * @return true 表示这是一次应当穿透的破敌之眼攻击
      */
     public static boolean shouldPierce(DamageSource source, LivingEntity target) {
-        // PVP 禁用（v1.4.9.1 可配置，默认 false）：穿透三连会绕过玩家 hurt 被取消时的保护
+        // PVP 默认禁用（v1.4.9.1 可配置，默认 false）：穿透三连会绕过玩家 hurt 被取消时的保护
         //（PVP 保护类模组），且觉醒禁无敌帧让对手无敌帧失效——对玩家目标一律不穿透；
-        // 开启后觉醒禁无敌帧（CombatAbilityHandler.handlePiercingGazeAwakened）同步放开
+        // 开启后仅放进"穿透判定 + hurt 管线条目"，觉醒禁无敌帧同步放开。
+        // <b>分层界限（本轮定案）</b>：与玩家防御自冲突的<b>引擎写侧</b>——
+        // {@code afterPierceFallback} 的兜底直写与清自定义无敌计时——对玩家目标<b>恒短路</b>
+        // （见该方法的 Player guard）。即开启本开关不等于"用引擎压穿玩家防御"；但也不等于
+        // "完全走原版 hurt 管线"——穿透三连仍直调 actuallyHurt 且觉醒禁无敌帧仍生效，
+        // 详见 afterPierceFallback 的注释
         if (target instanceof Player && !ModConfig.PIERCING_GAZE_PVP_ENABLED.get()) {
             return false;
         }
@@ -363,6 +385,24 @@ public final class PiercingGazeUtil {
      */
     public static void afterPierceFallback(LivingEntity target, DamageSource source, float effectiveAmount,
                                            float healthBefore, float absorptionBefore) {
+        // PVP 分层分支（v1.4.9.6+）：对玩家目标本兜底**整体短路**——
+        // ①引擎兜底直写（功能主体）：先按层走 L1 setter（此时仍是 data.set），被数据层拦下后才
+        //    落到 L2 的 DataItem.value **字段**直写——即"绕过受击方拒绝篡改"只在 L2 之后成立；
+        //    而真血侧又会把该值当非法降血修复拉回 → 净效果多为"瞬时数值"，却带着与玩家防御
+        //    自冲突的写侧。故对玩家不补刀。
+        // ②清自定义无敌计时（InvulClearUtil）——<b>对玩家不是 no-op</b>（复查核实）：其扫描
+        //    规则为"int 字段名含 invul/Invul"且只排除 Entity/LivingEntity 两层，而
+        //    {@code ServerPlayer} 声明了 {@code private int spawnInvulnerableTime} → 命中并被清零。
+        //    即改动前**每一次**玩家目标的 afterPierceFallback（含 Layer 2 情况 B 的普通命中）
+        //    都在清玩家的出生/重生无敌计时；本守卫顺带修掉了这个真实副作用
+        // ③DeathFinalizer：本身已带 Player guard（恒 no-op），随本分支一并短路
+        // <b>分层边界（勿过度理解）</b>：短路只覆盖本兜底的写侧。穿透三连本身仍会
+        // {@code invokeActuallyHurt} 直调（绕过 hurt() 的无敌帧/盾牌/睡眠等关卡，这是穿透能力的
+        // 既有语义）；觉醒"破无敌一击"对玩家的 invulnerableTime 剥离也仍按
+        // piercing_gaze_pvp_enabled 生效（v1.4.9.1 既有设计）。故本分支不等于"玩家完全走
+        // 原版 hurt 管线"，与淬魂的差异在于：淬魂对玩家是**连无敌帧都不清**、只留自定义伤害源
+        // 走 hurt；破敌对玩家仍是"穿透语义 + 引擎写侧短路"
+        if (target instanceof Player) return;
         // 架空参照读数：自定义血条 Boss（亚波伦）原版槽被架空，getHealthDirect 读到不动值，
         // 会导致"血量未下降"检测恒成立而每击触发直写兜底（数值错位）；取真实血量判断。
         // 吸收感知：吸收心吃掉伤害时血量不动但吸收下降，不算拦截（原版行为非无敌）

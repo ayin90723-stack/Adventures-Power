@@ -7,8 +7,10 @@ import com.ayin90723.adventure_power.util.DebugLog;
 import com.ayin90723.adventure_power.util.ExecutionFinalizer;
 import com.ayin90723.adventure_power.util.HealthUtil;
 import com.ayin90723.adventure_power.util.PersistentDataKeys;
+import com.ayin90723.adventure_power.util.TrustedRead;
 import com.ayin90723.adventure_power.util.probe.BloodWriteEngine;
 import com.ayin90723.adventure_power.util.probe.PendingVerifyRegistry;
+import com.ayin90723.adventure_power.util.probe.ProbeScales;
 import com.ayin90723.adventure_power.util.probe.gate.GateOracle;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
@@ -229,9 +231,12 @@ public class HealingBlockEffect extends MobEffect {
       if (target instanceof net.minecraft.world.entity.player.Player || target.level().isClientSide()) return false;
       TrackedEntry e = TRACKED_HEALTH.get(target.getUUID());
       if (e == null || target.level().getGameTime() > e.endTime) return false;
-      // 复查修（P2）：量纲对齐约定 14——容差 = max(0.01, ulp(低点)×4)（同 interceptTolerance 语义；
-      // 不可用 ProbeScales.epsilon[地板 1.0]——小血量目标会漏放 1.0hp 内的钳制压回写）
-      float tol = Math.max(0.01F, Math.ulp(e.health) * 4.0F);
+      // 复查修（P2）：量纲对齐约定 14——容差 = max(0.01, max(0, ulp(低点)×4))。
+      // 审查修（收束）：改用 ProbeScales.interceptTolerance 唯一来源——expectedDamage=0 时
+      // 其公式恰为 max(0.01, ulp×ULP_FACTOR)，与原先内联算式完全等价，但 ULP 倍数不再
+      // 游离于 ProbeScales 之外（原先全库唯一一处 Math.ulp 外泄，ProbeScales 调整倍数会漏改）。
+      // 不可用 ProbeScales.epsilon[地板 1.0]——小血量目标会漏放 1.0hp 内的钳制压回写
+      float tol = ProbeScales.interceptTolerance(0.0F, e.health);
       return newHealth > e.health + tol;
    }
 
@@ -364,7 +369,13 @@ public class HealingBlockEffect extends MobEffect {
          for (ServerLevel level : event.getServer().getAllLevels()) {
             for (UUID uuid : new ArrayList<>(TRACKED_HEALTH.keySet())) {
                Entity entity = level.getEntity(uuid);
-               if (entity instanceof LivingEntity living && living.isAlive()) {
+               // 审查修 P2（判据收束，约定 14「死亡判定禁用可覆写的 isAlive()」）：本 gate 同时
+               // 决定①是否钳制②是否进 found 集合——用可覆写的 isAlive()（= !isRemoved && getHealth>0）
+               // 时，liveness 覆写型与"0 血未移除且 deathTime==0"的幽灵态会被判定"不存在"：
+               // 既逃过 ServerTickEnd 钳制（回血不被压回低点），又连续 2 周期不进 found →
+               // TRACKED_HEALTH/VULN_END/MISSING 被清 → 禁疗"不许回血"承诺静默失效。
+               // 与影杀影子进度清理（ShadowKillHelper.cleanupInvalidTargets）同款收束
+               if (entity instanceof LivingEntity living && !TrustedRead.isFactuallyDead(living)) {
                   found.add(uuid);
                   TrackedEntry entry = TRACKED_HEALTH.get(uuid);
                   if (entry != null) {
@@ -530,9 +541,20 @@ public class HealingBlockEffect extends MobEffect {
             return true;
          }
          DebugLog.healingBlock("[禁疗] 终局复验：真被拉回（die 覆写/拉回型）→ 开门梯/处决善后 target={}", t);
-         GateOracle.OpenResult gate = GateOracle.tryOpen(t, source,
-            () -> ExecutionFinalizer.finalizeKill(t, source, serverLevel,
-               com.ayin90723.adventure_power.util.DebugLog.EngineCaller.HEALING_BLOCK));
+         // 审查修（可观测性，纯日志管道不涉禁疗语义）：包调用方上下文，使 GateOracle 内部的
+         // probe 日志（同步走梯 + 窗口末异步回调，后者经 GateAttempt.caller 快照）能按
+         // HEALING_BLOCK 归属输出。与 ShadowKillHelper 侧同款包裹
+         com.ayin90723.adventure_power.util.DebugLog.EngineCaller prevGateCaller =
+            com.ayin90723.adventure_power.util.DebugLog.setEngineCaller(
+               com.ayin90723.adventure_power.util.DebugLog.EngineCaller.HEALING_BLOCK);
+         GateOracle.OpenResult gate;
+         try {
+            gate = GateOracle.tryOpen(t, source,
+               () -> ExecutionFinalizer.finalizeKill(t, source, serverLevel,
+                  com.ayin90723.adventure_power.util.DebugLog.EngineCaller.HEALING_BLOCK));
+         } finally {
+            com.ayin90723.adventure_power.util.DebugLog.restoreEngineCaller(prevGateCaller);
+         }
          switch (gate) {
             case SYNC_DEAD -> ExecutionFinalizer.schedulePostKillSync(t, serverLevel,
                com.ayin90723.adventure_power.util.DebugLog.EngineCaller.HEALING_BLOCK);

@@ -98,19 +98,52 @@ public class HealthUtil {
     }
 
     /**
-     * 原版 maxHealth 属性驱动的 clamp 归位判定（审查修 P3#4 同语义，三层共用）。
+     * 属性层"可疑 base 值"阈值（{@code RejectHealthManipAttributeMixin} 拒绝
+     * {@code setBaseValue} 到低于本值的篡改）。审查修 2026-09：由该 Mixin 的私有字面量提为
+     * 公共唯一来源，两侧不得各自复制。
      * <p>
-     * 原版 {@code onAttributeModified → onHealthChanged} 走
-     * {@code setHealth(clamp(current, 0, maxHealth))}：生命上限下移（生命提升药水
-     * 到期/装备 modifier 卸下/诅咒装备）且当前血高于新上限时，写入值精确等于新
-     * maxHealth。拦截它会让 DataItem 停在新上限之上直到下次受伤才自纠（方法层放行
-     * 而数据层拦截时尤甚——setHealth 体内的 data.set 会被数据层 cancel）。能进入
-     * 降写分支（newHealth &lt; 当前读数）且 newHealth==maxHealth 的写入必然是
+     * <b>注意与本类的 clamp 归位豁免下界不是同一个东西</b>——后者见
+     * {@link #isMaxHealthClampSettle}（只排除 0）：早期游戏中"各种减少生命值上限的诅咒"
+     * 会让玩家的 maxHealth 合法落到 6 以下，故归位豁免不能沿用本阈值，否则会在那段时期把
+     * 合法的上限下移归位写入一并拦掉。
+     */
+    public static final float SUSPICIOUS_MAX_HEALTH_BASE = 6.0F;
+
+    /**
+     * 原版 maxHealth 属性驱动的 clamp 归位判定（审查修 P3#4 同语义；本谓词现有 **5 个消费点**共用：
+     * 三层降血闸门 [方法层 RejectHealthManipMixin / 数据层 RejectHealthManipDataMixin / 死亡抗拒层
+     * DeathDefyMixin] + 真血读取层 TrueHealthMixin + 真血事件层守卫 TrueHealthHandler）。
+     * <p>
+     * 原版血量归位写入的<b>真实来源（复查修正，2026-09）</b>：1.20.1 的 {@code LivingEntity}
+     * <b>没有</b> {@code onAttributeUpdated}（javap 实证，1.20.2 才引入），
+     * {@code AttributeMap.onAttributeModified} 只把实例塞进 {@code dirtyAttributes} 做客户端同步、
+     * <b>不</b>调 setHealth，{@code LivingEntity.tick} 也无 maxHealth 比较——即"maxHealth 下降
+     * 原版自动归位"在 1.20.1 不成立。实际触发者是<b>具体效果的卸载钩子自己显式调 setHealth</b>，
+     * 典型即 {@code HealthBoostMobEffect.removeAttributeModifiers}（javap 实证方法体为
+     * {@code if (getHealth() > getMaxHealth()) setHealth(getMaxHealth())}）；第三方模组的
+     * "上限下移归位"同样走各自的显式 setHealth。故本豁免的对象是"**显式写入且值恰等于 maxHealth**"
+     * 这一形态，与属性系统无关。
+     * <p>
+     * 原判据语义：能进入降写分支（newHealth &lt; 当前读数）且 newHealth==maxHealth 的写入必然是
      * "血高于上限的归位"；写高方向已被升血放行覆盖，本豁免不新增攻击面
      * （攻击者降血写的是远低于 maxHealth 的值）。
+     * <p>
+     * 审查修（下界守卫，2026-09）：追加 {@code maxHealth > 0}——原判据只看"写入值 == maxHealth"，
+     * 于是 maxHealth 被污染成 <b>0</b> 时，该判定把"写 0"也认作合法归位，豁免被武器化为绕过
+     * 整条防御链的一击必杀路径（真实样本：砧板之刃[神] 的 mode 2 先
+     * {@code getAttribute(MAX_HEALTH).setBaseValue(0)} 再把所有 Float 同步槽写成 0，正是靠这条
+     * 豁免让数据层放行、真血备份跟着掉到 0）。
+     * <p>
+     * <b>下界为何只取 &gt; 0、而非属性层的 6.0（明示取舍）</b>：早期游戏中玩家身上常叠"减少生命
+     * 上限"的诅咒，maxHealth 合法落到 6 以下属正常形态，若沿用 6.0 会在该时期把合法的上限下移
+     * 归位写入一并拦掉（血条停在旧上限之上直到下次受伤自纠）。故此处只封"归零"这一必杀形态；
+     * 残余面＝攻击者把 maxHealth 污染到"非零但很小"后触发一次显式归位写入——但那种情形下
+     * maxHealth 本身已被压低（任意 hurt 都会被 clamp 到该值），决定性风险在 maxHealth 污染本身
+     * （属性层只拦 setBaseValue，modifier 通道按设计开放，因为诅咒走 modifier）。
      */
     public static boolean isMaxHealthClampSettle(Player player, float newHealth) {
-        return newHealth == player.getMaxHealth();
+        float maxHealth = player.getMaxHealth();
+        return newHealth == maxHealth && maxHealth > 0.0F;
     }
 
     private static Field DATA_HEALTH_ID_FIELD;
@@ -120,7 +153,23 @@ public class HealthUtil {
     /** 反射不可用降级的一次性告警标记（v1.4.0）：避免每次调用刷日志 */
     private static volatile boolean degradeWarned = false;
 
+    /** getHealthDirect 直读异常的一次性告警标记（审查修 P3）：读血热路径，防按 tick 刷屏 */
+    private static volatile boolean directReadWarned = false;
+
     /** 反射不可用降级告警（一次性；相关直读/直写降级为原版路径，防御能力受限） */
+    /** 反射/内部操作失败的一次性告警标记（审查修）：这些 catch 多位于热路径——
+     *  getDataHealthId 每次 data.set 调用、setHealthDirect 每次内部写血、SynchedEntityData
+     *  批量写 helper 每次 repairHealth 巡检、移除链在每次处决善后；原先每次异常都 LOGGER.error，
+     *  反射一旦失效会按调用次数刷屏。改为全局一次性（同类"反射不可用"是持久条件，首条已够定位）。 */
+    private static volatile boolean reflectFailureWarned = false;
+
+    private static void warnReflectFailure(Throwable e) {
+        if (!reflectFailureWarned) {
+            reflectFailureWarned = true;
+            LOGGER.error("[HealthUtil] 反射/内部操作失败（后续同类异常静默）", e);
+        }
+    }
+
     private static void warnDegrade(String reason) {
         if (!degradeWarned) {
             degradeWarned = true;
@@ -201,7 +250,13 @@ public class HealthUtil {
             // v1.4.9.5 收宽 RuntimeException：DataItem accessor 未注册的槽缺失形态
             // （SynchedEntityData.get 内部 getItem 返回 null）在此降级——对 LivingEntity
             // 实际不可达（DATA_HEALTH_ID 恒注册），纯热路径鲁棒面
-            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
+            // 审查修 P3（告警降频）：本方法是读血热路径（TrustedRead.value 每次都走），
+            // 原先每次异常都 LOGGER.error——某类实体一旦稳定触发即按 tick 刷屏。改为
+            // 一次性降级告警（与 warnDegrade / ENTITY_REMOVE_LOOKUP_FAILED 同款惯例）
+            if (!directReadWarned) {
+                directReadWarned = true;
+                LOGGER.error("[HealthUtil] getHealthDirect 直读异常——降级为 getHealth()，后续同类异常静默", e);
+            }
         }
         return target.getHealth();
     }
@@ -223,7 +278,7 @@ public class HealthUtil {
                     DATA_HEALTH_ID = (EntityDataAccessor<Float>) accessor;
                 }
             } catch (IllegalAccessException e) {
-                LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
+                warnReflectFailure(e);
             }
         }
         return DATA_HEALTH_ID;
@@ -381,15 +436,25 @@ public class HealthUtil {
         INTERNAL_HEALTH_WRITE.set(true);
         try {
             player.getEntityData().set(dataHealthId, health);
-            if (!isHealthDataItemDirty(player)) {
-                if (markHealthDataItemDirty(player, health)) {
-                    if (DIRTY_MARK_SEEN.put(player, Boolean.TRUE) == null) {
-                        DebugLog.trueHealth("[MME-TrueHealth] 同步降级字段直标：data.set 后条目未入待同步队列"
-                            + "（被 cancel 或 equals 短路），值+dirty 直标完成（每实体仅记一次）");
-                    }
-                } else {
-                    warnDirtyMarkFail("repairHealth 同步兜底失败：dirty 直标未生效，客户端血量可能停留旧值");
+            // 审查修 P2（兜底无条件化）：原实现以 !isHealthDataItemDirty 为门，但本方法在
+            // 玩家路径上并未"字段直写 DataItem.value"——setAllHealthLikeRaw → setAllHealthLikeDirect
+            // → setHealthDirect 走的是 data.set（玩家被显式排除在"遍历 DataItem 直写 value"之前）。
+            // 于是对手只要每 tick 抢先 data.set（把 item.dirty 置 true）并持续 cancel 我方的
+            // data.set，dirty 就恒真 → 本兜底被永久跳过 → 服务端 DataItem.value 停在 0。
+            // 改为无条件落地：markHealthDataItemDirty 内部本就"先字段直写修复值再标 dirty"，
+            // 重复调用幂等（值相同），真正的判据（值是否落地）由它内部写后校验负责。
+            // 仅把"此前未 dirty"作为降级日志的触发条件，避免正常路径刷诊断日志
+            boolean wasDirty = isHealthDataItemDirty(player);
+            if (markHealthDataItemDirty(player, health)) {
+                if (!wasDirty && DIRTY_MARK_SEEN.put(player, Boolean.TRUE) == null) {
+                    DebugLog.trueHealth("[MME-TrueHealth] 同步降级字段直标：data.set 后条目未入待同步队列"
+                        + "（被 cancel 或 equals 短路），值+dirty 直标完成（每实体仅记一次）");
                 }
+            } else if (!wasDirty) {
+                // 复查修 P3：告警只在"本来就没 dirty"时发——否则正常路径（data.set 已成功、
+                // 条目已 dirty，只是三件套反射不可用导致 mark 返回 false）也会打出"兜底失败"，
+                // 而同步链实际是通的，属误报
+                warnDirtyMarkFail("repairHealth 同步兜底失败：dirty 直标未生效，客户端血量可能停留旧值");
             }
         } finally {
             INTERNAL_HEALTH_WRITE.set(prev);
@@ -435,7 +500,7 @@ public class HealthUtil {
                     warnDegrade("DATA_HEALTH_ID accessor 初始化失败，写入未发生");
                 }
             } catch (IllegalAccessException | ClassCastException e) {
-                LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
+                warnReflectFailure(e);
             }
         } finally {
             INTERNAL_HEALTH_WRITE.set(prevInternal);
@@ -817,11 +882,15 @@ public class HealthUtil {
         return false;
     }
 
-    /** v1.4.3 多存储：构建 DataItem 槽直写通路（field=DataItem.value、steps=[entityData 字段, 槽 id]）。反射不可用返回 null。 */
+    /** v1.4.3 多存储：构建 DataItem 槽直写通路（field=DataItem.value、steps=[entityData 字段, itemsById 字段, 槽 id]）。反射不可用返回 null。
+     *  审查修 P1：路径必须显式穿过 itemsById —— SynchedEntityData 不实现 Map/Collection，
+     *  resolvePath 对"槽 id"这一步无解释分支（落入 else → null），原两步形态的写入通路恒失效。 */
     public static GraphWritePath dataItemSlotPath(int slotId) {
-        if (DATA_ITEM_VALUE_FIELD == null || ENTITY_DATA_FIELD == null) return null;
+        if (DATA_ITEM_VALUE_FIELD == null || ENTITY_DATA_FIELD == null
+            || ENTITY_DATA_ITEMS_FIELD == null) return null;
         java.util.List<Object> steps = new java.util.ArrayList<>();
         steps.add(ENTITY_DATA_FIELD);
+        steps.add(ENTITY_DATA_ITEMS_FIELD);
         steps.add(slotId);
         return new GraphWritePath(DATA_ITEM_VALUE_FIELD, steps, false);
     }
@@ -1170,7 +1239,8 @@ public class HealthUtil {
      * 遍历目标 SynchedEntityData 的全部 Float DataItem（除 DATA_HEALTH_ID 主槽），
      * 值闸双向形态分类（正向 value≈reading / 反向 value≈(max−reading) 承伤累计，地板≥1）
      * → 写 ±ε 探针（血量恒下降方向）→ getHealth 联动验证 → 命中写入目标值并缓存
-     * WritePath（steps=[entityData 字段, itemsById key]，field=DataItem.value，reverse 标记）。
+     * WritePath（steps=[entityData 字段, itemsById 字段, 槽 id]，field=DataItem.value，reverse 标记——
+     * 审查修：原先漏了 itemsById 这一跳，resolvePath 对"槽 id"步无解释分支 → 通路恒失效）。
      * <p>
      * 覆盖形态：getHealth 覆写读自定义槽差（泽林 EXALTED_NORMAL−EXALTED_AWAY）、
      * 槽内反向承伤累计（EXALTED_AWAY）、以及 setAllHealthLikeRaw 按值匹配写不中的
@@ -1226,6 +1296,11 @@ public class HealthUtil {
                     DATA_ITEM_VALUE_FIELD.set(item, writeVal);
                     java.util.List<Object> steps = new java.util.ArrayList<>();
                     steps.add(ENTITY_DATA_FIELD);
+                    // 审查修 P1：缺 itemsById 这一步（见 dataItemSlotPath 同款注释）——
+                    // 缓存下来的 WritePath 在 resolvePath 上恒解不出宿主，会导致缓存快路径
+                    // 每刀作废 + onPositiveCacheDrift 级联清空全图封存（槽型 Boss 从"一次扫描"
+                    // 退化成"每刀重探+每刀清封存"）
+                    steps.add(ENTITY_DATA_ITEMS_FIELD);
                     steps.add(key);
                     CAP_WRITE_CACHE.put(target, new WritePath(DATA_ITEM_VALUE_FIELD, steps, isReverse));
                     DebugLog.probe("[插针] DataItem槽命中(形态={}) key={} 原值={} → {}",
@@ -1721,7 +1796,7 @@ public class HealthUtil {
                 }
             }
         } catch (IllegalAccessException | ClassCastException e) {
-            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
+            warnReflectFailure(e);
         }
     }
 
@@ -1763,7 +1838,7 @@ public class HealthUtil {
                 }
             }
         } catch (IllegalAccessException | ClassCastException e) {
-            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
+            warnReflectFailure(e);
         }
     }
 
@@ -1809,7 +1884,7 @@ public class HealthUtil {
                 }
             }
         } catch (IllegalAccessException | ClassCastException e) {
-            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
+            warnReflectFailure(e);
         }
     }
 
@@ -1920,7 +1995,7 @@ public class HealthUtil {
             ENTITY_REMOVE_LOOKUP_FAILED = true;
             LOGGER.error("[HealthUtil] Entity.remove 反射双名均不可达，永久降级（移除链层3失效）", e);
         } catch (Exception e) {
-            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
+            warnReflectFailure(e);
         }
     }
 
@@ -1960,7 +2035,7 @@ public class HealthUtil {
             ENTITY_SET_REMOVED_LOOKUP_FAILED = true;
             LOGGER.error("[HealthUtil] Entity.setRemoved 反射双名均不可达，永久降级（移除链层4失效）", e);
         } catch (Exception e) {
-            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
+            warnReflectFailure(e);
         }
     }
 
@@ -1989,7 +2064,7 @@ public class HealthUtil {
             }
             ENTITY_REMOVAL_REASON_FIELD.set(target, null);
         } catch (Exception e) {
-            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
+            warnReflectFailure(e);
         }
     }
 
@@ -2232,7 +2307,13 @@ public class HealthUtil {
                         if (ETL_PASSIVE != null) {
                             try {
                                 Object passive = ETL_PASSIVE.get(tickList);
-                                if (passive instanceof List) {
+                                // 审查修 P3：passive 与 active 同为 Int2ObjectMap<Entity>
+                                //（javap 实证 EntityTickList 三字段 active/iterated/passive 均为
+                                // it.unimi.dsi.fastutil.ints.Int2ObjectMap）——原实现只判 List 分支
+                                // 恒假 = 漏清 + 死代码。与上方 active 分支同款处理
+                                if (passive instanceof it.unimi.dsi.fastutil.ints.Int2ObjectMap) {
+                                    ((it.unimi.dsi.fastutil.ints.Int2ObjectMap<?>) passive).remove(entityId);
+                                } else if (passive instanceof List) {
                                     ((List<?>) passive).remove(target);
                                 }
                             } catch (IllegalAccessException ignored) {}
@@ -2399,7 +2480,7 @@ public class HealthUtil {
             }
             ENTITY_REMOVAL_REASON_FIELD.set(target, reason);
         } catch (Exception e) {
-            LOGGER.error("[HealthUtil] 反射/内部操作失败", e);
+            warnReflectFailure(e);
         }
     }
 }

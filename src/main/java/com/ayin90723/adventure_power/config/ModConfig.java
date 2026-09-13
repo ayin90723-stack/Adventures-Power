@@ -104,7 +104,9 @@ public class ModConfig {
     public static final DoubleValue PIERCING_GAZE_FALLBACK_CAP_PERCENT;
     public static final BooleanValue PIERCING_GAZE_FEEDBACK_ENABLED;
     public static final IntValue PIERCING_GAZE_FEEDBACK_PARTICLE_COUNT;
-    /** PVP 穿透开关（v1.4.9.1，默认 false=对玩家目标不穿透；true 时觉醒禁无敌帧同步放开——两处共用一门禁） */
+    /** PVP 穿透开关（v1.4.9.1，默认 false=对玩家目标不穿透；true 时仅放开"穿透判定 + hurt 管线条目"
+     *  + 觉醒禁无敌帧——引擎写侧（afterPierceFallback 的兜底直写/清自定义无敌计时）对玩家恒短路。
+     *  注意分层只覆盖引擎写侧：穿透三连仍直调 actuallyHurt、觉醒禁无敌帧亦对玩家生效） */
     public static final BooleanValue PIERCING_GAZE_PVP_ENABLED;
 
     // --- 影杀 ---
@@ -344,7 +346,7 @@ public class ModConfig {
             .define("piercing_gaze_feedback_enabled", true);
         PIERCING_GAZE_FEEDBACK_PARTICLE_COUNT = BUILDER.comment("穿透反馈粒子数量")
             .defineInRange("piercing_gaze_feedback_particle_count", 10, 0, 100);
-        PIERCING_GAZE_PVP_ENABLED = BUILDER.comment("PVP 穿透开关（默认 false=对玩家目标不穿透，觉醒禁无敌帧同步禁用；true 后对玩家生效——穿透会绕过 PVP 保护类模组的 hurt 取消，与觉醒禁无敌帧共用此开关）")
+        PIERCING_GAZE_PVP_ENABLED = BUILDER.comment("PVP 穿透开关（默认 false=对玩家目标不穿透，觉醒禁无敌帧同步禁用；true 后仅对玩家放开「穿透判定 + hurt 管线条目」与觉醒禁无敌帧——引擎写侧（兜底直写/清自定义无敌计时）对玩家目标恒短路，故不会绕穿受击方自身的拒绝篡改/真实血量。注意分层只覆盖引擎写侧：穿透三连仍直调 actuallyHurt（绕过 hurt() 的无敌帧/盾牌关卡）、觉醒禁无敌帧亦对玩家生效）")
             .define("piercing_gaze_pvp_enabled", false);
         BUILDER.pop();
 
@@ -630,7 +632,7 @@ public class ModConfig {
         BUILDER.pop(); // 改血引擎
         BUILDER.push("GateOracle");
 
-        GATE_ORACLE_ENABLED = BUILDER.comment("GateOracle 存活语义反推（v1.4.6 起接入点两处：影杀处决路径 + 禁疗 FORCE_KILL 终局复验，淬魂磨血不触发；分组仍在影杀但已非影杀专属）：五层引擎数值通道之外（含写 0 未死/die 拦截）反推存活许可并打开（许可标志/进度阈值/击杀工具/死亡序列触发），让目标走正规死亡链（战利品/事件/遭遇注销对方自清），失败退处决兜底（影杀善后/禁疗终局 ExecutionFinalizer；开关关闭时禁疗终局直接处决善后——终局性是能力承诺，开关只控制是否尝试正规死亡链这一手段）。v1.4.3 三大 Boss 实测通过后默认开启")
+        GATE_ORACLE_ENABLED = BUILDER.comment("GateOracle 存活语义反推（v1.4.6 起接入点两处：影杀处决路径 + 禁疗 FORCE_KILL 终局复验，淬魂磨血不触发）：五层引擎数值通道之外（含写 0 未死/die 拦截）反推存活许可并打开（许可标志/进度阈值/击杀工具/死亡序列触发），让目标走正规死亡链（战利品/事件/遭遇注销对方自清），失败退处决兜底（影杀善后/禁疗终局 ExecutionFinalizer；开关关闭时禁疗终局直接处决善后——终局性是能力承诺，开关只控制是否尝试正规死亡链这一手段）。v1.4.3 三大 Boss 实测通过后默认开启")
             .define("gate_oracle_enabled", true);
         GATE_ORACLE_KILL_TOOL_ENABLED = BUILDER.comment("GateOracle·KILL_TOOL 击杀工具反推：从目标 hurt/die 覆写反推其自己的静态击杀工具并反射调用（唯一实体作用域参数签名闸+调用点常量实参回放+双条件死亡验证，despawn 型不采用）——目标自清含其注册表/复活列表=真死。本末起源 KILL_TOOL 实测通过后默认开启")
             .define("gate_oracle_kill_tool_enabled", true);

@@ -55,7 +55,18 @@ public class AllSeeingHandler {
         int refreshAt = Math.min(NIGHT_VISION_REFRESH_AT,
             Math.max(VANILLA_FLICKER_LINE, duration - VANILLA_FLICKER_LINE));
         MobEffectInstance existing = player.getEffect(MobEffects.NIGHT_VISION);
-        if (existing == null || existing.getDuration() < refreshAt) {
+        // 审查修（遗漏补，与 resendNightVision 同一根因）：必须排除"无限时长"现存实例。
+        // 原条件只看 `existing.getDuration() < refreshAt`，而外部模组给的**无限时长**夜视
+        // duration == -1（MobEffectInstance.INFINITE_DURATION）恒满足该不等式 → 每 tick 都调
+        // addEffect；而 addEffect 对已存在实例只走 update()（判据 isShorterDurationThan 对
+        // 无限时长恒 false）→ 恒返回 false、不发包也不更新 → 每 tick 一次纯浪费的对象分配
+        // 与效果表查表（长期挂机场景持续）。无限时长本身无需刷新（客户端若在维度切换后丢包，
+        // 由 resendNightVision 的直发包路径修复，那条路径不受本条件影响）。
+        // 该守卫与同仓"恩赐永驻"续期（PlayerTickHandler）的既有惯例一致
+        // （那里同样是 `effect.getDuration() < 0 → continue`，注释理由即"避免被降级为有限时长
+        // 反复重建"）——本处属漏跟该惯例
+        if (existing == null
+            || (existing.getDuration() >= 0 && existing.getDuration() < refreshAt)) {
             // ambient=false, visible=false(无粒子), showIcon=false(无图标)
             player.addEffect(new MobEffectInstance(MobEffects.NIGHT_VISION, duration,
                 0, false, false, false));
@@ -74,12 +85,32 @@ public class AllSeeingHandler {
      * 不满足、不补发 → 客户端夜视丢失最长 2400-400=2000 tick（约 100 秒）。
      * 与翱翔 v1.4.0 修复（teleportTo 不重发 abilities）同族。
      * <p>
-     * 本方法通过 addEffect 替换实例触发 {@code ClientboundUpdateMobEffectPacket} 重发，
-     * 挂 {@code PlayerChangedDimensionEvent}（两条路径均 fire，已验证），同 tick 恢复。
+     * 本方法直接发 {@code ClientboundUpdateMobEffectPacket} 重发实例（与 changeDimension
+     * 的同步手段一致），挂 {@code PlayerChangedDimensionEvent}（两条路径均 fire，已验证），
+     * 同 tick 恢复。
+     * <p>
+     * <b>审查修 P2（原"借 addEffect 替换实例触发发包"不可靠）</b>：字节码实证
+     * {@code LivingEntity.addEffect} 在已存在同效果实例时只调
+     * {@code MobEffectInstance.update}，其返回 false 则 addEffect 直接返回 false、
+     * <b>不调 onEffectUpdated（=不发包）</b>；而 update 的时长判据是
+     * {@code isShorterDurationThan}（{@code !this.isInfinite() && (this.duration < other.duration
+     * || other.isInfinite())}）——现存剩余时长 ≥ 配置时长时不成立，外部模组给的
+     * <b>无限时长夜视（duration=-1）更是该判据恒 false</b>。此时客户端 LocalPlayer 重建后
+     * 夜视永久丢失——旧实现依赖 onTick 的刷新条件来补发，而该条件对无限时长恒真、只会每 tick
+     * 空转重试 addEffect 且永远发不出去（onTick 侧已另行补 `duration >= 0` 守卫止血；
+     * 重发本身则改由本方法直发，不依赖任何更新语义）。
      */
     public static void resendNightVision(Player player) {
+        if (!(player instanceof net.minecraft.server.level.ServerPlayer sp)) return;
         int duration = ModConfig.ALL_SEEING_NIGHT_VISION_DURATION.get();
-        player.addEffect(new MobEffectInstance(MobEffects.NIGHT_VISION, duration,
-            0, false, false, false));
+        MobEffectInstance existing = player.getEffect(MobEffects.NIGHT_VISION);
+        if (existing == null) {
+            // 服务端本无夜视（能力刚开启/已被清）：正常添加——新建实例路径必然发包
+            player.addEffect(new MobEffectInstance(MobEffects.NIGHT_VISION, duration,
+                0, false, false, false));
+            return;
+        }
+        sp.connection.send(new net.minecraft.network.protocol.game.ClientboundUpdateMobEffectPacket(
+            sp.getId(), existing));
     }
 }

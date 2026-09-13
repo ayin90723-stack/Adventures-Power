@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.handler;
 
+import com.ayin90723.adventure_power.util.TrustedRead;
 import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.AdventurePower;
 import com.ayin90723.adventure_power.config.ModConfig;
@@ -201,7 +202,10 @@ public class CombatAbilityHandler {
         // PVP 分层分支（v1.4.9.1，soul_quench_pvp_enabled 默认 false 整体禁用）：开启后对玩家
         // 仅走"自定义伤害"——下方 hurt(soulStrike) 管线照常结算，受击方真血保护/死亡抗拒等
         // 防御体系公平生效；引擎语义三件对玩家恒短路：①清盾（对象图探测与玩家防御自冲突）
-        // ②清无敌帧（保留原版 PVP 节奏）③兜底直写（BloodWriteEngine 对玩家短路）。读侧无冲突：
+        // ②清无敌帧（保留原版 PVP 节奏）③兜底直写（由下方 `!pvpBranch` 条件在**本调用点**
+        // 短路）。措辞更正（2026-09）：`BloodWriteEngine` 内部**没有**玩家守卫——引擎入口只对玩家
+        // 跳过"清盾"（Boss 血量存储设计）；"对玩家短路"是各调用点用 pvpBranch 自己做的，
+        // 勿误以为引擎能兜底。读侧无冲突：
         // getEffectiveHealth 对玩家=DataItem 直读（只读不写，不碰真血备份通道）。
         // 边界声明（v1.4.9.5 注释对齐实现）：soul_strike 属内部伤害源，onLivingHurt 入口
         // （isInternalSource 早退）不触发受击方伤害抗性/觉醒易伤——淬魂的"真实伤害"语义
@@ -274,7 +278,17 @@ public class CombatAbilityHandler {
         // （PVP 分层分支恒短路：引擎直写与玩家侧真血防御自冲突——玩家目标 hurt 未生效
         // 就让它未生效，不做直写补刀）
         float epsilon = ProbeScales.interceptTolerance(extraDamage, healthBefore);
-        if (!pvpBranch && target.isAlive() && actualDealt < extraDamage - epsilon) {
+        // 审查修（判据收束，约定 14）：存活判定用容器/字段事实，不用可覆写的 isAlive()。
+        // isAlive() = !isRemoved() && getHealth() > 0；isFactuallyDead = isRemoved() || deathTime>0。
+        // 两向差异（均须知悉）：
+        //  · 新纳入：{未移除, deathTime==0, getHealth<=0}——"0 血未死"幽灵实体（旧判据判死而跳过
+        //    兜底；新判据进去写 0，致死收尾由**外层 hurt 尾部 die / 穿透三连收口**负责——
+        //    本分支的 correctedHealth<=0 只做受击闪烁清零与击杀归属补偿，**不调** DeathFinalizer
+        //    [淬魂兜底写在管线内，直调会双发 LivingDeathEvent]）；以及**只覆写 isAlive
+        //    而 getHealth 诚实**的谎报型（这是本改动的真实收益面——注意若对手连 getHealth 也谎报成 0，
+        //    则 healthBefore 本身被污染，本条收益有限，真正的读侧护栏是 getHealthDirect/真血）
+        //  · 新排除：{未移除, deathTime>0, getHealth>0}（复活/演出残留，旧判据会进兜底、新判据跳过）
+        if (!pvpBranch && !TrustedRead.isFactuallyDead(target) && actualDealt < extraDamage - epsilon) {
             float correctedHealth = Math.max(healthBefore - extraDamage, 0.0F);
             DebugLog.soulQuench("[淬魂] 兜底直写: hp {} → {}（hurt 被拦截/限伤，实际仅扣 {}）",
                 healthBefore, correctedHealth, actualDealt);

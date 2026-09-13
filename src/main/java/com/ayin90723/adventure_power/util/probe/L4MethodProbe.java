@@ -51,6 +51,13 @@ import java.util.concurrent.ConcurrentHashMap;
  * 作用域：实体模组类链（net.minecraft 层级原版单参方法不扫）+ 图可达非
  * net.minecraft holder。
  * <p>
+ * <b>已知损失（实体边界剪枝，2026-09 审查补）</b>：{@code probeOwners} 遇到任何
+ * {@code Entity != target} 即剪枝（与 {@code NumericInverter.collectCells} 同款纪律），
+ * 代价是"目标经**其他实体**间接持有血量存储"的 exotic 组合不再可见（minion/controller/
+ * 弹射物持有型）。此为该剪枝换取的作用域安全性的明示取舍——L2（{@code HealthUtil.probeGraph}，
+ * 无实体剪枝、以值闸驱动）仍覆盖"关联实体 + 线性镜像"子形态，故实际损失仅"关联实体 +
+ * 必须经方法调用写入"这一类。改回不剪枝会在实体图上对非目标实体反射调用其写方法。
+ * <p>
  * L4-B 已知明文恢复（加密容器定位+密钥推算）<b>未实施</b>：密文容器定位依赖
  * 真实对手样本指纹，无样本即盲写（误判字段会破坏对方非血量数据）——按
  * 真实对手驱动原则，等第一个加密存血 Boss 再建。
@@ -202,6 +209,11 @@ final class L4MethodProbe {
         if (obj instanceof Class<?> || obj instanceof Thread || obj instanceof ClassLoader) return 0;
         if (obj instanceof net.minecraft.world.level.Level) return 0;
         if (obj instanceof net.minecraft.core.Registry) return 0;
+        // 审查修 P1（实体边界剪枝）：与 NumericInverter.collectCells 同款纪律——实体图里
+        // 持有其他实体（minion/owner/controller/弹射物）时，L4 会对"非目标实体"反射调用其
+        // 写方法，而探针验证只看 target.getHealth()（不联动即拒），被误伤的实体上留下残余写入。
+        // 根调用传 target 自身，`e != target` 天然放行
+        if (obj instanceof net.minecraft.world.entity.Entity e && e != target) return 0;
         if (!visited.add(obj)) return 0;
         if (visited.size() > ModConfig.QUENCH_GRAPH_BUDGET.get()) return OWNER_ABORTED;
         if (probeMethods(target, obj, path, writeValue)) {
@@ -220,7 +232,13 @@ final class L4MethodProbe {
                     if (child instanceof Map<?, ?> m) {
                         for (Map.Entry<?, ?> e : m.entrySet()) {
                             path.add(f);
-                            path.add(e.getKey());
+                            // 审查修 P2（弱引用化）：PATH_CACHE 是 WeakHashMap<实体, CachedPath>，
+                            // 若 CachedPath.steps 强引用实体 key，条目恒可达、弱引用永不过期 →
+                            // 每命中泄漏一份 CachedPath（含整条路径 + 实体）。与 HealthUtil.WritePath
+                            // 的既有纪律一致（那里注释明确点出"每命中泄漏一整棵实体对象图"）
+                            Object stepKey = e.getKey();
+                            path.add(stepKey instanceof net.minecraft.world.entity.Entity
+                                ? new java.lang.ref.WeakReference<>(stepKey) : stepKey);
                             int r = probeOwners(target, e.getValue(), depth + 1, visited, path, writeValue);
                             path.remove(path.size() - 1);
                             path.remove(path.size() - 1);
@@ -366,13 +384,18 @@ final class L4MethodProbe {
             }
             // 反向分支前置反向地板闸（子代理审查修）：满血/近满血时 reading≈maxHealth，
             // 首次探针 delta 与反向 setter 不可区分——若误入反向分支，二次确认探针
-            // m(after+eps≈maxHealth) 对 delta 是叠加扣血（磨血变秒杀）、被拒后还原再扣
-            // （被拒探针也击杀）。地板闸保证只有明显低于满血（max−reading≥1.0）才允许
+            // 会把参数语义错位（修复前的 before+eps 形态会写成"累计=maxHealth"→ 血量瞬 0、
+            // 磨血变秒杀；现已改为 (maxHealth−after)+eps ≈ 2eps，见下方分支内注释，
+            // 故本条闸门现为纯防御纵深）。地板闸保证只有明显低于满血（max−reading≥1.0）才允许
             // 反向判定，近满血 delta 自然落入 delta 分支（其攻击用探针后读数自校正无残差）。
             if (ProbeScales.reverseFloorMet(target, reading)
                 && Math.abs(after - (maxHealth - eps)) <= driftTol) {
                 // 反向承伤 setter 形状（参数=承伤累计值，血量=maxHealth−累计）→ 二次确认
-                float secondArg = after + eps; // 累计 +eps → 血量应降 eps
+                // 审查修 P1（实参错位）：二次探针要传"累计 +eps"，累计 = maxHealth − 血量。
+                // 原 `after + eps` 把血量当累计传入 → secondArg = maxHealth → 目标被瞬时打到 0 血
+                // （不变量③"最坏抬升 ≤ ε"被破坏；对面 setter 内若有 ≤0 分支/相位逻辑会被同栈触发），
+                // 且 tracks 判据 |0 − 0| = 0 恒过，把这个错误掩盖成"确认成功"。
+                float secondArg = (maxHealth - after) + eps; // 累计 +eps → 血量应降 eps
                 m.invoke(owner, invokerArgs(m, target, secondArg));
                 float after2 = target.getHealth();
                 boolean tracks = Math.abs(after2 - (maxHealth - secondArg)) <= confirmTol;
@@ -403,11 +426,17 @@ final class L4MethodProbe {
         return new Object[]{num};
     }
 
-    /** 沿路径链从实体根解析 owner（Field=对象字段；其余=Map key / Collection index）。 */
+    /** 沿路径链从实体根解析 owner（Field=对象字段；其余=Map key / Collection index）。
+     *  审查修 P2：step 可能是弱引用化的实体 Map key（见 probeOwners），此处先解包；
+     *  引用已过期（实体不可达）→ 通路失效返回 null → 缓存作废重探。 */
     private static Object resolveOwner(Object root, List<Object> steps) {
         Object cur = root;
         for (Object step : steps) {
             if (cur == null) return null;
+            if (step instanceof java.lang.ref.WeakReference<?> wr) {
+                step = wr.get();
+                if (step == null) return null;
+            }
             if (step instanceof Field f) {
                 try {
                     cur = f.get(cur);

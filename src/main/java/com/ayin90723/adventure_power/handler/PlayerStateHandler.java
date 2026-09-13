@@ -504,8 +504,8 @@ public class PlayerStateHandler {
         if (event.getEffectInstance().getEffect().getCategory() != MobEffectCategory.HARMFUL) return;
 
         var progress = ProgressCache.get(player);
-        if (progress != null && (progress.isAdventurer() || progress.isFullyUnlocked())
-              && progress.isAbilityEnabled(AbilityIds.PURIFIED_SOUL)) {
+        // 审查修（收束）：三连门禁走 AbilityGate 唯一判定源
+        if (progress != null && AbilityGate.isActive(progress, AbilityIds.PURIFIED_SOUL)) {
             event.setResult(Event.Result.DENY);
         }
     }
@@ -560,6 +560,10 @@ public class PlayerStateHandler {
                 List<LivingEntity> targets = player.level()
                     .getEntitiesOfClass(LivingEntity.class, aabb,
                         e -> e.isAlive() && !(e instanceof Player)
+                            // 审查修 P2：虚弱光环同样过友好火力保护（同影杀 AOE / 加速推开口径）
+                            // ——monsters_only=false 时"一切非玩家生物"会包含自家宠物
+                            && !com.ayin90723.adventure_power.util.FriendlyFireProtection
+                                .isOwnerTarget(player, e)
                             && (!monstersOnly || e instanceof net.minecraft.world.entity.monster.Monster));
                 // 刷新余量：时长的 60%，且至少覆盖到下一次施加（避免配置短时长时断档）
                 int refreshThreshold = Math.min(weaknessDur * 3 / 5,

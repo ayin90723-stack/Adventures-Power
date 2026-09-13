@@ -247,9 +247,22 @@ public class ShadowKillHelper {
             // isRemoved 仍 false，开门补正规 die 同样合理）即试语义开门。
             // 普通怪 hurt 已死不进 saturationKill；进来的无覆写者由"不适用"快速 FAILED 零退化
             if (!zeroed || !target.isRemoved()) {
-                GateOracle.OpenResult gate = GateOracle.tryOpen(target, source,
-                    () -> com.ayin90723.adventure_power.util.ExecutionFinalizer.finalizeKill(
-                        target, source, serverLevel, DebugLog.EngineCaller.SHADOW_KILL));
+                // 审查修 P2（可观测性）：GateOracle 的探针日志走 DebugLog.probe，而该门禁要求
+                // 调用方上下文非空——它只在 BloodWriteEngine.execute 的 try 内存在，返回即还原。
+                // 若在此直接调 tryOpen，ThreadLocal 已为 null → [GateOracle] 分析/走梯/开门/放弃
+                // 全部静默，现场排障拿不到任何证据（同一根因也使 HealingBlockEffect 的终局复验
+                // 日志全灭）。故在同步走梯期间显式恢复调用方归属（与本调用点语义一致=影杀）；
+                // 窗口末的异步回调由 GateAttempt.caller 快照 + GateOracle.registerPending 一并覆盖
+                // （该快照取自本处设置的值，故本处的包裹是异步日志归属的前提，勿删）
+                DebugLog.EngineCaller prevCaller = DebugLog.setEngineCaller(DebugLog.EngineCaller.SHADOW_KILL);
+                GateOracle.OpenResult gate;
+                try {
+                    gate = GateOracle.tryOpen(target, source,
+                        () -> com.ayin90723.adventure_power.util.ExecutionFinalizer.finalizeKill(
+                            target, source, serverLevel, DebugLog.EngineCaller.SHADOW_KILL));
+                } finally {
+                    DebugLog.restoreEngineCaller(prevCaller);
+                }
                 // SYNC_DEAD=正规链自清（十二轮：死亡表演型 Boss 覆写 remove 延迟容器移除，
                 // 服务端已死但客户端收不到包——模型残留直到重进；挂 pending 窗口确认移除后
                 // 补发客户端移除包，窗口末仍存活则 finalizeFallback 强制收尾）；
@@ -352,6 +365,14 @@ public class ShadowKillHelper {
         java.util.List<LivingEntity> nearby = killed.level().getEntitiesOfClass(LivingEntity.class, aabb,
             e -> e != attacker && e != killed && e.isAlive()
                 && !(e instanceof Player)
+                // 审查修 P2：AOE 次级目标必须过友好火力保护——主目标链
+                // （CombatAbilityHandler.onLivingHurt:146）有该门禁，AOE 却漏接，
+                // 且 executeShadowKill 走内部伤害源会在 onLivingHurt 入口
+                // （isInternalSource 早退）绕过它，事件层也兜不住。默认 monsters_only=true
+                // 时 Monster 不含宠物故不暴露；改成 false（"一切非玩家生物"）即会链式处决
+                // 玩家自己的狼/猫/女仆。与主目标链（CombatAbilityHandler）及觉醒光环/推开
+                // 三处同款门禁对齐——全库 isOwnerTarget 共 9 处调用点，本处属"觉醒 AOE 目标集"组
+                && !com.ayin90723.adventure_power.util.FriendlyFireProtection.isOwnerTarget(attacker, e)
                 && (!monstersOnly || e instanceof net.minecraft.world.entity.monster.Monster));
 
         int count = 0;
@@ -392,6 +413,14 @@ public class ShadowKillHelper {
                 shadowData.remove(targetKey);
                 MISSING_TARGET_TICKS.remove(missingKey(attacker.getUUID(), target.getUUID()));
                 removeShadowHPBossBar(target);
+                // 审查修 P2（击杀归属）：直杀路径在 executeShadowKill 前显式补归属
+                //（见 handleShadowKill），AOE 链漏了——executeShadowKill 走
+                // ExecutionFinalizer（不做归属补偿，只有 DeathFinalizer 做），
+                // lastHurtByPlayer 保持空 → createLootContext 不注入 LAST_DAMAGE_PLAYER
+                // → killed_by_player 类掉落条件失败、死亡消息归属退化、依赖
+                // lastHurtByPlayerTime 的击杀统计/稀有掉落失效
+                target.setLastHurtByMob(attacker);
+                target.setLastHurtByPlayer(attacker);
                 executeShadowKill(target, attacker);
                 count++;
                 continue;
@@ -524,7 +553,19 @@ public class ShadowKillHelper {
                     UUID uuid = UUID.fromString(uuidKey);
                     if (found.contains(uuid)) continue;
                     Entity entity = level.getEntity(uuid);
-                    if (entity instanceof LivingEntity living && living.isAlive()) {
+                    // 审查修 P2：存活判据用容器/字段事实（约定 14「死亡判定禁用可覆写的
+                    // isAlive」）。真实收益面（复查更正归因）：本方法判的是"影子数据里记录的
+                    // 目标是否还在"，而**恒 false 的 liveness 谎报型根本进不了影子数据**
+                    // （handleShadowKill 入口 :111 与 AOE 过滤 :366 都先用 isAlive() 早退）——
+                    // 故真正被旧写法误清的是"曾 isAlive=true、之后落到 0 血未移除且 deathTime==0"
+                    // 的幽灵态（旧判据 getHealth>0 为假 → 连续 2 周期判"不存在"→ 影子血量与
+                    // BossBar 被静默抹掉，玩家磨了半天的进度白费）。isFactuallyDead 不受 getHealth
+                    // 覆写影响（只看 isRemoved/deathTime），故保住该态；同域 afterPierceFallback 已同口径。
+                    // 已知边界（复查披露）：与 isAlive() 的差集还有"血量已回但 deathTime 残留
+                    // >0"的复活型形态——该类会被本判据清掉影子进度（极端形态，方向与"错误保留"
+                    // 相反，无泄漏风险）；条目另有 NBT_SP_END_TIME 硬过期兜底
+                    if (entity instanceof LivingEntity living
+                        && !com.ayin90723.adventure_power.util.TrustedRead.isFactuallyDead(living)) {
                         found.add(uuid);
                     }
                 } catch (IllegalArgumentException ignored) {}

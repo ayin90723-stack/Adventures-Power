@@ -36,7 +36,12 @@ public class SwiftHandler {
         if (player.isInWater()) {
             int dur = ModConfig.SWIFT_WATER_DURATION.get();
             MobEffectInstance dolphin = player.getEffect(MobEffects.DOLPHINS_GRACE);
-            if (dolphin == null || dolphin.getDuration() < dur / 2) {
+            // 审查修（遗漏补，同 AllSeeingHandler/恩赐永驻惯例）：排除无限时长现存实例——
+            // 原条件对 duration==-1 恒真 → 每 tick 构造实例 + addEffect，而 addEffect 对已存在
+            // 实例只走 update()（isShorterDurationThan 对无限时长恒 false）→ 恒 false、不发包，
+            // 纯浪费。无限时长无需刷新
+            if (dolphin == null
+                || (dolphin.getDuration() >= 0 && dolphin.getDuration() < dur / 2)) {
                 player.addEffect(new MobEffectInstance(MobEffects.DOLPHINS_GRACE, dur, 0, false, false, false));
             }
         }
@@ -72,6 +77,9 @@ public class SwiftHandler {
         List<LivingEntity> mobs = serverLevel.getEntitiesOfClass(LivingEntity.class, box,
             e -> e != player && e.isAlive()
                 && !(e instanceof Player)
+                // 审查修 P2：觉醒推开同样过友好火力保护（同影杀 AOE / 净魂光环口径）——
+                // monsters_only=false 时"一切非玩家生物"会包含玩家自己驯服的宠物
+                && !com.ayin90723.adventure_power.util.FriendlyFireProtection.isOwnerTarget(player, e)
                 && (!monstersOnly || e instanceof Monster));
         for (LivingEntity m : mobs) {
             if (m.isRemoved()) continue;

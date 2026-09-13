@@ -249,8 +249,12 @@ public final class ContainerAuditor {
         }
 
         // A8 players（公共方法直返字段本体）
+        // 复查补：判据由 contains 升级为"计数恰为 1"——ServerPlayer 不覆写 equals（恒等语义），
+        // 故 frequency 可用；vanilla 回调（onTrackingStart 对玩家的 players.add 无 contains 守卫）
+        // 与重建链都在写这张表，重复条目原先永远测不出（containerEntriesHealthy 恒真 → 永不触发
+        // 重建）。计数为 1 才健康，重复交给重建链的 removeIf 去重收口
         try {
-            if (level.players().contains(player)) {
+            if (java.util.Collections.frequency(level.players(), player) == 1) {
                 mask |= A_LEVEL_PLAYERS;
             }
         } catch (Exception ignored) {

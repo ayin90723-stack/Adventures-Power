@@ -172,8 +172,8 @@ public class TrueHealthHandler {
 
         // 备份污染重建（照 Mixin tick 自检：先重建再检测，否则移除复活分支失效；
         // DataItem 同为非法时放弃，交给读取层兜底）
-        if (Float.isNaN(backup) || Float.isInfinite(backup)) {
-            if (Float.isNaN(raw) || Float.isInfinite(raw)) return;
+        if (HealthUtil.isSpecialFloat(backup)) {
+            if (HealthUtil.isSpecialFloat(raw)) return;
             progress.setBackupHealth(raw);
             backup = raw;
         }
@@ -209,7 +209,7 @@ public class TrueHealthHandler {
 
         // ② 数据层合法性：NaN/Inf（污染自愈）与零/负血（假死修复）一律回到备份。
         //    零血分支优先于③的放行分支——合法伤害打空血走"免死修复"，备份永不被 0 污染。
-        if (Float.isNaN(raw) || Float.isInfinite(raw)) {
+        if (HealthUtil.isSpecialFloat(raw)) {
             if (debugLog()) {
                 DebugLog.trueHealth("[TrueHealth-Guard] 数据层血量污染！" +
                     " raw=" + raw + " -> 修复为备份 " + backup);
@@ -235,10 +235,19 @@ public class TrueHealthHandler {
                 // 数据层 > 备份：合法回血（休养生息/嗜血/药水/内部修复直写）→ 备份上移
                 progress.setBackupHealth(raw);
             } else if (-diff > epsilon) {
-                if (raw == player.getMaxHealth() && player.getMaxHealth() > 0.0F) {
+                if (HealthUtil.isMaxHealthClampSettle(player, raw)) {
                     // maxHealth 属性驱动的 clamp 降值（生命上限下移）不是篡改，
-                    // 接受为合法归位（审查修 P3#4 同款判据；maxHealth>0 守卫挡住
-                    // maxHealth 被清零语境下的伪归位）
+                    // 接受为合法归位（审查修 P3#4 同款判据）。
+                    // 复查修（判据收束）：改调唯一判定源 HealthUtil.isMaxHealthClampSettle
+                    // （`newHealth == maxHealth && maxHealth > 0`），与 Mixin 读取层、三层降血闸门同口径。
+                    // <b>本点收束为等价替换、无行为差异</b>：此处位于 isSpecialFloat/raw<=0 两个已处理分支
+                    // 之后，到达即恒有 raw>0，故新增的 `>0` 守卫在此恒真冗余；原裸表达式 `raw == maxHealth
+                    // && maxHealth > 0` 与新谓词逐字等价。
+                    // <b>未被关闭的残余面（明示，勿按"已修"理解）</b>：攻击者经 modifier 通道把 maxHealth
+                    // 压到"非零但很小"（如 5）后字段直写血量=5，本分支仍会把它当合法归位下调备份——豁免的
+                    // 下界只封"归零"（砧板之刃[神] mode 2 的形态），该残余面由 <b>maxHealth 污染本身</b>
+                    // 决定（属性层只拦 setBaseValue；modifier 通道按设计开放，因为"减上限诅咒"走 modifier）。
+                    // 详见 HealthUtil.isMaxHealthClampSettle 的 javadoc
                     progress.setBackupHealth(raw);
                 } else if (recentLegalHurt(player, gameTime)) {
                     // 合法 hurt 管线伤害落地 → 承伤同步（HURT_DEPTH 的事件层替代）

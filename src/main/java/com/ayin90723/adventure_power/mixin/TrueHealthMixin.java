@@ -1,5 +1,6 @@
 package com.ayin90723.adventure_power.mixin;
 
+import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
 import com.ayin90723.adventure_power.capability.IAdventureProgress;
@@ -81,8 +82,7 @@ public abstract class TrueHealthMixin {
         if (player.level().isClientSide()) return null;
         var progress = com.ayin90723.adventure_power.util.ProgressCache.get(player);
         if (progress == null) return null;
-        if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return null;
-        if (!progress.isAbilityEnabled(AbilityIds.TRUE_HEALTH)) return null;
+        if (!AbilityGate.isActive(progress, AbilityIds.TRUE_HEALTH)) return null;
         return progress;
     }
 
@@ -132,7 +132,7 @@ public abstract class TrueHealthMixin {
             // DataItem 被写入 NaN/Infinity -> 用备份值覆盖修复。
             // restore 必须同时是有限值：backup=+Infinity 且 rawHealth 也非法（双重污染）时，
             // 若直接选中 +Inf 会把 DataItem 永久修复成 Infinity（循环固化）——isFinite 兜底
-            if (Float.isNaN(rawHealth) || Float.isInfinite(rawHealth)) {
+            if (HealthUtil.isSpecialFloat(rawHealth)) {
                 float restore = backup > 0.0F && Float.isFinite(backup) ? backup : player.getMaxHealth();
                 if (debugLog()) {
                     DebugLog.trueHealth("[MME-TrueHealth] 检测到异常血量！" +
@@ -154,7 +154,7 @@ public abstract class TrueHealthMixin {
             // 重建后 backup=0，后续假死分支按"确实死了"放行死亡——备份失效时以
             // DataItem 为唯一事实来源（改动前 NaN 会经 repairHealth(NaN) 自愈，
             // 但代价是 DataItem 被短暂污染，且依赖下一次 getHealth 触发修复）。
-            if (Float.isNaN(backup) || Float.isInfinite(backup)) {
+            if (HealthUtil.isSpecialFloat(backup)) {
                 if (debugLog()) {
                     DebugLog.trueHealth("[MME-TrueHealth] 备份被污染！" +
                         " backup=" + backup + " -> 从 DataItem=" + rawHealth + " 重建");
@@ -208,7 +208,17 @@ public abstract class TrueHealthMixin {
                     // 机制）不是篡改——rawHealth 精确等于当前 maxHealth 时接受为合法归位并
                     // 同步备份；repairHealth 直写绕过 setHealth 的 clamp 会把血量写回高于新
                     // 上限的旧值，且每次读数反复拉锯
-                    if (rawHealth == player.getMaxHealth()) {
+                    // 复查修（判据收束）：原为裸表达式 `rawHealth == player.getMaxHealth()`（零守卫），
+                    // 改调唯一判定源 HealthUtil.isMaxHealthClampSettle，与三层降血闸门/事件层同口径，
+                    // 勿再复制裸表达式。
+                    // <b>本点收束为等价替换、无行为差异</b>：此行位于 `rawHealth <= 0` 提前返回之后，
+                    // 到达即恒有 rawHealth>0，故新增的 `>0` 守卫在此恒真冗余。
+                    // <b>未被关闭的残余面（明示）</b>：攻击者经 modifier 通道把 maxHealth 压到"非零但很小"
+                    // 后用字段直写把血量写成同值，本分支仍会把它当合法归位、把真血备份拽到该低值——豁免
+                    // 下界只封"归零"（砧板之刃[神] mode 2 形态）。残余面由 maxHealth 污染本身决定
+                    // （属性层只拦 setBaseValue；modifier 通道按设计开放，因"减上限诅咒"走 modifier）。
+                    // 详见 HealthUtil.isMaxHealthClampSettle 的 javadoc
+                    if (HealthUtil.isMaxHealthClampSettle(player, rawHealth)) {
                         progress.setBackupHealth(rawHealth);
                         backup = rawHealth;
                     } else {
@@ -508,9 +518,9 @@ public abstract class TrueHealthMixin {
         // 直接跳过会让 isRemoved 救援（下方①分支）失效——实体在 backup 污染窗口内
         // 被字段直写标记移除后无人清除 removalReason。
         // DataItem 也非法（双重污染）时才放弃自检，交给 getHealth 层兜底。
-        if (Float.isNaN(backup) || Float.isInfinite(backup)) {
+        if (HealthUtil.isSpecialFloat(backup)) {
             float raw = HealthUtil.getHealthDirect(player);
-            if (Float.isNaN(raw) || Float.isInfinite(raw)) return;
+            if (HealthUtil.isSpecialFloat(raw)) return;
             progress.setBackupHealth(raw);
             backup = raw;
         }

@@ -1,6 +1,7 @@
 package com.ayin90723.adventure_power.mixin;
 
 import com.ayin90723.adventure_power.capability.AdventureProgressCapability;
+import com.ayin90723.adventure_power.util.AbilityGate;
 import com.ayin90723.adventure_power.util.AbilityIds;
 import com.ayin90723.adventure_power.util.DebugLog;
 import net.minecraft.server.level.ServerPlayer;
@@ -94,8 +95,7 @@ public abstract class PlayerListRespawnGateMixin {
         // 审查修 P3-2：与 TrueHealthMixin.gatedProgress 门禁同构（isAdventurer/fullyUnlocked
         // 前置）——当前 backup>0 只可能由 gated 路径写入，补检查防未来新 setBackupHealth
         // 调用点打破该隐含不变量
-        if (!progress.isAdventurer() && !progress.isFullyUnlocked()) return;
-        if (!progress.isAbilityEnabled(AbilityIds.TRUE_HEALTH)) return;
+        if (!AbilityGate.isActive(progress, AbilityIds.TRUE_HEALTH)) return;
         float backup = progress.getBackupHealth();
         if (backup > 0.0F && Float.isFinite(backup)) {
             long now = player.level().getGameTime();

@@ -62,7 +62,19 @@ public class DeathDefyHandler {
             // 只走 setHealthDirect 直写：若再调 player.setHealth(restoreHealth)，
             // 原版 setHealth 内部 clamp(value, 0, maxHealth) 会把"下限 20"钳回污染值
             //（maxHealth < 20 时直写值被覆盖，防护语义失效）。
-            float restoreHealth = Math.max(20.0F, player.getMaxHealth());
+            // 审查修 P2（有限性守卫）：Math.max 对 NaN 传播（任一参 NaN 即 NaN）——
+            // maxHealth 被外部模组经 modifier 通道污染成 NaN 时，原写法算出 NaN：
+            // ① setHealthDirect 走 data.set，而 RejectHealthManipDataMixin 的
+            //    isSpecialFloat 判定排在 INTERNAL_HEALTH_WRITE 放行之前 → 写入被 cancel
+            //    → 死亡事件已 cancel 而血量仍停在 0（比"复活血量过低"更糟）；
+            // ② 若 true_health 启用，NaN 还会被写进 backup，污染真血备份（读取层重建要求
+            //    至少一侧有限，两侧同时 NaN 时无法自愈）。降级为 20 即可——与"下限 20"
+            //    的原意一致。注：setBaseValue(NaN) 已被 RejectHealthManipAttributeMixin
+            //    拦下，但 addTransientModifier/addPermanentModifier 通道未设防
+            float maxHealth = player.getMaxHealth();
+            // 判定收束：与同批其余守卫统一走 HealthUtil.isSpecialFloat（等价否定式，避免同批两种拼写）
+            float restoreHealth = !HealthUtil.isSpecialFloat(maxHealth)
+                ? Math.max(20.0F, maxHealth) : 20.0F;
             HealthUtil.setHealthDirect(player, restoreHealth);
             // v1.4.9（2.5 二连 die 缺口修复）：救场瞬间同步 backup——原依赖"下一次
             // getHealth 惰性同步"（doTick 每 tick 读血，窗口微秒级），但攻击者可同栈打
