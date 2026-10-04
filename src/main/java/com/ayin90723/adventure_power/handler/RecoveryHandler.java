@@ -78,6 +78,13 @@ public class RecoveryHandler {
     /** 门禁后业务（由 PlayerTickDispatcher 调用）：休养生息脱战再生 */
     public static void onTick(Player player, IAdventureProgress progress) {
 
+        // 死亡态短路（v1.4.9.7 事故修复）：内部直写回血绝不能作用于已死/已移除的玩家。
+        // 尸体血量一旦被抬到 >0，原版重生门禁（ServerGamePacketListenerImpl.handleClientCommand
+        // PERFORM_RESPAWN 分支的 `getHealth() > 0 → return`）会静默吞掉重生请求 → 不回重生点、
+        // 服务端实体停留在已移除态（实体不再被 tick：挖不了方块、区块与实体跟踪停摆）。
+        // 详见 HealthUtil#isHealBlockedByDeath 的完整事故链说明。
+        if (HealthUtil.isHealBlockedByDeath(player)) return;
+
         // ---- 休养生息 ----
         if (progress.isAbilityEnabled(AbilityIds.RAPID_RECOVERY)) {
             // 全局 tick 防跨维度冻结：lastRecoveryCheck/lastHurtTimestamps 是静态 Map，
@@ -158,6 +165,9 @@ public class RecoveryHandler {
         if (!(rawAttacker instanceof Player attacker)) return;
         if (attacker == target) return; // 自杀不算
 
+        // 攻击者自身已死（互杀同 tick / 延迟投射物补刀）：不得给尸体回血复活（v1.4.9.7）
+        if (HealthUtil.isHealBlockedByDeath(attacker)) return;
+
         if (FriendlyFireProtection.isOwnerTarget(attacker, target)) return;
 
         AbilityGate.getActiveProgress(attacker, AbilityIds.LIFESTEAL).ifPresent(progress -> {
@@ -195,6 +205,10 @@ public class RecoveryHandler {
         // 弹射物击杀（弓/弩/三叉戟）的 getEntity() 是弹射物本身，走 resolveAttacker 回溯
         //（v1.3.7 与击杀回馈 onLivingDeath 统一，弓/弩/三叉戟伤害也能吸血）
         if (!(PiercingGazeUtil.resolveAttacker(event.getSource()) instanceof Player attacker)) return;
+
+        // 攻击者自身已死（互杀同 tick / 死亡后仍落地的延迟伤害结算）：不得给尸体回血复活（v1.4.9.7）
+        if (HealthUtil.isHealBlockedByDeath(attacker)) return;
+
         if (target instanceof Player && !ModConfig.LIFESTEAL_PVP_ENABLED.get()) return; // PVP 无效（v1.4.9.1 可配置）
 
         // 跳过内部穿透伤害，防递归

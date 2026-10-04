@@ -68,6 +68,12 @@ public class DeathScreenAutoDismissHandler {
     private static long revivedAt = -1L;
     private static long diagTick = 0L;
 
+    /** 陈旧死亡画面记录（v1.4.9.7 ③，玩家处于死亡态时打开的画面实例）：重生完成后据此精确关屏。
+     *  原版 {@code ClientPacketListener.handleRespawn}（m_7992_ 偏移 573-607）只在
+     *  {@code screen instanceof DeathScreen || DeathScreen$TitleConfirmScreen} 时 setScreen(null)——
+     *  被第三方替换的死亡画面（本包 souloflegends 的 SekiroDiedScreen）不在白名单，重生完成后画面残留。 */
+    private static net.minecraft.client.gui.screens.Screen deathScreenRef;
+
     /** 服务端传送确认字段（f_9766_，诊断专用反射；null=不可用跳过）。
      *  注：该字段类型是 Vec3（awaitingPositionFromClient）而非 boolean——String.valueOf
      *  输出坐标值或 null（null=未在等待）；判读按"null=未等待"语义（P3-4 修正预期） */
@@ -229,7 +235,33 @@ public class DeathScreenAutoDismissHandler {
             revivedAt = System.currentTimeMillis();
         }
 
-        // ② 冻结诊断（只读零副作用）：自愈触发后 10 秒内每 20 tick 打排查快照——分辨
+        // ③ 陈旧死亡画面收尾（v1.4.9.7）：原版重生只关 DeathScreen / DeathScreen$TitleConfirmScreen
+        //    （ClientPacketListener.m_7992_ 偏移 573-607 字节码实证），被第三方替换的死亡画面
+        //    （本包 souloflegends 经 ScreenEvent.Opening 换上的 SekiroDiedScreen）不在白名单 →
+        //    重生成功后画面残留：按键被屏幕吃掉（key-up 也被吞时人物还会"粘键"继续走）、无法攻击，
+        //    直到玩家按 P 打开别的界面才被动替换掉（实测：回出生点后画面仍挂着，随后被僵尸村民打死）。
+        //    ① 只覆盖原版 DeathScreen；本条覆盖"实际使用的那张死亡画面"（任意类）。
+        //    不误伤三条件：只在「死亡态 + 画面非空」时记录实例（正常游玩 deathScreenRef 恒 null，零副作用）；
+        //    死亡期间（血量 0）绝不关——该显示多久显示多久；只在「同一画面实例 + 玩家已存活」时关，
+        //    不会误关背包/面板/玩家自己想打开的界面。
+        if (player != null && mc.screen != null) {
+            var dAcc = (LivingEntityFieldsAccessor) player;
+            if (player.isRemoved() || player.isDeadOrDying()
+                || dAcc.adventure_power$isDead() || dAcc.adventure_power$getDeathTime() > 0) {
+                deathScreenRef = mc.screen;
+            }
+        }
+        if (deathScreenRef != null) {
+            if (mc.screen != deathScreenRef) {
+                // 画面已被玩家关闭或被别的界面替换：释放引用，避免长期持有已废弃画面
+                deathScreenRef = null;
+            } else if (player != null && !player.isDeadOrDying()) {
+                mc.setScreen(null);
+                deathScreenRef = null;
+            }
+        }
+
+        // ④ 冻结诊断（只读零副作用）：自愈触发后 10 秒内每 20 tick 打排查快照——分辨
         //    「输入层瘫痪」（client input=0）vs「客户端本地正常但被服务端拉回」（client pos 动
         //    而 server pos 不动 / awaitingTp 卡真=服务端等传送确认拒移动包）vs「血量/姿势残留」
         //    vs「tick 资格丢失」（clientTicking=false——实体不在客户端 tick 表，aiStep 不跑）

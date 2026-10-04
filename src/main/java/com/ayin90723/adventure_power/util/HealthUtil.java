@@ -262,6 +262,38 @@ public class HealthUtil {
     }
 
     /**
+     * 内部回血的死亡态门禁（v1.4.9.7）——「目标当前是否不得被模组内部回血写入」的唯一判定源。
+     * <p>
+     * <b>为什么必须拦</b>：原版重生入口 {@code ServerGamePacketListenerImpl.handleClientCommand}
+     * 的 PERFORM_RESPAWN 分支有 {@code if (player.getHealth() > 0.0F) return;} 门禁。玩家真死后
+     * 容器侧实体已被 {@code LivingEntity.tickDeath}（{@code deathTime >= 20} → {@code remove(KILLED)}）
+     * 移出世界，此时若模组内部把尸体血量直写到 &gt;0，重生请求会被那道门禁<b>静默吞掉</b>：
+     * 不发 RespawnPacket、不回重生点，玩家停在「服务端实体已移除、血量却 &gt;0」的幽灵态
+     * （实体不再被 tick → 挖不了方块/区块与实体跟踪停摆，包驱动的右键与容器却照常）。
+     * <p>
+     * 实测事故（三连复现）：某整合包用自带死亡画面替换了原版 DeathScreen，该画面无重生按钮、
+     * 自动重生由「渲染帧也数一次」的计数器驱动 → 重生请求延迟约 6~7 秒才发出，正好落进
+     * 「休养生息」首次回血的 5~8 秒窗口 → 尸体血量先行 &gt;0 → 重生被吞。
+     * <p>
+     * <b>判据取方法读 {@code getHealth()} 而非 {@link #getHealthDirect}</b>：真血（true_health）
+     * 备份 &gt;0 的<b>假死</b>态下方法读返回备份值（&gt;0），本门禁不介入——假死救场由真血链路
+     * 负责（{@code setHealthDirect(backup)} 是那条状态的唯一合法写入者），内部回血不得与
+     * 攻击方写 0 的拉锯混线。真死时备份已同步 ≤0，方法读与直读同为 0，两者判据一致。
+     * <p>
+     * {@code !(h > 0)} 写法同时覆盖 0、负数与 NaN（NaN 参与比较恒为 false），顺带避免把污染值
+     * 再写回血量条目。
+     *
+     * @param target 待执行内部回血写入的目标（可为 null）
+     * @return true = 目标处于死亡态，禁止内部回血写入
+     */
+    public static boolean isHealBlockedByDeath(LivingEntity target) {
+        if (target == null) return true;
+        // 容器事实优先：已被移出世界的实体一律不写（防"已移除但血量>0"的幽灵态被继续投喂）
+        if (target.isRemoved()) return true;
+        return !(target.getHealth() > 0.0F);
+    }
+
+    /**
      * 原版血量条目 accessor（{@code DATA_HEALTH_ID}，懒初始化缓存）。
      * <p>
      * 供 {@code RejectHealthManipDataMixin} 等数据同步层拦截做 key 引用比较——
